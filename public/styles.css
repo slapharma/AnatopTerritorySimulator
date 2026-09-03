@@ -99,6 +99,25 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .transcript { flex: 1; overflow-y: auto; padding: 18px 20px 30px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { .transcript { scroll-behavior: auto; } }
 
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 10px; }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.chip:hover { background: var(--surface-2); }
+.chip.active { background: var(--primary-hover); color: #fff; border-color: var(--primary-hover); }
+.chip-fav.active { background: #B45309; border-color: #B45309; }
+
+.round-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 -4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.round-divider::before, .round-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.round-divider span { white-space: nowrap; }
+
+.fav-btn { border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--muted); padding: 0 2px; }
+.fav-btn:hover { color: #B45309; }
+.fav-btn.on { color: #B45309; }
+.msg.favourited { border-color: #FDE68A; box-shadow: 0 0 0 1px #FDE68A inset; }
+
+.src-back { font-size: 11px; }
+.msg:target, .src:target { animation: flash-highlight 1.6s ease-out; }
+@keyframes flash-highlight { 0% { box-shadow: 0 0 0 3px #FDE047; } 100% { box-shadow: none; } }
+
 .msg { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--moderator); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 980px; }
 .msg-regulatory { border-left-color: var(--regulatory); }
 .msg-clinical { border-left-color: var(--clinical); }

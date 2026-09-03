@@ -77,6 +77,15 @@
           </div>
 
           <div id="inputs-summary" class="inputs-summary"></div>
+          <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
+            <button type="button" class="chip active" data-speaker="all">All</button>
+            <button type="button" class="chip" data-speaker="regulatory">Regulatory</button>
+            <button type="button" class="chip" data-speaker="clinical">Clinical</button>
+            <button type="button" class="chip" data-speaker="commercial">Commercial</button>
+            <button type="button" class="chip" data-speaker="moderator">Moderator</button>
+            <button type="button" class="chip" data-speaker="user">You</button>
+            <button type="button" class="chip chip-fav" data-speaker="favourites">★ Favourites</button>
+          </div>
           <div id="transcript" class="transcript" aria-live="polite"></div>
 
           <form id="composer" class="composer">

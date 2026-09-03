@@ -107,6 +107,15 @@ app.delete('/api/sessions/:id/messages/:mid', async (req, res, next) => {
   try { await db.deleteMessage(Number(req.params.mid), Number(req.params.id)); res.json({ ok: true }); } catch (e) { next(e); }
 });
 
+app.patch('/api/sessions/:id/messages/:mid/favourite', async (req, res, next) => {
+  try {
+    const favourite = Boolean(req.body.favourite);
+    const msg = await db.setFavourite(Number(req.params.mid), Number(req.params.id), favourite);
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+    res.json(msg);
+  } catch (e) { next(e); }
+});
+
 // ---------- agent turns (SSE over a POST) ----------
 const running = new Set();
 

@@ -43,6 +43,9 @@ async function createSession(inputs) {
 async function listMessages(sessionId) { return q('SELECT * FROM messages WHERE session_id = $1 ORDER BY seq', [sessionId]); }
 async function getMessage(id) { return one('SELECT * FROM messages WHERE id = $1', [id]); }
 async function deleteMessage(id, sessionId) { await q('DELETE FROM messages WHERE id = $1 AND session_id = $2', [id, sessionId]); }
+async function setFavourite(id, sessionId, favourite) {
+  return one('UPDATE messages SET favourite = $1 WHERE id = $2 AND session_id = $3 RETURNING *', [favourite, id, sessionId]);
+}
 
 async function updateMessage(id, { text, content_json, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error }) {
   await q(
@@ -116,7 +119,7 @@ async function fullSession(id) {
 module.exports = {
   pool,
   listSessions, getSession, lastSession, renameSession, touchSession, setDecision, deleteSession, createSession,
-  listMessages, getMessage, deleteMessage, updateMessage, addMessage,
+  listMessages, getMessage, deleteMessage, updateMessage, addMessage, setFavourite,
   listSources, upsertSource,
   listDisagreements, setDisStatus, addDisagreement,
   fullSession,

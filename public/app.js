@@ -139,22 +139,71 @@
     const missing = state.config.input_fields.filter((f) => !(s.inputs[f.key] || '').trim());
     $('#inputs-summary').innerHTML = `<details><summary>Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING</summary><dl>${state.config.input_fields.map((f) => `<dt>${escapeHtml(f.label)}</dt><dd class="${(s.inputs[f.key] || '').trim() ? '' : 'missing'}">${escapeHtml((s.inputs[f.key] || '').trim() || 'INPUT MISSING')}</dd>`).join('')}</dl></details>`;
     // transcript
-    const t = $('#transcript');
-    t.innerHTML = '';
-    if (!s.messages.length) t.innerHTML = '<div class="empty">No messages yet. Run Round 1 to start.</div>';
-    for (const m of s.messages) t.appendChild(messageElement(m));
+    renderTranscript();
     renderSources(); renderDisagreements(); renderCost();
     setRunning(state.running);
+    const t = $('#transcript');
     t.scrollTop = t.scrollHeight;
+  }
+
+  // Speaker filter (chips above the transcript) + round/mode dividers, so a long
+  // session stays navigable: jump to one agent's thread, or see where a round starts.
+  function renderTranscript() {
+    const s = state.session;
+    const t = $('#transcript');
+    t.innerHTML = '';
+    if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Round 1 to start.</div>'; return; }
+    let lastMode = null;
+    for (const m of s.messages) {
+      if (m.mode && m.mode !== lastMode && m.role !== 'user') {
+        const div = document.createElement('div'); div.className = 'round-divider'; div.dataset.mode = m.mode;
+        div.innerHTML = `<span>${escapeHtml(MODE_LABEL[m.mode] || m.mode)}</span>`;
+        t.appendChild(div);
+        lastMode = m.mode;
+      }
+      t.appendChild(messageElement(m));
+    }
+    applyFilter();
+  }
+
+  function applyFilter() {
+    const active = state.filterSpeaker || 'all';
+    $$('#filter-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.speaker === active));
+    $$('#transcript .msg').forEach((el) => {
+      el.hidden = active === 'favourites' ? !el.classList.contains('favourited')
+        : active !== 'all' && el.dataset.speaker !== active;
+    });
+    $$('#transcript .round-divider').forEach((el) => {
+      // Hide a divider only if every message in its group is filtered out.
+      let sib = el.nextElementSibling; let anyVisible = false;
+      while (sib && !sib.classList.contains('round-divider')) { if (sib.classList.contains('msg') && !sib.hidden) anyVisible = true; sib = sib.nextElementSibling; }
+      el.hidden = !anyVisible;
+    });
   }
 
   function messageElement(m) {
     const speaker = m.role === 'user' ? 'user' : m.speaker;
     const el = document.createElement('article');
-    el.className = `msg msg-${speaker}`;
+    el.className = `msg msg-${speaker}${m.favourite ? ' favourited' : ''}`;
     el.id = `msg-${m.id}`;
+    el.dataset.speaker = speaker;
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` → ${AGENT_LABEL[m.addressed_to]}` : '';
-    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta">#${m.seq} · ${fmtTime(m.created_at)}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span></div>`;
+    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta">#${m.seq} · ${fmtTime(m.created_at)}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
+    const favBtn = $('.fav-btn', el);
+    favBtn.addEventListener('click', async () => {
+      const next = !favBtn.classList.contains('on');
+      favBtn.disabled = true;
+      try {
+        const updated = await api.send('PATCH', `/api/sessions/${state.session.id}/messages/${m.id}/favourite`, { favourite: next });
+        m.favourite = updated.favourite;
+        favBtn.classList.toggle('on', m.favourite);
+        favBtn.textContent = m.favourite ? '★' : '☆';
+        favBtn.title = m.favourite ? 'Remove from favourites' : 'Favourite this response';
+        favBtn.setAttribute('aria-pressed', m.favourite ? 'true' : 'false');
+        el.classList.toggle('favourited', m.favourite);
+        if (state.filterSpeaker === 'favourites') applyFilter();
+      } catch (e) { toast(`Could not update favourite: ${e.message}`); } finally { favBtn.disabled = false; }
+    });
     const body = document.createElement('div'); body.className = 'msg-body';
     if (m.error) {
       const err = document.createElement('div'); err.className = 'msg-error';
@@ -189,7 +238,8 @@
     if (!s.sources.length) { box.innerHTML = '<div class="empty">No sources yet. Every URL the agents search or cite appears here, numbered.</div>'; return; }
     box.innerHTML = s.sources.map((src) => {
       const by = [...new Set(src.cited_by.map((c) => AGENT_LABEL[c.speaker] || c.speaker))].join(', ');
-      return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${src.kind}">${src.kind === 'cited' ? 'cited' : 'searched'}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}</div></div>`;
+      const backlink = src.first_message_id ? ` · <a href="#msg-${src.first_message_id}" class="src-back" data-msg="${src.first_message_id}">↑ view in message</a>` : '';
+      return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${src.kind}">${src.kind === 'cited' ? 'cited' : 'searched'}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}${backlink}</div></div>`;
     }).join('');
   }
 
@@ -367,6 +417,8 @@
       runSequence([{ speaker: 'moderator', mode: 'decision' }]);
     });
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
+
+    $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
     $('#btn-custom').addEventListener('click', () => { $('#dlg-custom').showModal(); $('#custom-instruction').focus(); });
     $('#dlg-custom form').addEventListener('submit', (e) => {

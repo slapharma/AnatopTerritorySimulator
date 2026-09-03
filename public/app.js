@@ -414,7 +414,7 @@
     if (state.sessions.length) await openSession(state.sessions[0].id);
 
     $('#btn-new').addEventListener('click', showSetup);
-    $('#btn-load-korea').addEventListener('click', () => { fillForm(state.config.korea_example, { clear: true }); toast('Korea example loaded. Remaining fields stay INPUT MISSING unless you fill them.'); });
+    $('#btn-load-korea').addEventListener('click', () => { fillForm(state.config.korea_example, { clear: true }); toast('Base values loaded. Remaining fields stay INPUT MISSING unless you fill them.'); });
     $('#btn-copy-last').addEventListener('click', async () => { const last = await api.get('/api/sessions/last-inputs'); if (!Object.keys(last).length) return toast('No previous session'); fillForm(last, { clear: true }); });
 
     $('#setup-form').addEventListener('submit', async (e) => {

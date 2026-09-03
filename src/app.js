@@ -39,6 +39,21 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// ---------- form defaults ----------
+// A stored value overrides prompts.BASE_VALUES field-by-field; an unconfigured
+// field still falls back to the hardcoded example rather than coming back blank.
+app.get('/api/defaults', async (req, res, next) => {
+  try { res.json({ ...prompts.BASE_VALUES, ...(await db.getDefaults()) }); } catch (e) { next(e); }
+});
+app.patch('/api/defaults', async (req, res, next) => {
+  try {
+    const { key, value } = req.body;
+    if (!prompts.INPUT_FIELDS.some((f) => f.key === key)) return res.status(400).json({ error: `Unknown field ${key}` });
+    const stored = await db.setDefaultField(key, typeof value === 'string' ? value : '');
+    res.json({ ...prompts.BASE_VALUES, ...stored });
+  } catch (e) { next(e); }
+});
+
 // ---------- sessions ----------
 app.get('/api/sessions', async (req, res, next) => { try { res.json(await db.listSessions()); } catch (e) { next(e); } });
 
@@ -214,6 +229,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   const msg = await db.addMessage(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode, text: '' });
   send('start', { message_id: msg.id, seq: msg.seq, speaker, mode, created_at: msg.created_at });
   const searches = [];
+  const turnStarted = Date.now();
   try {
     const result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
@@ -225,7 +241,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     await db.updateMessage(msg.id, {
       text, content_json: JSON.stringify({ model: result.model, trace: result.trace, usage: u }),
       input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
-      searches: u.searches, cost_usd: result.cost_usd, error: null,
+      searches: u.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
     });
     const disagreements = await extractDisagreements(id, msg.id, text);
     if (mode === 'decision') await db.setDecision(id, text);
@@ -245,7 +261,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     console.error(`[turn ${msg.id}] ${speaker}/${mode} failed:`, message);
     await db.updateMessage(msg.id, {
       text: '', content_json: null, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
-      searches: 0, cost_usd: 0, error: message,
+      searches: 0, cost_usd: 0, error: message, duration_ms: Date.now() - turnStarted,
     });
     send('error', { message_id: msg.id, message, code: err.code || (err.status ? `HTTP ${err.status}` : 'ERROR') });
   } finally {

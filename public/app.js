@@ -21,7 +21,13 @@
   const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
   function fmtTime(utc) {
     if (!utc) return '';
-    const d = new Date(utc.replace(' ', 'T') + 'Z');
+    // Postgres timestamptz rows arrive already ISO-8601 with a "Z"/offset suffix;
+    // the old SQLite-era "YYYY-MM-DD HH:MM:SS" rows have neither and need both
+    // added. Only add what's actually missing, or a trailing "Z" gets doubled
+    // into an invalid date and this silently falls back to the raw string.
+    const hasZone = /Z$|[+-]\d{2}:?\d{2}$/.test(utc);
+    const iso = hasZone ? utc.replace(' ', 'T') : `${utc.replace(' ', 'T')}Z`;
+    const d = new Date(iso);
     return isNaN(d) ? utc : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   }
   function fmtElapsed(ms) {
@@ -39,15 +45,28 @@
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+  // Safety net for a model that runs headings/rules/bullets together inline
+  // instead of on their own line (FORMATTING RULES asks for real line breaks,
+  // but this covers it if one slips through). Forces a blank line before each
+  // recognised block-starter, then collapses any resulting excess blank lines.
+  function normalizeSpacing(text) {
+    if (!text) return text;
+    const out = text.replace(/[ \t]*(#{1,6}\s|-{3,}(?:\s|$)|-\s(?=[A-Z*]))/g, '\n\n$1');
+    return out.replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '');
+  }
+
   // Markdown -> HTML, then decorate badges, citations, question blocks and disagreement blocks.
   function renderMarkdown(text) {
-    let html = window.marked ? marked.parse(text || '', { breaks: true, gfm: true }) : `<p>${escapeHtml(text)}</p>`;
+    let html = window.marked ? marked.parse(normalizeSpacing(text) || '', { breaks: true, gfm: true }) : `<p>${escapeHtml(text)}</p>`;
     html = html.replace(/\[(VERIFIED|ESTIMATE|UNKNOWN)\b\s*(?:&#8212;|—|–|:|-)?\s*([^\]]*)\]/g, (m, tag, detail) => {
       const d = detail.trim();
       return `<span class="badge badge-${tag.toLowerCase()}" title="${escapeHtml(d.replace(/<[^>]+>/g, ''))}">${tag}${d ? ` <span class="d">${d}</span>` : ''}</span>`;
     });
     const max = state.session ? state.session.sources.length : 0;
     html = html.replace(/\[(\d{1,3})\]/g, (m, n) => (Number(n) >= 1 && Number(n) <= max ? `<a class="cite" href="#src-${n}" data-src="${n}" title="Source ${n}">[${n}]</a>` : m));
+    // Closing-block labels required by FORMATTING RULES (Next step / Question / Consideration / Conclusion).
+    html = html.replace(/<p>(\s*)<strong>(Next step|Question|Consideration|Conclusion):<\/strong>/g,
+      (m, lead, label) => `<p>${lead}<span class="badge badge-endpoint badge-${label.toLowerCase().replace(/\s+/g, '')}">${label}</span>`);
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     const root = tpl.content;
@@ -75,6 +94,33 @@
       }
     }
     return root;
+  }
+
+  // During challenge/converge/crosstalk/dive-deeper turns, hyperlink the first
+  // plain-text mention of each OTHER agent to that agent's most recent prior
+  // response, so "Clinical Agent" in a Round 2 rebuttal jumps to what they said.
+  function linkAgentMentions(bodyEl, m) {
+    if (!['round2', 'round3', 'crosstalk', 'dive_deeper'].includes(m.mode)) return;
+    const others = ['regulatory', 'clinical', 'commercial'].filter((a) => a !== m.speaker);
+    for (const other of others) {
+      const target = state.session.messages.filter((x) => x.speaker === other && x.seq < m.seq && !x.error).pop();
+      if (!target) continue;
+      const label = AGENT_LABEL[other];
+      const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement.closest('a')) continue;
+        const idx = node.nodeValue.indexOf(label);
+        if (idx === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + label.length);
+        const a = document.createElement('a');
+        a.className = 'agent-ref'; a.href = `#msg-${target.id}`; a.title = `Jump to ${label}'s response (#${target.seq})`;
+        range.surroundContents(a);
+        break;
+      }
+    }
   }
 
   // ---------------- sidebar ----------------
@@ -119,9 +165,18 @@
         const datalist = f.suggestions ? `<datalist id="${id}-suggestions">${f.suggestions.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>` : '';
         control = `<input id="${id}" name="${f.key}" type="text"${listAttr}>${datalist}`;
       }
-      div.innerHTML = `<label for="${id}">${escapeHtml(f.label)}</label>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
+      div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}</label><button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">💾 Save as default</button></div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
     }
+    wrap.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.save-default');
+      if (!btn) return;
+      const f = state.config.input_fields.find((x) => x.key === btn.dataset.key);
+      try {
+        await api.send('PATCH', '/api/defaults', { key: f.key, value: readField(f) });
+        toast(`Saved "${f.label}" as the new default.`);
+      } catch (err) { toast(`Could not save default: ${err.message}`); }
+    });
     // select-other: reveal the free-text box only when "Other…" is picked.
     $$('.field select', wrap).forEach((sel) => {
       const other = $('.other-input', sel.closest('.field'));
@@ -161,21 +216,22 @@
     }
   }
 
+  function readField(f) {
+    const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
+    if (f.type === 'select-other') {
+      const sel = $('select', div); const other = $('.other-input', div);
+      return (sel.value === OTHER_SENTINEL ? other.value : sel.value).trim();
+    }
+    if (f.type === 'multiselect') {
+      const checked = $$('input[type=checkbox]:checked', div).map((b) => b.value);
+      const other = $('.other-input', div).value.trim();
+      return checked.concat(other ? [other] : []).join(', ');
+    }
+    return ($(`[name="${f.key}"]`, div).value || '').trim();
+  }
   function readForm() {
     const inputs = {};
-    for (const f of state.config.input_fields) {
-      const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
-      if (f.type === 'select-other') {
-        const sel = $('select', div); const other = $('.other-input', div);
-        inputs[f.key] = (sel.value === OTHER_SENTINEL ? other.value : sel.value).trim();
-      } else if (f.type === 'multiselect') {
-        const checked = $$('input[type=checkbox]:checked', div).map((b) => b.value);
-        const other = $('.other-input', div).value.trim();
-        inputs[f.key] = checked.concat(other ? [other] : []).join(', ');
-      } else {
-        inputs[f.key] = ($(`[name="${f.key}"]`, div).value || '').trim();
-      }
-    }
+    for (const f of state.config.input_fields) inputs[f.key] = readField(f);
     return inputs;
   }
   function showSetup() {
@@ -273,7 +329,8 @@
     el.id = `msg-${m.id}`;
     el.dataset.speaker = speaker;
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` → ${AGENT_LABEL[m.addressed_to]}` : '';
-    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta">#${m.seq} · ${fmtTime(m.created_at)}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
+    const responseTime = m.duration_ms != null ? `⏱ ${fmtElapsed(m.duration_ms)}` : fmtTime(m.created_at);
+    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
     const favBtn = $('.fav-btn', el);
     favBtn.addEventListener('click', async () => {
       const next = !favBtn.classList.contains('on');
@@ -305,6 +362,7 @@
       el.appendChild(err);
     } else {
       body.appendChild(renderMarkdown(m.text));
+      linkAgentMentions(body, m);
       el.appendChild(body);
       if ((m.text || '').length > 2500 && m.mode !== 'decision') {
         body.classList.add('collapsed');
@@ -354,6 +412,22 @@
     }).join('');
   }
 
+  // Splits the stored ⚠ DISAGREEMENT block into its fixed rows (Position A/B,
+  // evidence, status — see the format required in prompts/evidence-rules.md) so
+  // the tab shows the actual back-and-forth instead of one opaque text blob.
+  function parseDisagreementBody(body) {
+    const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+    const rows = [];
+    let current = null;
+    for (const line of lines) {
+      const m = line.match(/^(Position A|Position B|What evidence would settle it|Status)\s*(?:\([^)]*\))?\s*[:\-—]\s*(.*)$/i);
+      if (m) { current = { label: m[1], text: m[2] }; rows.push(current); }
+      else if (current) { current.text += ' ' + line; }
+      else if (!/^⚠/.test(line)) { rows.push({ label: '', text: line }); }
+    }
+    return rows;
+  }
+
   function renderDisagreements() {
     const s = state.session;
     const open = s.disagreements.filter((d) => d.status !== 'resolved').length;
@@ -363,7 +437,12 @@
     box.innerHTML = '';
     for (const d of s.disagreements) {
       const el = document.createElement('div'); el.className = 'dis';
-      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${escapeHtml(d.body)}</div>`;
+      const rows = parseDisagreementBody(d.body);
+      const rowsHtml = (rows.length ? rows : [{ label: '', text: d.body }])
+        .map((r) => `<div class="dis-row${/status/i.test(r.label) ? ' dis-status-row' : ''}">${r.label ? `<span class="dis-label">${escapeHtml(r.label)}</span>` : ''}<span class="dis-text">${escapeHtml(r.text)}</span></div>`)
+        .join('');
+      const backlink = d.message_id ? `<a href="#msg-${d.message_id}" class="dis-back">↑ view in message</a>` : '';
+      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${rowsHtml}</div>${backlink}`;
       $('.status', el).addEventListener('click', async () => {
         const next = d.status === 'resolved' ? 'unresolved' : 'resolved';
         state.session.disagreements = await api.send('PATCH', `/api/sessions/${s.id}/disagreements/${d.n}`, { status: next });
@@ -512,12 +591,16 @@
   async function init() {
     state.config = await api.get('/api/config');
     buildForm();
-    $('#sidebar-foot').innerHTML = `Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
+    $('#sidebar-foot').innerHTML = `<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a><br>Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
     await loadSessions();
     if (state.sessions.length) await openSession(state.sessions[0].id);
 
     $('#btn-new').addEventListener('click', showSetup);
-    $('#btn-load-korea').addEventListener('click', () => { fillForm(state.config.base_values, { clear: true }); toast('Base values loaded. Remaining fields stay INPUT MISSING unless you fill them.'); });
+    $('#btn-load-korea').addEventListener('click', async () => {
+      const defaults = await api.get('/api/defaults');
+      fillForm(defaults, { clear: true });
+      toast('Default values restored. Remaining fields stay INPUT MISSING unless you fill them.');
+    });
     $('#btn-copy-last').addEventListener('click', async () => { const last = await api.get('/api/sessions/last-inputs'); if (!Object.keys(last).length) return toast('No previous session'); fillForm(last, { clear: true }); });
 
     $('#setup-form').addEventListener('submit', async (e) => {

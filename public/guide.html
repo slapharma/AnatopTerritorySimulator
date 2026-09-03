@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>User Guide — Anatop Territory Evaluation</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+  body { max-width: 820px; margin: 0 auto; padding: 32px 24px 80px; background: var(--bg); }
+  .guide h1 { font-size: 24px; margin: 0 0 4px; }
+  .guide .lede { color: var(--text-2); margin: 0 0 32px; }
+  .guide h2 { font-size: 17px; margin: 36px 0 10px; padding-top: 4px; border-top: 1px solid var(--border); }
+  .guide h2:first-of-type { border-top: none; padding-top: 0; }
+  .guide h3 { font-size: 13.5px; margin: 18px 0 6px; }
+  .guide p, .guide li { font-size: 13.5px; line-height: 1.6; color: var(--text); }
+  .guide ol, .guide ul { padding-left: 22px; margin: 6px 0; }
+  .guide li { margin: 4px 0; }
+  .guide .example-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .guide code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .guide .back { display: inline-block; margin-bottom: 20px; font-size: 13px; }
+  .guide table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12.5px; }
+  .guide th, .guide td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+  .guide th { background: var(--surface-2); }
+</style>
+</head>
+<body>
+<div class="guide">
+  <a class="back" href="/">← Back to the app</a>
+  <img src="/sla-logo.png" alt="SLA Pharma" style="width:110px;display:block;margin-bottom:16px">
+  <h1>Anatop Territory Evaluation — User Guide</h1>
+  <p class="lede">A working reference for colleagues new to the tool. It covers what the app does, how to run a session, and what everything on screen means.</p>
+
+  <h2>What this is</h2>
+  <p>A simulated cross-functional launch working group for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents (<strong>Regulatory</strong>, <strong>Clinical</strong>, <strong>Commercial</strong>) each play a specialist role, research the country live on the web, argue their case with evidence, and challenge each other's assumptions over several rounds. A fourth AI role (<strong>Moderator Assistant</strong>) synthesises the whole discussion into a structured decision document at the end.</p>
+  <p>It is not a source of truth on its own — it is a fast, structured first pass that surfaces what's known, what's estimated, what's genuinely unresolved, and where the agents disagree, each claim tagged and sourced so you can verify it yourself.</p>
+
+  <h2>Starting a session</h2>
+  <ol>
+    <li>Click <strong>New session</strong> in the sidebar.</li>
+    <li>Fill in what you know. Every field is optional — anything left blank is passed to the agents as <code>INPUT MISSING</code>, and they are required to say what they assumed instead rather than silently guessing.</li>
+    <li><strong>Restore Default Values</strong> pre-fills the form with the saved default example (a real product, useful for a demo or a quick test). Any field you've saved as a default (see below) is included.</li>
+    <li><strong>Copy from last session</strong> pre-fills the form with whatever you entered last time.</li>
+    <li>Click <strong>Start session and run Round 1</strong>. This runs all three agents in turn, each with live web search.</li>
+  </ol>
+  <p>Note: Regulator and Reimbursement Bodies are not asked for — they follow from the Country you pick, and the agents identify them themselves as their first research step.</p>
+
+  <h3>Saving your own defaults</h3>
+  <p>Hover any field in the New Session form and a small <strong>💾 Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
+
+  <h2>The rounds</h2>
+  <table>
+    <tr><th>Round</th><th>What happens</th></tr>
+    <tr><td>Round 1 · Baselines</td><td>Each agent answers its own questions independently, with no visibility of what the others will say.</td></tr>
+    <tr><td>Round 2 · Challenge</td><td>Each agent attacks at least two assumptions made by the others, backed by evidence — concede, rebut, or log a formal disagreement.</td></tr>
+    <tr><td>Round 3 · Converge</td><td>Agents give base / upside / downside figures for timelines, cost, and revenue, working from the whole discussion so far.</td></tr>
+    <tr><td>Let the agents respond to each other</td><td>One free-form round: every agent reacts to the discussion so far, only where something genuinely changed their view.</td></tr>
+    <tr><td>Custom round…</td><td>Write your own instruction and pick which agents respond to it.</td></tr>
+  </table>
+  <p>You can also type directly into the message box at the bottom as the moderator — address it to one agent or all of them — and they'll reply.</p>
+
+  <h2>Reading a response</h2>
+  <h3>Evidence badges</h3>
+  <p>Every factual claim is tagged with exactly one of these:</p>
+  <div class="example-badges">
+    <span class="badge badge-verified">VERIFIED <span class="d">checked against a real source, with a link</span></span>
+  </div>
+  <div class="example-badges">
+    <span class="badge badge-estimate">ESTIMATE <span class="d">a reasoned guess, with its basis stated</span></span>
+  </div>
+  <div class="example-badges">
+    <span class="badge badge-unknown">UNKNOWN <span class="d">needs a local in-market expert to settle</span></span>
+  </div>
+  <p>Numbered links like <code>[1]</code> next to a claim jump to that source in the Sources panel on the right, which lists every URL an agent searched or cited.</p>
+
+  <h3>Closing labels</h3>
+  <p>Every response ends with at least one of these, called out as a small coloured label — the single most important takeaway of that message, not a recap of the whole thing:</p>
+  <div class="example-badges">
+    <span class="badge badge-endpoint badge-nextstep">Next step</span>
+    <span class="badge badge-endpoint badge-question">Question</span>
+    <span class="badge badge-endpoint badge-consideration">Consideration</span>
+    <span class="badge badge-endpoint badge-conclusion">Conclusion</span>
+  </div>
+
+  <h3>Cross-references</h3>
+  <p>In Round 2/3 and cross-talk responses, a mention of another agent's name (e.g. "Clinical Agent") is a link — click it to jump straight to what that agent actually said.</p>
+
+  <h2>Disagreements</h2>
+  <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
+
+  <h2>Favourites, Regenerate, Dive Deeper</h2>
+  <ul>
+    <li><strong>☆ Favourite</strong> — star any response to flag it; filter the transcript to just your favourites with the ★ Favourites chip above the transcript.</li>
+    <li><strong>↻ Regenerate</strong> — deletes a response and has the same agent answer again from scratch. Not offered on custom-round responses, since the original instruction isn't stored.</li>
+    <li><strong>⇊ Dive Deeper</strong> — responses are compact by default. This asks the same agent to expand one specific response in full depth, as a new follow-up message, without discarding the original.</li>
+  </ul>
+
+  <h2>Filtering the transcript</h2>
+  <p>The chip row above the transcript filters by who's speaking: an agent, <strong>You</strong> (messages you typed), <strong>Decision Output</strong> (the Moderator Assistant's synthesis — a separate thing from your own messages), or your favourites.</p>
+
+  <h2>The model selector</h2>
+  <p>Each session can use a different underlying AI model — the dropdown in the top-right of a session picks it. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (shown in the Cost tab) but tend to be faster and more reliable for testing. A change applies to turns run from that point on, not retroactively.</p>
+
+  <h2>Cost and timing</h2>
+  <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The <strong>Cost</strong> tab and the $ figure in the topbar are the actual API cost reported for the session, token by token.</p>
+
+  <h2>Writing the decision output</h2>
+  <p>Once you've run at least one round, <strong>Write the decision output</strong> triggers the Moderator Assistant to read the entire transcript and produce a fixed ten-section decision document — recommendation, regulatory pathway, clinical verdict, entry model, investment and breakeven, top risks, kill criteria, unresolved items, a verification appendix of every sourced claim, and next actions. It doesn't re-run the analysis or vote — it only synthesises what the three agents already established, keeping their tags and disagreements intact.</p>
+
+  <h2>Exporting</h2>
+  <p><strong>Export ▾</strong> in the top-right of a session produces a Word (.docx) or PDF document of the full session — inputs, every message, sources, and the decision output if one has been written.</p>
+
+  <a class="back" href="/">← Back to the app</a>
+</div>
+</body>
+</html>

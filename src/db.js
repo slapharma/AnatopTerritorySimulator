@@ -48,11 +48,11 @@ async function setFavourite(id, sessionId, favourite) {
   return one('UPDATE messages SET favourite = $1 WHERE id = $2 AND session_id = $3 RETURNING *', [favourite, id, sessionId]);
 }
 
-async function updateMessage(id, { text, content_json, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error }) {
+async function updateMessage(id, { text, content_json, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error, duration_ms }) {
   await q(
     `UPDATE messages SET text = $1, content_json = $2, input_tokens = $3, output_tokens = $4,
-     cache_read_tokens = $5, cache_write_tokens = $6, searches = $7, cost_usd = $8, error = $9 WHERE id = $10`,
-    [text, content_json, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error, id],
+     cache_read_tokens = $5, cache_write_tokens = $6, searches = $7, cost_usd = $8, error = $9, duration_ms = $10 WHERE id = $11`,
+    [text, content_json, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error, duration_ms ?? null, id],
   );
 }
 
@@ -117,8 +117,25 @@ async function fullSession(id) {
   };
 }
 
+async function getDefaults() {
+  const row = await one('SELECT values_json FROM app_defaults WHERE id = true', []);
+  return row ? JSON.parse(row.values_json) : {};
+}
+async function setDefaultField(key, value) {
+  const current = await getDefaults();
+  current[key] = value;
+  const json = JSON.stringify(current);
+  await q(
+    `INSERT INTO app_defaults (id, values_json, updated_at) VALUES (true, $1, now())
+     ON CONFLICT (id) DO UPDATE SET values_json = $1, updated_at = now()`,
+    [json],
+  );
+  return current;
+}
+
 module.exports = {
   pool,
+  getDefaults, setDefaultField,
   listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, deleteSession, createSession,
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, setFavourite,
   listSources, upsertSource,

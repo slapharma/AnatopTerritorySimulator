@@ -1,0 +1,8 @@
+{
+  "opening": "ROUND 1 — Independent baseline. Answer every one of your questions in your own voice, with tags on each claim. Do not comment on other agents. End with the sentence: \"The three assumptions my view depends on most are…\" followed by the three assumptions.",
+  "round2": "ROUND 2 — Challenge. Attack at least two assumptions stated by the other agents in Round 1, using evidence (search first). For each, either concede, rebut with a source, or log a ⚠ DISAGREEMENT block in the required format. Answer any Questions addressed to you.",
+  "round3": "ROUND 3 — Converge and quantify. Working from the whole transcript, give your base / upside / downside figures for: time to approval, cost to approval, time to first revenue, year-5 revenue — each as a range with its basis and tags. Where you still disagree with another agent, restate the ⚠ DISAGREEMENT block with its current Status; do not split the difference.",
+  "crosstalk": "Respond to the discussion so far. Answer any Questions addressed to you, respond to points that bear on your function, and challenge only where the evidence or incentives genuinely differ. If nothing in the latest messages changes your view, say so in two or three sentences and stop.",
+  "reply": "The Moderator (the human) has just spoken. Respond to their message directly and specifically. If they asked a question you cannot answer without new evidence, search first.",
+  "custom": "The Moderator has set a custom instruction for this round, given below. Follow it precisely."
+}

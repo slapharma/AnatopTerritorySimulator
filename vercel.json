@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 800,
+      "includeFiles": "{public/**,fonts/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
+  ]
+}

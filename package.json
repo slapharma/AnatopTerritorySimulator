@@ -1,0 +1,19 @@
+{
+  "name": "launch-working-group",
+  "version": "0.1.0",
+  "description": "Simulated cross-functional launch working group (Regulatory / Clinical / Commercial agents) for pharma country launch decisions",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "docx": "^9.7.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "marked": "^18.0.11",
+    "pdfmake": "^0.3.11",
+    "pg": "^8.13.1"
+  }
+}

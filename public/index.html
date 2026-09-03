@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anatop Territory Evaluation</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand brand-stack">
+        <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
+        <span>Anatop Territory Evaluation</span>
+      </div>
+      <button id="btn-new" class="btn btn-primary btn-block" type="button">New session</button>
+    </div>
+    <div id="session-list" class="session-list" aria-label="Saved sessions"></div>
+    <div class="sidebar-foot" id="sidebar-foot"></div>
+  </aside>
+
+  <main class="main">
+    <!-- ============ SETUP VIEW ============ -->
+    <section id="view-setup" class="view">
+      <header class="topbar">
+        <h1>New session</h1>
+        <div class="topbar-actions">
+          <button id="btn-load-korea" class="btn" type="button">Load Korea example</button>
+          <button id="btn-copy-last" class="btn" type="button">Copy from last session</button>
+        </div>
+      </header>
+      <div class="scroll">
+        <form id="setup-form" class="setup-form" autocomplete="off">
+          <p class="lede">Every field below is Section 0 of the spec. Blank fields are allowed: they are passed to the agents as <code>INPUT MISSING</code>, and the agents must say what they assumed instead.</p>
+          <div id="setup-fields" class="fields"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-lg">Start session and run Round 1</button>
+            <span class="muted">Runs the Regulatory, Clinical and Commercial agents in turn, each with live web search.</span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ============ SESSION VIEW ============ -->
+    <section id="view-session" class="view" hidden>
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="session-title" title="Click to rename"></h1>
+          <div id="session-sub" class="muted"></div>
+        </div>
+        <div class="topbar-actions">
+          <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
+          <div class="menu">
+            <button class="btn" type="button" id="btn-export">Export ▾</button>
+            <div class="menu-items" id="export-menu" hidden>
+              <a id="link-docx" href="#" download>Word (.docx)</a>
+              <a id="link-pdf" href="#" download>PDF</a>
+            </div>
+          </div>
+          <button class="btn btn-danger-ghost" type="button" id="btn-delete" title="Delete this session">Delete</button>
+        </div>
+      </header>
+
+      <div class="session-body">
+        <div class="transcript-col">
+          <div class="toolbar" id="toolbar">
+            <span class="toolbar-label">Rounds</span>
+            <button class="btn btn-sm" data-round="opening" type="button" title="Each agent answers its own questions independently">Round 1 · Baselines</button>
+            <button class="btn btn-sm" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence">Round 2 · Challenge</button>
+            <button class="btn btn-sm" data-round="round3" type="button" title="Agents give base / upside / downside figures">Round 3 · Converge</button>
+            <button class="btn btn-sm" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far">Let the agents respond to each other</button>
+            <button class="btn btn-sm" id="btn-custom" type="button" title="Write your own instruction for a round">Custom round…</button>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-accent" id="btn-decision" type="button" title="Moderator assistant writes Section 4 from the whole transcript">Write the decision output</button>
+            <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
+          </div>
+
+          <div id="inputs-summary" class="inputs-summary"></div>
+          <div id="transcript" class="transcript" aria-live="polite"></div>
+
+          <form id="composer" class="composer">
+            <label class="composer-to">
+              <span>To</span>
+              <select id="composer-to">
+                <option value="all">All agents</option>
+                <option value="regulatory">Regulatory</option>
+                <option value="clinical">Clinical</option>
+                <option value="commercial">Commercial</option>
+              </select>
+            </label>
+            <textarea id="composer-text" rows="2" placeholder="Speak as the moderator… (Ctrl+Enter to send)"></textarea>
+            <button type="submit" class="btn btn-primary" id="btn-send">Send</button>
+          </form>
+        </div>
+
+        <aside class="panel">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
+            <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
+            <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
+          </div>
+          <div class="tab-body" id="tab-sources"></div>
+          <div class="tab-body" id="tab-disagreements" hidden></div>
+          <div class="tab-body" id="tab-cost" hidden></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Custom round dialog -->
+<dialog id="dlg-custom">
+  <form method="dialog" class="dialog-form">
+    <h2>Custom round</h2>
+    <p class="muted">Your instruction replaces the built-in round text. The evidence rules still apply.</p>
+    <label>Instruction<textarea id="custom-instruction" rows="5" placeholder="e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only."></textarea></label>
+    <fieldset class="agent-picks">
+      <legend>Who responds, in order</legend>
+      <label><input type="checkbox" value="regulatory" checked> Regulatory</label>
+      <label><input type="checkbox" value="clinical" checked> Clinical</label>
+      <label><input type="checkbox" value="commercial" checked> Commercial</label>
+    </fieldset>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Cancel</button>
+      <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Run round</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/vendor/marked.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -12,7 +12,11 @@ module.exports = {
   // "tool_calls" and zero parsed calls. Do not re-add it without fixing that first.)
   MODEL: 'google/gemma-4-26b-a4b-it:free',
   // Tried in order if the primary is rate-limited or down.
-  FALLBACK_MODELS: ['nvidia/nemotron-3-super-120b-a12b:free', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
+  // Nvidia models removed from this list: their free-tier capacity has repeatedly
+  // returned "Upstream error from Nvidia: Service temporarily overloaded" mid-stream
+  // when OpenRouter auto-routed here, even with a different primary model. Minimax
+  // is served by multiple providers including Groq, which has held up better.
+  FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.

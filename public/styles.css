@@ -149,6 +149,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .msg-body.collapsed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 80px; background: linear-gradient(transparent, var(--surface)); }
 .msg-user .msg-body.collapsed::after { background: linear-gradient(transparent, var(--user-soft)); }
 .msg-expand { margin: 0 16px 12px; }
+.msg-regen { margin: 0 16px 12px; color: var(--text-2); }
 .msg-status { padding: 4px 16px 12px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .spinner { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

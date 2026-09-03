@@ -227,6 +227,21 @@
         btn.addEventListener('click', () => { const c = body.classList.toggle('collapsed'); btn.textContent = c ? 'Show full message' : 'Collapse'; });
         el.appendChild(btn);
       }
+      // Custom rounds aren't offered: the free-form instruction that produced this
+      // response isn't stored on the message, so it can't be reproduced faithfully.
+      if (m.role !== 'user' && m.mode !== 'custom') {
+        const regen = document.createElement('button'); regen.type = 'button'; regen.className = 'btn btn-sm msg-regen'; regen.textContent = '↻ Regenerate';
+        regen.title = 'Delete this response and have the agent answer again';
+        regen.addEventListener('click', async () => {
+          if (state.running) return;
+          if (!confirm('Delete this response and regenerate it? This cannot be undone.')) return;
+          await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${m.id}`);
+          state.session.messages = state.session.messages.filter((x) => x.id !== m.id);
+          el.remove();
+          await runSequence([{ speaker: m.speaker, mode: m.mode }]);
+        });
+        el.appendChild(regen);
+      }
     }
     return el;
   }

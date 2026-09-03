@@ -18,10 +18,14 @@ function apiKey() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // One streamed request. Returns { text, reasoning, toolCalls, finish, usage }.
-async function streamOnce({ messages, maxTokens, onEvent }) {
+async function streamOnce({ messages, maxTokens, onEvent, model }) {
+  const primary = model || config.MODEL;
+  // Only chain the configured free-tier fallbacks when using the default model.
+  // A session that explicitly picked a different model (e.g. testing a paid one)
+  // should not silently fall back to a free model mid-turn.
   const body = {
-    model: config.MODEL,
-    models: [config.MODEL, ...config.FALLBACK_MODELS],
+    model: primary,
+    models: primary === config.MODEL ? [primary, ...config.FALLBACK_MODELS] : [primary],
     messages,
     tools: search.TOOLS,
     tool_choice: 'auto',
@@ -67,7 +71,7 @@ async function streamOnce({ messages, maxTokens, onEvent }) {
   let reasoning = '';
   let finish = null;
   let usage = null;
-  let model = null;
+  let respondedModel = null;
   const toolCalls = new Map(); // index -> {id, name, args}
   let announcedThinking = false;
 
@@ -77,7 +81,7 @@ async function streamOnce({ messages, maxTokens, onEvent }) {
       throw err;
     }
     if (chunk.usage) usage = chunk.usage;
-    if (chunk.model) model = chunk.model;
+    if (chunk.model) respondedModel = chunk.model;
     const choice = chunk.choices && chunk.choices[0];
     if (!choice) return;
     const d = choice.delta || {};
@@ -117,7 +121,7 @@ async function streamOnce({ messages, maxTokens, onEvent }) {
       handle(chunk);
     }
   }
-  return { text, reasoning, toolCalls: [...toolCalls.values()], finish, usage, model };
+  return { text, reasoning, toolCalls: [...toolCalls.values()], finish, usage, model: respondedModel };
 }
 
 async function runTool(call, counters, onEvent) {
@@ -149,7 +153,7 @@ async function runTool(call, counters, onEvent) {
  * Runs one turn. Returns { text, trace, usage, model, stop_reason, cost_usd }.
  * onEvent(name, payload): 'status' {text}, 'text' {delta}, 'search' {query}
  */
-async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent }) {
+async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent, model: requestedModel }) {
   apiKey();
   const convo = [
     { role: 'system', content: systemPrompt(agentKey, inputs) },
@@ -167,7 +171,7 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent 
 
   for (let round = 0; round < config.SEARCH.max_tool_rounds; round++) {
     onEvent('status', { text: round === 0 ? 'Thinking…' : 'Continuing…' });
-    const r = await streamOnce({ messages: convo, maxTokens, onEvent });
+    const r = await streamOnce({ messages: convo, maxTokens, onEvent, model: requestedModel });
     usage.requests++;
     if (r.usage) {
       usage.input_tokens += r.usage.prompt_tokens || 0;

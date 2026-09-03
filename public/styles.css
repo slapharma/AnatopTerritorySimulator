@@ -152,6 +152,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .msg-regen { margin: 0 16px 12px; color: var(--text-2); }
 .msg-dive { margin: 0 16px 12px; color: var(--text-2); }
 .msg-status { padding: 4px 16px 12px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.msg-status .turn-timer { font-variant-numeric: tabular-nums; color: var(--text-2); }
 .spinner { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
@@ -203,6 +204,8 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .cost-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .cost-table tr.total td { font-weight: 700; border-bottom: none; }
 .cost { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 10px; background: var(--surface-2); border-radius: 8px; font-variant-numeric: tabular-nums; }
+.model-select { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; max-width: 220px; }
+.active-clock { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 10px; background: var(--surface-2); border-radius: 8px; font-variant-numeric: tabular-nums; }
 .empty { color: var(--muted); font-size: 12.5px; padding: 12px 0; }
 
 /* ---------- dialog ---------- */

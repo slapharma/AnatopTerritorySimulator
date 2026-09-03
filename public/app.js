@@ -4,7 +4,7 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources' };
+  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0 };
 
   // ---------------- API ----------------
   const api = {
@@ -23,6 +23,11 @@
     if (!utc) return '';
     const d = new Date(utc.replace(' ', 'T') + 'Z');
     return isNaN(d) ? utc : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  function fmtElapsed(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
   }
   function money(usd) {
     const gbp = usd * (state.config ? state.config.usd_to_gbp : 0.78);
@@ -125,6 +130,7 @@
   // ---------------- session view ----------------
   async function openSession(id) {
     state.session = await api.get(`/api/sessions/${id}`);
+    state.sessionActiveMs = 0; // per-tab stopwatch; not persisted, resets when (re)opening a session
     $('#view-setup').hidden = true;
     $('#view-session').hidden = false;
     renderSession();
@@ -138,6 +144,8 @@
     $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)}`;
     $('#link-docx').href = `/api/sessions/${s.id}/export.docx`;
     $('#link-pdf').href = `/api/sessions/${s.id}/export.pdf`;
+    renderModelSelect();
+    updateActiveClock(0);
     // inputs summary
     const missing = state.config.input_fields.filter((f) => !(s.inputs[f.key] || '').trim());
     $('#inputs-summary').innerHTML = `<details><summary>Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING</summary><dl>${state.config.input_fields.map((f) => `<dt>${escapeHtml(f.label)}</dt><dd class="${(s.inputs[f.key] || '').trim() ? '' : 'missing'}">${escapeHtml((s.inputs[f.key] || '').trim() || 'INPUT MISSING')}</dd>`).join('')}</dl></details>`;
@@ -147,6 +155,22 @@
     setRunning(state.running);
     const t = $('#transcript');
     t.scrollTop = t.scrollHeight;
+  }
+
+  // extraMs: the running turn's not-yet-committed elapsed time, added on top of
+  // state.sessionActiveMs (which only accumulates once a turn finishes).
+  function updateActiveClock(extraMs) {
+    const el = $('#active-clock');
+    if (el) el.textContent = `⏱ ${fmtElapsed(state.sessionActiveMs + extraMs)}`;
+  }
+
+  function renderModelSelect() {
+    const sel = $('#model-select');
+    const current = state.session.model || state.config.model;
+    const opts = state.config.model_options.some((o) => o.id === current)
+      ? state.config.model_options
+      : [{ id: current, label: current }, ...state.config.model_options]; // keep a legacy/unlisted model selectable
+    sel.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
   }
 
   // Speaker filter (chips above the transcript) + round/mode dividers, so a long
@@ -325,9 +349,13 @@
       $('.empty', t)?.remove();
       const el = document.createElement('article');
       el.className = `msg msg-${speaker}`;
-      el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${MODE_LABEL[mode] || mode}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
+      el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${MODE_LABEL[mode] || mode}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
       t.appendChild(el);
       const body = $('.msg-body', el); const statusEl = $('.msg-status .txt', el); const searchesEl = $('.msg-searches', el);
+      const turnTimerEl = $('.msg-status .turn-timer', el);
+      const turnStart = Date.now();
+      const tick = () => { const ms = Date.now() - turnStart; if (turnTimerEl) turnTimerEl.textContent = fmtElapsed(ms); updateActiveClock(ms); };
+      const tickInterval = setInterval(tick, 1000);
       let raw = '';
       let lastRender = 0;
       const atBottom = () => t.scrollHeight - t.scrollTop - t.clientHeight < 120;
@@ -341,6 +369,9 @@
       };
       let messageId = null;
       const finish = async (ok, errText) => {
+        clearInterval(tickInterval);
+        state.sessionActiveMs += Date.now() - turnStart;
+        updateActiveClock(0);
         if (ok) {
           // Replace the live element with the stored message so numbering, cost and citations are exact.
           const stored = state.session.messages[state.session.messages.length - 1];
@@ -482,6 +513,13 @@
       if (!confirm(`Delete "${state.session.title}"? This cannot be undone.`)) return;
       await api.send('DELETE', `/api/sessions/${state.session.id}`);
       showSetup(); await loadSessions();
+    });
+    $('#model-select').addEventListener('change', async (e) => {
+      const model = e.target.value;
+      try {
+        state.session = await api.send('PATCH', `/api/sessions/${state.session.id}`, { model });
+        toast(`Model set to ${(state.config.model_options.find((o) => o.id === model) || { label: model }).label}. Applies to turns from now on.`);
+      } catch (err) { toast(`Could not change model: ${err.message}`); renderModelSelect(); }
     });
     $('#btn-export').addEventListener('click', (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; });
     document.addEventListener('click', () => { $('#export-menu').hidden = true; });

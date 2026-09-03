@@ -19,6 +19,18 @@ module.exports = {
   FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
+  // Offered in the session header's model selector. Each session stores its own
+  // choice (sessions.model); a new session defaults to MODEL above. Paid options
+  // are here for testing without free-tier rate limits — they cost real money per
+  // OpenRouter's reported usage.cost, shown in the Cost tab as normal.
+  MODEL_OPTIONS: [
+    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free)' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)' },
+    { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)' },
+    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (paid, cheapest — ~$0.02/$0.03 per M tok)' },
+  ],
+
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.
   PRICES: {
     input_per_mtok: 0,

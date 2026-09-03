@@ -28,14 +28,15 @@ async function lastSession() { return one('SELECT * FROM sessions ORDER BY creat
 async function renameSession(id, title) { await q('UPDATE sessions SET title = $1, updated_at = now() WHERE id = $2', [title, id]); }
 async function touchSession(id) { await q('UPDATE sessions SET updated_at = now() WHERE id = $1', [id]); }
 async function setDecision(id, text) { await q('UPDATE sessions SET decision_text = $1, updated_at = now() WHERE id = $2', [text, id]); }
+async function setModel(id, model) { await q('UPDATE sessions SET model = $1, updated_at = now() WHERE id = $2', [model, id]); }
 async function deleteSession(id) { await q('DELETE FROM sessions WHERE id = $1', [id]); }
 
-async function createSession(inputs) {
+async function createSession(inputs, model) {
   const productShort = (inputs.product || 'Untitled product').split(/\s[—–-]\s/)[0].trim();
   const title = `${productShort} · ${inputs.country || 'country?'}`;
   const row = await one(
-    'INSERT INTO sessions (title, product, country, inputs_json) VALUES ($1, $2, $3, $4) RETURNING *',
-    [title, inputs.product || null, inputs.country || null, JSON.stringify(inputs)],
+    'INSERT INTO sessions (title, product, country, inputs_json, model) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [title, inputs.product || null, inputs.country || null, JSON.stringify(inputs), model || null],
   );
   return row;
 }
@@ -118,7 +119,7 @@ async function fullSession(id) {
 
 module.exports = {
   pool,
-  listSessions, getSession, lastSession, renameSession, touchSession, setDecision, deleteSession, createSession,
+  listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, deleteSession, createSession,
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, setFavourite,
   listSources, upsertSource,
   listDisagreements, setDisStatus, addDisagreement,

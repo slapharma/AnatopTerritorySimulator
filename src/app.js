@@ -30,7 +30,7 @@ app.get('/vendor/marked.js', (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json({
-    model: config.MODEL, prices: config.PRICES, usd_to_gbp: config.USD_TO_GBP,
+    model: config.MODEL, model_options: config.MODEL_OPTIONS, prices: config.PRICES, usd_to_gbp: config.USD_TO_GBP,
     agents: prompts.AGENTS, agent_order: prompts.AGENT_ORDER,
     input_fields: prompts.INPUT_FIELDS, base_values: prompts.BASE_VALUES,
     has_api_key: Boolean(process.env.OPENROUTER_API_KEY),
@@ -72,6 +72,10 @@ app.patch('/api/sessions/:id', async (req, res, next) => {
     const id = Number(req.params.id);
     if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
     if (typeof req.body.title === 'string' && req.body.title.trim()) await db.renameSession(id, req.body.title.trim());
+    if (typeof req.body.model === 'string') {
+      if (!config.MODEL_OPTIONS.some((m) => m.id === req.body.model)) return res.status(400).json({ error: `Unknown model ${req.body.model}` });
+      await db.setModel(id, req.body.model);
+    }
     res.json(await db.fullSession(id));
   } catch (e) { next(e); }
 });
@@ -213,6 +217,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   try {
     const result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
+      model: session.model || config.MODEL,
       onEvent: (name, payload) => { if (name === 'search') searches.push(payload.query); send(name, payload); },
     });
     const text = await assembleText(id, msg.id, speaker, result.text, result.trace);

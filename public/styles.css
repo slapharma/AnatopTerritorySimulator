@@ -79,6 +79,10 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .field.wide { grid-column: 1 / -1; }
 .field label { font-weight: 600; font-size: 12px; letter-spacing: .02em; color: var(--text-2); }
 .field .hint { font-size: 11.5px; color: var(--muted); }
+.field .other-input { margin-top: 4px; }
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px 12px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); }
+.check-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 400; }
+.check-item input { margin: 0; }
 .field input, .field textarea, .field select, .composer textarea, .composer select, dialog textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); transition: border-color .15s, box-shadow .15s; }
 .field input:focus, .field textarea:focus, .field select:focus, .composer textarea:focus, dialog textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(8, 145, 178, .15); }
 .field textarea { min-height: 76px; resize: vertical; }

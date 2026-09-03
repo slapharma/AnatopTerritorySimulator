@@ -40,13 +40,35 @@ const BUDGET_OPTIONS = ['Under $1M', '$1M–$5M', '$5M–$10M', '$10M–$25M', '
 
 const DEADLINE_OPTIONS = ['Within 3 months', '3–6 months', '6–12 months', '12–18 months', '18–24 months', 'No fixed deadline'];
 
+const PARTNER_STATUS_OPTIONS = [
+  'No partner yet — going direct', 'Identifying candidate partners', 'In discussions with a partner',
+  'Partner selected, agreement pending', 'Partner agreement signed',
+];
+
+// Common global launch partners/competitors to exclude with one click, per the
+// EXCLUSIONS field below. Free text still covers anything not on this list.
+const COMPANY_OPTIONS = [
+  'Pfizer', 'Novartis', 'Roche', 'Merck & Co', 'AbbVie', 'Johnson & Johnson', 'Sanofi', 'GSK', 'AstraZeneca',
+  'Bristol Myers Squibb', 'Eli Lilly', 'Bayer', 'Takeda', 'Amgen', 'Gilead Sciences', 'Boehringer Ingelheim',
+  'Novo Nordisk', 'Teva', 'Viatris', 'Sun Pharma',
+];
+
+// Autocomplete suggestions only (not a closed list) — INDICATION stays free text
+// since the real value space is far too large to enumerate.
+const INDICATION_SUGGESTIONS = [
+  'Chronic anal fissure', 'Hypertension', 'Type 2 diabetes', 'Major depressive disorder', 'Rheumatoid arthritis',
+  'Chronic pain', 'Migraine prophylaxis', 'Asthma', 'COPD', 'Psoriasis', 'Atopic dermatitis',
+  'Gastroesophageal reflux disease', 'Insomnia', 'Generalized anxiety disorder', 'Osteoarthritis',
+  'Chronic kidney disease', 'Heart failure', 'Overactive bladder', 'Erectile dysfunction', 'Acne vulgaris',
+];
+
 // Every field in Section 0 of the spec, in order. `key` is what the form posts.
 // REGULATOR and REIMBURSEMENT_BODIES are deliberately not asked here: they are
 // determined by COUNTRY, and the agents identify them themselves as their first
 // research step (see prompts/regulatory.md, prompts/commercial.md).
 const INPUT_FIELDS = [
   { key: 'product',              label: 'PRODUCT' },
-  { key: 'indication',           label: 'INDICATION' },
+  { key: 'indication',           label: 'INDICATION', suggestions: INDICATION_SUGGESTIONS },
   { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS },
   { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', multiline: true,
     hint: 'Each country, approval date, pathway used, and whether a CPP is available' },
@@ -56,9 +78,10 @@ const INPUT_FIELDS = [
     hint: 'Site name, country, GMP certificates held (EU GMP / PIC/S), date of last inspection' },
   { key: 'commercial_targets',   label: 'COMMERCIAL TARGETS', multiline: true,
     hint: 'Target ex-factory or net price range; year-3 and year-5 volume ambition; minimum acceptable margin; preferred deal structure' },
-  { key: 'partner_status',       label: 'PARTNER STATUS', multiline: true },
-  { key: 'exclusions',           label: 'EXCLUSIONS', multiline: true,
-    hint: 'Companies that must not be proposed as partners' },
+  { key: 'partner_status',       label: 'PARTNER STATUS', type: 'select-other', options: PARTNER_STATUS_OPTIONS,
+    hint: 'Choose Other to name a specific partner or add detail' },
+  { key: 'exclusions',           label: 'EXCLUSIONS', type: 'multiselect', options: COMPANY_OPTIONS,
+    hint: 'Companies that must not be proposed as partners — tick any that apply, add others below' },
   { key: 'budget_ceiling',       label: 'BUDGET CEILING', options: BUDGET_OPTIONS },
   { key: 'decision_deadline',    label: 'DECISION DEADLINE', options: DEADLINE_OPTIONS },
   { key: 'competitor_file',      label: 'COMPETITOR FILE', multiline: true,

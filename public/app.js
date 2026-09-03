@@ -93,31 +93,89 @@
   }
 
   // ---------------- setup view ----------------
+  const OTHER_SENTINEL = '__other__';
+
   function buildForm() {
     const wrap = $('#setup-fields');
     wrap.innerHTML = '';
     for (const f of state.config.input_fields) {
       const div = document.createElement('div');
-      div.className = 'field' + (f.multiline ? ' wide' : '');
+      div.className = 'field' + (f.multiline || f.type === 'multiselect' ? ' wide' : '');
+      div.dataset.key = f.key;
       const id = `f-${f.key}`;
-      const control = f.options
-        ? `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`
-        : f.multiline ? `<textarea id="${id}" name="${f.key}"></textarea>` : `<input id="${id}" name="${f.key}" type="text">`;
+      let control;
+      if (f.type === 'select-other') {
+        control = `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}<option value="${OTHER_SENTINEL}">Other…</option></select>
+          <input type="text" class="other-input" placeholder="Specify…" hidden>`;
+      } else if (f.type === 'multiselect') {
+        control = `<div class="check-grid">${f.options.map((o) => `<label class="check-item"><input type="checkbox" value="${escapeHtml(o)}"> ${escapeHtml(o)}</label>`).join('')}</div>
+          <input type="text" class="other-input" placeholder="Other companies (comma-separated)…">`;
+      } else if (f.options) {
+        control = `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
+      } else if (f.multiline) {
+        control = `<textarea id="${id}" name="${f.key}"></textarea>`;
+      } else {
+        const listAttr = f.suggestions ? ` list="${id}-suggestions"` : '';
+        const datalist = f.suggestions ? `<datalist id="${id}-suggestions">${f.suggestions.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>` : '';
+        control = `<input id="${id}" name="${f.key}" type="text"${listAttr}>${datalist}`;
+      }
       div.innerHTML = `<label for="${id}">${escapeHtml(f.label)}</label>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
     }
+    // select-other: reveal the free-text box only when "Other…" is picked.
+    $$('.field select', wrap).forEach((sel) => {
+      const other = $('.other-input', sel.closest('.field'));
+      if (!other) return;
+      sel.addEventListener('change', () => {
+        const isOther = sel.value === OTHER_SENTINEL;
+        other.hidden = !isOther;
+        if (isOther) other.focus();
+      });
+    });
   }
+
   function fillForm(values, { clear } = { clear: false }) {
     for (const f of state.config.input_fields) {
-      const el = $(`[name="${f.key}"]`, $('#setup-form'));
-      if (!el) continue;
-      if (values[f.key] !== undefined) el.value = values[f.key];
-      else if (clear) el.value = '';
+      const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
+      if (!div) continue;
+      const val = values[f.key] !== undefined ? values[f.key] : (clear ? '' : undefined);
+      if (val === undefined) continue;
+      if (f.type === 'select-other') {
+        const sel = $('select', div); const other = $('.other-input', div);
+        if (f.options.includes(val)) { sel.value = val; other.hidden = true; other.value = ''; }
+        else { sel.value = val ? OTHER_SENTINEL : ''; other.hidden = !val; other.value = val; }
+      } else if (f.type === 'multiselect') {
+        const boxes = $$('input[type=checkbox]', div); const other = $('.other-input', div);
+        const parts = val ? val.split(', ') : [];
+        const leftover = [];
+        for (const p of parts) {
+          const box = boxes.find((b) => b.value === p);
+          if (box) box.checked = true; else if (p) leftover.push(p);
+        }
+        if (!val) boxes.forEach((b) => { b.checked = false; });
+        other.value = leftover.join(', ');
+      } else {
+        const el = $(`[name="${f.key}"]`, div);
+        if (el) el.value = val;
+      }
     }
   }
+
   function readForm() {
     const inputs = {};
-    for (const f of state.config.input_fields) inputs[f.key] = ($(`[name="${f.key}"]`, $('#setup-form')).value || '').trim();
+    for (const f of state.config.input_fields) {
+      const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
+      if (f.type === 'select-other') {
+        const sel = $('select', div); const other = $('.other-input', div);
+        inputs[f.key] = (sel.value === OTHER_SENTINEL ? other.value : sel.value).trim();
+      } else if (f.type === 'multiselect') {
+        const checked = $$('input[type=checkbox]:checked', div).map((b) => b.value);
+        const other = $('.other-input', div).value.trim();
+        inputs[f.key] = checked.concat(other ? [other] : []).join(', ');
+      } else {
+        inputs[f.key] = ($(`[name="${f.key}"]`, div).value || '').trim();
+      }
+    }
     return inputs;
   }
   function showSetup() {

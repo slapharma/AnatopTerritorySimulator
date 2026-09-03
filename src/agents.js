@@ -155,7 +155,9 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent 
     { role: 'system', content: systemPrompt(agentKey, inputs) },
     { role: 'user', content: turnUserMessage({ agentKey, mode, instruction, messages }) },
   ];
-  const maxTokens = mode === 'decision' ? config.MAX_TOKENS_DECISION : config.MAX_TOKENS_AGENT;
+  const maxTokens = mode === 'decision' ? config.MAX_TOKENS_DECISION
+    : mode === 'dive_deeper' ? config.MAX_TOKENS_DIVE_DEEPER
+      : config.MAX_TOKENS_AGENT;
   const counters = { searches: 0, opens: 0 };
   const trace = [];
   const usage = { input_tokens: 0, output_tokens: 0, cost: 0, requests: 0 };

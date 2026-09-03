@@ -133,11 +133,15 @@ function transcriptText(messages) {
     .join('\n\n');
 }
 
+const COMPACT_SUFFIX = "\n\nKeep this response compact: lead with your conclusion, use tight bullet points, and do not restate context or repeat earlier messages. Full depth and nuance are for if the moderator clicks \"Dive Deeper\" on this response — until then, favour brevity.";
+
 function turnUserMessage({ agentKey, mode, instruction, messages }) {
   const r = rounds();
   let roundText = r[mode] || r.crosstalk;
   if (mode === 'custom') roundText = `${r.custom}\n\nCUSTOM INSTRUCTION:\n${instruction || '(none given)'}`;
   if (mode === 'decision') roundText = 'Write the DECISION OUTPUT now from the transcript above.';
+  if (mode === 'dive_deeper') roundText = `${r.dive_deeper}\n\n${instruction || ''}`;
+  else if (mode !== 'decision') roundText += COMPACT_SUFFIX;
   const who = agentKey === 'moderator' ? 'the MODERATOR ASSISTANT' : `the ${AGENTS[agentKey].label.toUpperCase()}`;
   return [
     '## TRANSCRIPT SO FAR',

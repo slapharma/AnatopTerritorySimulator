@@ -23,7 +23,8 @@ module.exports = {
   },
   USD_TO_GBP: 0.78,              // on-screen GBP estimate only
 
-  MAX_TOKENS_AGENT: 16000,
+  MAX_TOKENS_AGENT: 4500,        // compact default; see COMPACT_SUFFIX in prompts.js
+  MAX_TOKENS_DIVE_DEEPER: 16000, // "Dive Deeper" follow-up on one response
   MAX_TOKENS_DECISION: 32000,
 
   SEARCH: {

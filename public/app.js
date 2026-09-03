@@ -18,7 +18,7 @@
 
   // ---------------- helpers ----------------
   const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)' };
-  const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output' };
+  const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
   function fmtTime(utc) {
     if (!utc) return '';
     const d = new Date(utc.replace(' ', 'T') + 'Z');
@@ -244,6 +244,17 @@
           await runSequence([{ speaker: m.speaker, mode: m.mode }]);
         });
         el.appendChild(regen);
+      }
+      // Responses are compact by default (see COMPACT_SUFFIX server-side); this asks
+      // the same agent to expand THIS specific response as a new follow-up message.
+      if (m.role !== 'user' && m.mode !== 'decision') {
+        const dive = document.createElement('button'); dive.type = 'button'; dive.className = 'btn btn-sm msg-dive'; dive.textContent = '⇊ Dive Deeper';
+        dive.title = 'Ask the agent to expand this specific response with full detail';
+        dive.addEventListener('click', async () => {
+          if (state.running) return;
+          await runSequence([{ speaker: m.speaker, mode: 'dive_deeper', instruction: `Expand your response #${m.seq} above.` }]);
+        });
+        el.appendChild(dive);
       }
     }
     return el;

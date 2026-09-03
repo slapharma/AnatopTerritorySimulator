@@ -84,8 +84,12 @@ async function streamOnce({ messages, maxTokens, onEvent }) {
     if (d.reasoning && !announcedThinking) { announcedThinking = true; onEvent('status', { text: 'Thinking…' }); }
     if (d.reasoning) reasoning += d.reasoning;
     if (d.content) { text += d.content; onEvent('text', { delta: d.content }); }
-    if (Array.isArray(d.tool_calls)) {
-      for (const tc of d.tool_calls) {
+    // Normal case: incremental deltas. Some providers instead send the whole
+    // tool_calls array on `message` even while streaming — handle both.
+    const tcSource = Array.isArray(d.tool_calls) ? d.tool_calls
+      : (choice.message && Array.isArray(choice.message.tool_calls)) ? choice.message.tool_calls : null;
+    if (tcSource) {
+      for (const tc of tcSource) {
         const idx = tc.index ?? 0;
         if (!toolCalls.has(idx)) toolCalls.set(idx, { id: tc.id || `call_${idx}`, name: '', args: '' });
         const cur = toolCalls.get(idx);
@@ -187,7 +191,10 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent 
     break;
   }
   if (!text.trim()) {
-    const err = new Error(finish === 'length' ? 'The model ran out of output tokens before writing anything.' : `The model returned no text (finish_reason: ${finish}).`);
+    const msg = finish === 'length' ? 'The model ran out of output tokens before writing anything.'
+      : finish === 'tool_calls' ? `The model signalled tool_calls but no tool call could be parsed from its response (model: ${model || config.MODEL}). The model's streaming format may be incompatible.`
+        : `The model returned no text (finish_reason: ${finish}).`;
+    const err = new Error(msg);
     err.code = 'EMPTY';
     throw err;
   }

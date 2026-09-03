@@ -4,14 +4,15 @@
 // every request in its usage block and that figure is what the app records.
 module.exports = {
   OPENROUTER_BASE: 'https://openrouter.ai/api/v1',
-  // Primary model. Strongest free NVIDIA model on OpenRouter at time of writing:
-  // 1M context, tool calling, reasoning. Change to any OpenRouter model id.
+  // Primary model. 4B active params (26B total MoE), served first-party by Google
+  // plus 8 other providers on OpenRouter — good tool-call streaming reliability.
+  // Change to any OpenRouter model id.
   // (nemotron-3.5-lightning was tried as a faster swap but its streamed tool_calls
   // deltas don't parse correctly here — turns finish empty with finish_reason
   // "tool_calls" and zero parsed calls. Do not re-add it without fixing that first.)
-  MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+  MODEL: 'google/gemma-4-26b-a4b-it:free',
   // Tried in order if the primary is rate-limited or down.
-  FALLBACK_MODELS: ['nvidia/nemotron-3-super-120b-a12b:free'],
+  FALLBACK_MODELS: ['nvidia/nemotron-3-super-120b-a12b:free', 'nvidia/nemotron-3-ultra-550b-a55b:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.

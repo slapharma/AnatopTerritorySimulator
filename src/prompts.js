@@ -12,13 +12,42 @@ const AGENTS = {
 };
 const AGENT_ORDER = ['regulatory', 'clinical', 'commercial'];
 
+const COUNTRY_OPTIONS = [
+  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia', 'Austria',
+  'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin',
+  'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso',
+  'Burundi', 'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile',
+  'China', 'Colombia', 'Comoros', 'Congo (DRC)', 'Congo (Republic)', 'Costa Rica', "Cote d'Ivoire", 'Croatia',
+  'Cuba', 'Cyprus', 'Czechia', 'Denmark', 'Djibouti', 'Dominican Republic', 'Ecuador', 'Egypt', 'El Salvador',
+  'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'France', 'Gabon',
+  'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Guatemala', 'Guinea', 'Guinea-Bissau', 'Guyana', 'Haiti',
+  'Honduras', 'Hong Kong', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran', 'Iraq', 'Ireland', 'Israel',
+  'Italy', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kosovo', 'Kuwait', 'Kyrgyzstan', 'Laos',
+  'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg', 'Macau',
+  'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Mauritania', 'Mauritius', 'Mexico',
+  'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia', 'Nepal',
+  'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Macedonia', 'Norway', 'Oman',
+  'Pakistan', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar',
+  'Romania', 'Russia', 'Rwanda', 'Saudi Arabia', 'Senegal', 'Serbia', 'Sierra Leone', 'Singapore', 'Slovakia',
+  'Slovenia', 'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan',
+  'Suriname', 'Sweden', 'Switzerland', 'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Togo',
+  'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Uganda', 'Ukraine', 'United Arab Emirates',
+  'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia',
+  'Zimbabwe',
+];
+
+const BUDGET_OPTIONS = ['Under $1M', '$1M–$5M', '$5M–$10M', '$10M–$25M', '$25M–$50M', 'Over $50M', 'Not yet defined'];
+
+const DEADLINE_OPTIONS = ['Within 3 months', '3–6 months', '6–12 months', '12–18 months', '18–24 months', 'No fixed deadline'];
+
 // Every field in Section 0 of the spec, in order. `key` is what the form posts.
+// REGULATOR and REIMBURSEMENT_BODIES are deliberately not asked here: they are
+// determined by COUNTRY, and the agents identify them themselves as their first
+// research step (see prompts/regulatory.md, prompts/commercial.md).
 const INPUT_FIELDS = [
   { key: 'product',              label: 'PRODUCT' },
   { key: 'indication',           label: 'INDICATION' },
-  { key: 'country',              label: 'COUNTRY' },
-  { key: 'regulator',            label: 'REGULATOR' },
-  { key: 'reimbursement_bodies', label: 'REIMBURSEMENT BODIES' },
+  { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS },
   { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', multiline: true,
     hint: 'Each country, approval date, pathway used, and whether a CPP is available' },
   { key: 'dossier',              label: 'DOSSIER ON HAND', multiline: true,
@@ -30,18 +59,16 @@ const INPUT_FIELDS = [
   { key: 'partner_status',       label: 'PARTNER STATUS', multiline: true },
   { key: 'exclusions',           label: 'EXCLUSIONS', multiline: true,
     hint: 'Companies that must not be proposed as partners' },
-  { key: 'budget_ceiling',       label: 'BUDGET CEILING', hint: 'Max spend to first revenue' },
-  { key: 'decision_deadline',    label: 'DECISION DEADLINE' },
+  { key: 'budget_ceiling',       label: 'BUDGET CEILING', options: BUDGET_OPTIONS },
+  { key: 'decision_deadline',    label: 'DECISION DEADLINE', options: DEADLINE_OPTIONS },
   { key: 'competitor_file',      label: 'COMPETITOR FILE', multiline: true,
     hint: 'Paste the existing competitor landscape if available' },
 ];
 
-const KOREA_EXAMPLE = {
+const BASE_VALUES = {
   product: 'Anatop — diltiazem hydrochloride 2% topical cream, 30 g tube',
   indication: 'Chronic anal fissure (adults)',
   country: 'South Korea',
-  regulator: 'MFDS (Ministry of Food and Drug Safety)',
-  reimbursement_bodies: 'HIRA (Health Insurance Review & Assessment Service), NHIS (National Health Insurance Service), MOHW',
   partner_status: 'Kwangdong Pharmaceutical — assessed; status to be confirmed',
   exclusions: 'Any company marketing a competing diltiazem or nifedipine fissure product',
 };
@@ -58,9 +85,7 @@ function fill(template, inputs) {
   return template
     .replace(/\{\{PRODUCT\}\}/g, v('product'))
     .replace(/\{\{INDICATION\}\}/g, v('indication'))
-    .replace(/\{\{COUNTRY\}\}/g, v('country'))
-    .replace(/\{\{REGULATOR\}\}/g, v('regulator'))
-    .replace(/\{\{REIMBURSEMENT_BODIES\}\}/g, v('reimbursement_bodies'));
+    .replace(/\{\{COUNTRY\}\}/g, v('country'));
 }
 
 function inputsBlock(inputs) {
@@ -123,4 +148,4 @@ function turnUserMessage({ agentKey, mode, instruction, messages }) {
   ].join('\n');
 }
 
-module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, KOREA_EXAMPLE, systemPrompt, turnUserMessage, inputsBlock, speakerLabel, rounds };
+module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, turnUserMessage, inputsBlock, speakerLabel, rounds };

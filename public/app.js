@@ -95,7 +95,10 @@
       const div = document.createElement('div');
       div.className = 'field' + (f.multiline ? ' wide' : '');
       const id = `f-${f.key}`;
-      div.innerHTML = `<label for="${id}">${escapeHtml(f.label)}</label>${f.multiline ? `<textarea id="${id}" name="${f.key}"></textarea>` : `<input id="${id}" name="${f.key}" type="text">`}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
+      const control = f.options
+        ? `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`
+        : f.multiline ? `<textarea id="${id}" name="${f.key}"></textarea>` : `<input id="${id}" name="${f.key}" type="text">`;
+      div.innerHTML = `<label for="${id}">${escapeHtml(f.label)}</label>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
     }
   }
@@ -414,7 +417,7 @@
     if (state.sessions.length) await openSession(state.sessions[0].id);
 
     $('#btn-new').addEventListener('click', showSetup);
-    $('#btn-load-korea').addEventListener('click', () => { fillForm(state.config.korea_example, { clear: true }); toast('Base values loaded. Remaining fields stay INPUT MISSING unless you fill them.'); });
+    $('#btn-load-korea').addEventListener('click', () => { fillForm(state.config.base_values, { clear: true }); toast('Base values loaded. Remaining fields stay INPUT MISSING unless you fill them.'); });
     $('#btn-copy-last').addEventListener('click', async () => { const last = await api.get('/api/sessions/last-inputs'); if (!Object.keys(last).length) return toast('No previous session'); fillForm(last, { clear: true }); });
 
     $('#setup-form').addEventListener('submit', async (e) => {

@@ -32,7 +32,7 @@ app.get('/api/config', (req, res) => {
   res.json({
     model: config.MODEL, prices: config.PRICES, usd_to_gbp: config.USD_TO_GBP,
     agents: prompts.AGENTS, agent_order: prompts.AGENT_ORDER,
-    input_fields: prompts.INPUT_FIELDS, korea_example: prompts.KOREA_EXAMPLE,
+    input_fields: prompts.INPUT_FIELDS, base_values: prompts.BASE_VALUES,
     has_api_key: Boolean(process.env.OPENROUTER_API_KEY),
     search_provider: config.SEARCH.provider,
     rounds: prompts.rounds(),

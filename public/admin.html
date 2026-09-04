@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Anatop Territory Evaluation</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+  body { max-width: 720px; margin: 0 auto; padding: 32px 24px 80px; background: var(--bg); }
+  .page h1 { font-size: 22px; margin: 0 0 4px; }
+  .page .lede { color: var(--text-2); margin: 0 0 24px; }
+  .back { display: inline-block; margin-bottom: 20px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .admin-pill { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--verified-bg); color: var(--verified-fg); }
+  .row-actions { display: flex; gap: 8px; }
+  .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; }
+  .add-form h2 { margin: 0 0 12px; font-size: 15px; }
+  .add-form .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  .add-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 12px; color: var(--text-2); }
+  .add-form input[type=email], .add-form input[type=password] { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; min-width: 220px; }
+  .denied { padding: 40px 0; text-align: center; color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back" href="/">← Back to the app</a>
+  <h1>Admin — Users</h1>
+  <p class="lede">Anyone listed here can log in with their email and password. Admins can also manage users and edit agent profiles.</p>
+  <div id="content">Loading…</div>
+</div>
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  async function api(method, url, body) {
+    const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  }
+  function toast(text) {
+    const el = document.createElement('div'); el.className = 'toast'; el.textContent = text; document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+  function fmtTime(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  async function render() {
+    const users = await api('GET', '/api/admin/users');
+    const content = $('#content');
+    content.innerHTML = `
+      <table>
+        <tr><th>Email</th><th>Role</th><th>Added</th><th></th></tr>
+        ${users.map((u) => `
+          <tr data-id="${u.id}">
+            <td>${escapeHtml(u.email)}</td>
+            <td>${u.is_admin ? '<span class="admin-pill">ADMIN</span>' : ''}</td>
+            <td>${fmtTime(u.created_at)}</td>
+            <td class="row-actions">
+              <button type="button" class="btn btn-sm toggle-admin">${u.is_admin ? 'Remove admin' : 'Make admin'}</button>
+              <button type="button" class="btn btn-sm reset-pw">Reset password</button>
+              <button type="button" class="btn btn-sm btn-danger-ghost remove">Remove</button>
+            </td>
+          </tr>`).join('')}
+      </table>
+      <div class="add-form">
+        <h2>Add a user</h2>
+        <form id="add-user-form">
+          <div class="row">
+            <label>Email<input type="email" id="new-email" required></label>
+            <label>Password<input type="password" id="new-password" required></label>
+            <label><input type="checkbox" id="new-is-admin"> Admin</label>
+            <button type="submit" class="btn btn-primary">Add user</button>
+          </div>
+        </form>
+      </div>`;
+
+    for (const tr of content.querySelectorAll('tr[data-id]')) {
+      const id = tr.dataset.id;
+      const user = users.find((u) => String(u.id) === id);
+      tr.querySelector('.toggle-admin').addEventListener('click', async () => {
+        try { await api('PATCH', `/api/admin/users/${id}`, { is_admin: !user.is_admin }); toast('Updated.'); render(); }
+        catch (e) { toast(e.message); }
+      });
+      tr.querySelector('.reset-pw').addEventListener('click', async () => {
+        const pw = prompt(`New password for ${user.email}:`);
+        if (!pw) return;
+        try { await api('PATCH', `/api/admin/users/${id}`, { password: pw }); toast('Password reset.'); }
+        catch (e) { toast(e.message); }
+      });
+      tr.querySelector('.remove').addEventListener('click', async () => {
+        if (!confirm(`Remove ${user.email}? They will no longer be able to log in.`)) return;
+        try { await api('DELETE', `/api/admin/users/${id}`); toast('Removed.'); render(); }
+        catch (e) { toast(e.message); }
+      });
+    }
+
+    $('#add-user-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('POST', '/api/admin/users', {
+          email: $('#new-email').value.trim(),
+          password: $('#new-password').value,
+          is_admin: $('#new-is-admin').checked,
+        });
+        toast('User added.');
+        render();
+      } catch (err) { toast(err.message); }
+    });
+  }
+
+  async function init() {
+    const me = await api('GET', '/api/me').catch(() => ({ authenticated: false }));
+    if (!me.is_admin) { $('#content').innerHTML = '<div class="denied">Admin access required.</div>'; return; }
+    render();
+  }
+  init();
+})();
+</script>
+</body>
+</html>

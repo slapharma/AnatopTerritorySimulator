@@ -2,7 +2,7 @@
 // Runs one agent turn against OpenRouter (OpenAI-compatible chat completions) with
 // streaming and a tool loop for web_search / open_url. Text streams back through onEvent.
 const config = require('./config');
-const { systemPrompt, turnUserMessage } = require('./prompts');
+const { systemPrompt, turnUserMessage, agentAbilities } = require('./prompts');
 const search = require('./search');
 
 function apiKey() {
@@ -18,7 +18,7 @@ function apiKey() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // One streamed request. Returns { text, reasoning, toolCalls, finish, usage }.
-async function streamOnce({ messages, maxTokens, onEvent, model }) {
+async function streamOnce({ messages, maxTokens, onEvent, model, tools }) {
   const primary = model || config.MODEL;
   // Only chain the configured free-tier fallbacks when using the default model.
   // A session that explicitly picked a different model (e.g. testing a paid one)
@@ -27,8 +27,7 @@ async function streamOnce({ messages, maxTokens, onEvent, model }) {
     model: primary,
     models: primary === config.MODEL ? [primary, ...config.FALLBACK_MODELS] : [primary],
     messages,
-    tools: search.TOOLS,
-    tool_choice: 'auto',
+    ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
     stream: true,
     stream_options: { include_usage: true },
     max_tokens: maxTokens,
@@ -155,8 +154,12 @@ async function runTool(call, counters, onEvent) {
  */
 async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent, model: requestedModel }) {
   apiKey();
+  const [systemContent, abilities] = await Promise.all([systemPrompt(agentKey, inputs), agentAbilities(agentKey)]);
+  const tools = search.TOOLS.filter((t) =>
+    (t.function.name === 'web_search' && abilities.can_web_search) ||
+    (t.function.name === 'open_url' && abilities.can_open_url));
   const convo = [
-    { role: 'system', content: systemPrompt(agentKey, inputs) },
+    { role: 'system', content: systemContent },
     { role: 'user', content: turnUserMessage({ agentKey, mode, instruction, messages }) },
   ];
   const maxTokens = mode === 'decision' ? config.MAX_TOKENS_DECISION
@@ -171,7 +174,7 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent,
 
   for (let round = 0; round < config.SEARCH.max_tool_rounds; round++) {
     onEvent('status', { text: round === 0 ? 'Thinking…' : 'Continuing…' });
-    const r = await streamOnce({ messages: convo, maxTokens, onEvent, model: requestedModel });
+    const r = await streamOnce({ messages: convo, maxTokens, onEvent, model: requestedModel, tools });
     usage.requests++;
     if (r.usage) {
       usage.input_tokens += r.usage.prompt_tokens || 0;

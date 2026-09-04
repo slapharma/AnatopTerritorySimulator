@@ -624,7 +624,13 @@
     state.config = await api.get('/api/config');
     buildForm($('#setup-form'), { saveDefault: true });
     buildForm($('#session-inputs-form'), { saveDefault: false });
-    $('#sidebar-foot').innerHTML = `<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a><br>Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
+    const me = await api.get('/api/me').catch(() => ({ authenticated: false }));
+    const links = [
+      '<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a>',
+      '<a href="/agents.html" target="_blank" rel="noopener">Agents ↗</a>',
+      me.is_admin ? '<a href="/admin.html" target="_blank" rel="noopener">Admin ↗</a>' : '',
+    ].filter(Boolean).join(' · ');
+    $('#sidebar-foot').innerHTML = `${links}<br>Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
     await loadSessions();
     if (state.sessions.length) await openSession(state.sessions[0].id);
 

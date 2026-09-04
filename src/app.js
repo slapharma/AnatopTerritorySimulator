@@ -7,7 +7,7 @@ const db = require('./db');
 const prompts = require('./prompts');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
-const { basicAuth } = require('./auth');
+const { basicAuth, requireAdmin, hashPassword } = require('./auth');
 
 const app = express();
 app.use(basicAuth);
@@ -37,6 +37,65 @@ app.get('/api/config', (req, res) => {
     search_provider: config.SEARCH.provider,
     rounds: prompts.rounds(),
   });
+});
+
+app.get('/api/me', (req, res) => {
+  res.json(req.user ? { authenticated: true, ...req.user } : { authenticated: false });
+});
+
+// ---------- admin: users ----------
+app.get('/api/admin/users', requireAdmin, async (req, res, next) => {
+  try { res.json(await db.listUsers()); } catch (e) { next(e); }
+});
+app.post('/api/admin/users', requireAdmin, async (req, res, next) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+    if (await db.getUserByEmail(email)) return res.status(409).json({ error: 'A user with that email already exists' });
+    const password_hash = await hashPassword(password);
+    const user = await db.createUser({ email, password_hash, is_admin: Boolean(req.body.is_admin) });
+    res.json(user);
+  } catch (e) { next(e); }
+});
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.getUserById(id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+    const fields = {};
+    if (typeof req.body.password === 'string' && req.body.password) fields.password_hash = await hashPassword(req.body.password);
+    if (typeof req.body.is_admin === 'boolean') {
+      if (existing.is_admin && !req.body.is_admin && (await db.countAdmins()) <= 1) {
+        return res.status(400).json({ error: 'Cannot remove the last remaining admin' });
+      }
+      fields.is_admin = req.body.is_admin;
+    }
+    res.json(await db.updateUser(id, fields));
+  } catch (e) { next(e); }
+});
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.getUserById(id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+    if (existing.is_admin && (await db.countAdmins()) <= 1) return res.status(400).json({ error: 'Cannot delete the last remaining admin' });
+    await db.deleteUser(id);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---------- agent profiles (view: any authenticated user; edit: admin only) ----------
+app.get('/api/agents', async (req, res, next) => {
+  try { res.json(await db.listAgents()); } catch (e) { next(e); }
+});
+app.patch('/api/agents/:key', requireAdmin, async (req, res, next) => {
+  try {
+    const { description, role, knowledge, can_web_search, can_open_url } = req.body;
+    const updated = await db.updateAgent(req.params.key, { description, role, knowledge, can_web_search, can_open_url });
+    if (!updated) return res.status(404).json({ error: 'Unknown agent' });
+    res.json(updated);
+  } catch (e) { next(e); }
 });
 
 // ---------- form defaults ----------

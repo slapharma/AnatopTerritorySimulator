@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');
 
 const PROMPT_DIR = path.join(__dirname, '..', 'prompts');
 
@@ -118,10 +119,22 @@ function inputsBlock(inputs) {
   }).join('\n');
 }
 
-function systemPrompt(agentKey, inputs) {
+// Regulatory/Clinical/Commercial personas are DB-backed (editable on the
+// Agents page) so a live edit changes behavior on the next turn with no
+// deploy; the moderator's persona is not on that page and stays file-based.
+async function personaFor(agentKey) {
+  if (agentKey === 'moderator') return readPrompt(AGENTS.moderator.file);
+  const row = await db.getAgent(agentKey);
+  if (!row) throw new Error(`Agent ${agentKey} has no DB row — run the agents migration/seed`);
+  const parts = [row.description, row.role];
+  if (row.knowledge && row.knowledge.trim()) parts.push(`Additional knowledge:\n${row.knowledge.trim()}`);
+  return parts.filter(Boolean).join('\n\n');
+}
+
+async function systemPrompt(agentKey, inputs) {
   const agent = AGENTS[agentKey];
   if (!agent) throw new Error(`Unknown agent ${agentKey}`);
-  const persona = fill(readPrompt(agent.file), inputs);
+  const persona = fill(await personaFor(agentKey), inputs);
   const rules = fill(readPrompt('evidence-rules.md'), inputs);
   const today = new Date().toISOString().slice(0, 10);
   const others = AGENT_ORDER.filter((k) => k !== agentKey).map((k) => AGENTS[k].label).join(', ');
@@ -137,6 +150,14 @@ function systemPrompt(agentKey, inputs) {
     '',
     `Today's date is ${today}. The other agents in the room are: ${others}. The human moderator is addressed as "Moderator".`,
   ].join('\n');
+}
+
+// Which tools an agent may use this turn — DB-backed (Agents page), defaults
+// to both enabled for the moderator (not on that page, no restriction).
+async function agentAbilities(agentKey) {
+  if (agentKey === 'moderator') return { can_web_search: true, can_open_url: true };
+  const row = await db.getAgent(agentKey);
+  return row ? { can_web_search: row.can_web_search, can_open_url: row.can_open_url } : { can_web_search: true, can_open_url: true };
 }
 
 function speakerLabel(msg) {
@@ -175,4 +196,4 @@ function turnUserMessage({ agentKey, mode, instruction, messages }) {
   ].join('\n');
 }
 
-module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, turnUserMessage, inputsBlock, speakerLabel, rounds };
+module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, turnUserMessage, inputsBlock, speakerLabel, rounds };

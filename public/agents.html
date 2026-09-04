@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Profiles — Anatop Territory Evaluation</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+  body { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; background: var(--bg); }
+  .page h1 { font-size: 22px; margin: 0 0 4px; }
+  .page .lede { color: var(--text-2); margin: 0 0 24px; }
+  .back { display: inline-block; margin-bottom: 20px; font-size: 13px; }
+  .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 20px; }
+  .agent-card h2 { margin: 0 0 2px; font-size: 16px; }
+  .agent-card .key { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 14px; }
+  .agent-card label { display: block; font-weight: 600; font-size: 12px; color: var(--text-2); margin: 12px 0 4px; }
+  .agent-card textarea, .agent-card input[type=text] { width: 100%; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-family: inherit; font-size: 13px; }
+  .agent-card textarea.role { min-height: 220px; }
+  .agent-card textarea.knowledge { min-height: 90px; }
+  .abilities { display: flex; gap: 20px; margin-top: 12px; }
+  .abilities label { display: flex; align-items: center; gap: 6px; font-weight: 500; color: var(--text); margin: 0; cursor: pointer; }
+  .card-actions { margin-top: 14px; display: flex; align-items: center; gap: 12px; }
+  .readonly-note { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: var(--text-2); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <a class="back" href="/">← Back to the app</a>
+  <h1>Agent Profiles</h1>
+  <p class="lede">Each agent's description, role and knowledge feed directly into its prompt for every turn — an edit here changes how it behaves on the next turn, no deploy needed. Abilities control which tools it's allowed to use.</p>
+  <div id="admin-note" class="readonly-note" hidden>You're viewing these read-only. Only an admin can save changes here.</div>
+  <div id="cards">Loading…</div>
+</div>
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  async function api(method, url, body) {
+    const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    return r.json();
+  }
+  function toast(text) {
+    const el = document.createElement('div'); el.className = 'toast'; el.textContent = text; document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+
+  async function init() {
+    const [me, agents] = await Promise.all([api('GET', '/api/me'), api('GET', '/api/agents')]);
+    const isAdmin = Boolean(me.is_admin);
+    $('#admin-note').hidden = isAdmin;
+    const wrap = $('#cards');
+    wrap.innerHTML = '';
+    for (const a of agents) {
+      const card = document.createElement('div'); card.className = 'agent-card'; card.dataset.key = a.key;
+      card.innerHTML = `
+        <h2>${escapeHtml(a.label)}</h2>
+        <div class="key">${escapeHtml(a.key)}</div>
+        <label>Description</label>
+        <input type="text" class="f-description" value="${escapeHtml(a.description)}" ${isAdmin ? '' : 'disabled'}>
+        <label>Role</label>
+        <textarea class="role f-role" ${isAdmin ? '' : 'disabled'}>${escapeHtml(a.role)}</textarea>
+        <label>Knowledge <span style="font-weight:400;color:var(--muted)">(optional extra notes appended to the prompt)</span></label>
+        <textarea class="knowledge f-knowledge" ${isAdmin ? '' : 'disabled'}>${escapeHtml(a.knowledge)}</textarea>
+        <div class="abilities">
+          <label><input type="checkbox" class="f-web-search" ${a.can_web_search ? 'checked' : ''} ${isAdmin ? '' : 'disabled'}> Can search the web</label>
+          <label><input type="checkbox" class="f-open-url" ${a.can_open_url ? 'checked' : ''} ${isAdmin ? '' : 'disabled'}> Can open/read pages</label>
+        </div>
+        <div class="card-actions">
+          <button type="button" class="btn btn-primary btn-sm save" ${isAdmin ? '' : 'disabled'}>Save</button>
+          <span class="muted saved-at" style="font-size:11.5px"></span>
+        </div>`;
+      wrap.appendChild(card);
+      if (isAdmin) {
+        $('.save', card).addEventListener('click', async () => {
+          try {
+            await api('PATCH', `/api/agents/${a.key}`, {
+              description: $('.f-description', card).value.trim(),
+              role: $('.f-role', card).value,
+              knowledge: $('.f-knowledge', card).value,
+              can_web_search: $('.f-web-search', card).checked,
+              can_open_url: $('.f-open-url', card).checked,
+            });
+            toast(`${a.label} saved.`);
+          } catch (e) { toast(`Could not save: ${e.message}`); }
+        });
+      }
+    }
+  }
+  init().catch((e) => { $('#cards').innerHTML = `<p class="muted">Could not load agent profiles: ${escapeHtml(e.message)}</p>`; });
+})();
+</script>
+</body>
+</html>

@@ -80,32 +80,54 @@ async function addMessage(sessionId, fields) {
 
 async function listSources(sessionId) { return q('SELECT * FROM sources WHERE session_id = $1 ORDER BY n', [sessionId]); }
 
-async function upsertSource(sessionId, { url, title, kind, messageId, speaker }) {
-  const existing = await one('SELECT * FROM sources WHERE session_id = $1 AND url = $2', [sessionId, url]);
-  if (existing) {
-    const citedBy = JSON.parse(existing.cited_by_json);
-    if (!citedBy.some((c) => c.message_id === messageId)) citedBy.push({ message_id: messageId, speaker });
-    const newKind = existing.kind === 'cited' || kind === 'cited' ? 'cited' : 'searched';
-    await q('UPDATE sources SET title = COALESCE($1, title), kind = $2, cited_by_json = $3 WHERE id = $4',
-      [title || null, newKind, JSON.stringify(citedBy), existing.id]);
-    return existing.n;
+// Serializes read-then-write "next n" numbering (sources, disagreements) per
+// session, even across concurrent turns (parallel Round 1) — an advisory
+// transaction lock on the session id, held on one dedicated connection for
+// the duration of fn, auto-released at COMMIT/ROLLBACK.
+async function withSessionLock(sessionId, fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [sessionId]);
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
   }
-  const nRow = await one('SELECT COALESCE(MAX(n),0)+1 AS n FROM sources WHERE session_id = $1', [sessionId]);
-  const n = nRow.n;
-  await q('INSERT INTO sources (session_id, n, url, title, kind, first_message_id, cited_by_json) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [sessionId, n, url, title || null, kind, messageId, JSON.stringify([{ message_id: messageId, speaker }])]);
-  return n;
+}
+
+async function upsertSource(sessionId, { url, title, kind, messageId, speaker }) {
+  return withSessionLock(sessionId, async (client) => {
+    const existing = (await client.query('SELECT * FROM sources WHERE session_id = $1 AND url = $2', [sessionId, url])).rows[0];
+    if (existing) {
+      const citedBy = JSON.parse(existing.cited_by_json);
+      if (!citedBy.some((c) => c.message_id === messageId)) citedBy.push({ message_id: messageId, speaker });
+      const newKind = existing.kind === 'cited' || kind === 'cited' ? 'cited' : 'searched';
+      await client.query('UPDATE sources SET title = COALESCE($1, title), kind = $2, cited_by_json = $3 WHERE id = $4',
+        [title || null, newKind, JSON.stringify(citedBy), existing.id]);
+      return existing.n;
+    }
+    const n = (await client.query('SELECT COALESCE(MAX(n),0)+1 AS n FROM sources WHERE session_id = $1', [sessionId])).rows[0].n;
+    await client.query('INSERT INTO sources (session_id, n, url, title, kind, first_message_id, cited_by_json) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [sessionId, n, url, title || null, kind, messageId, JSON.stringify([{ message_id: messageId, speaker }])]);
+    return n;
+  });
 }
 
 async function listDisagreements(sessionId) { return q('SELECT * FROM disagreements WHERE session_id = $1 ORDER BY n', [sessionId]); }
 async function setDisStatus(sessionId, n, status) { await q('UPDATE disagreements SET status = $1 WHERE session_id = $2 AND n = $3', [status, sessionId, n]); }
 
 async function addDisagreement(sessionId, messageId, topic, body, status) {
-  const nRow = await one('SELECT COALESCE(MAX(n),0)+1 AS n FROM disagreements WHERE session_id = $1', [sessionId]);
-  const n = nRow.n;
-  await q('INSERT INTO disagreements (session_id, message_id, n, topic, body, status) VALUES ($1,$2,$3,$4,$5,$6)',
-    [sessionId, messageId, n, topic, body, status]);
-  return n;
+  return withSessionLock(sessionId, async (client) => {
+    const n = (await client.query('SELECT COALESCE(MAX(n),0)+1 AS n FROM disagreements WHERE session_id = $1', [sessionId])).rows[0].n;
+    await client.query('INSERT INTO disagreements (session_id, message_id, n, topic, body, status) VALUES ($1,$2,$3,$4,$5,$6)',
+      [sessionId, messageId, n, topic, body, status]);
+    return n;
+  });
 }
 
 async function fullSession(id) {
@@ -139,6 +161,43 @@ async function setDefaultField(key, value) {
   return current;
 }
 
+// ---------- users (auth) ----------
+async function countUsers() { return Number((await one('SELECT COUNT(*)::int AS n FROM users', [])).n); }
+async function getUserByEmail(email) { return one('SELECT * FROM users WHERE lower(email) = lower($1)', [email]); }
+async function listUsers() { return q('SELECT id, email, is_admin, created_at FROM users ORDER BY created_at', []); }
+async function createUser({ email, password_hash, is_admin }) {
+  return one('INSERT INTO users (email, password_hash, is_admin) VALUES ($1,$2,$3) RETURNING id, email, is_admin, created_at',
+    [email.toLowerCase(), password_hash, Boolean(is_admin)]);
+}
+async function countAdmins() { return Number((await one('SELECT COUNT(*)::int AS n FROM users WHERE is_admin', [])).n); }
+async function updateUser(id, { password_hash, is_admin }) {
+  const sets = []; const vals = []; let i = 1;
+  if (password_hash !== undefined) { sets.push(`password_hash = $${i++}`); vals.push(password_hash); }
+  if (is_admin !== undefined) { sets.push(`is_admin = $${i++}`); vals.push(Boolean(is_admin)); }
+  if (!sets.length) return getUserById(id);
+  vals.push(id);
+  return one(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING id, email, is_admin, created_at`, vals);
+}
+async function getUserById(id) { return one('SELECT id, email, is_admin, created_at FROM users WHERE id = $1', [id]); }
+async function deleteUser(id) { await q('DELETE FROM users WHERE id = $1', [id]); }
+
+// ---------- agents (editable profiles) ----------
+async function listAgents() { return q('SELECT * FROM agents ORDER BY key', []); }
+async function getAgent(key) { return one('SELECT * FROM agents WHERE key = $1', [key]); }
+async function updateAgent(key, { description, role, knowledge, can_web_search, can_open_url }) {
+  const sets = []; const vals = []; let i = 1;
+  const set = (col, val) => { sets.push(`${col} = $${i++}`); vals.push(val); };
+  if (description !== undefined) set('description', description);
+  if (role !== undefined) set('role', role);
+  if (knowledge !== undefined) set('knowledge', knowledge);
+  if (can_web_search !== undefined) set('can_web_search', Boolean(can_web_search));
+  if (can_open_url !== undefined) set('can_open_url', Boolean(can_open_url));
+  if (!sets.length) return getAgent(key);
+  sets.push('updated_at = now()');
+  vals.push(key);
+  return one(`UPDATE agents SET ${sets.join(', ')} WHERE key = $${i} RETURNING *`, vals);
+}
+
 module.exports = {
   pool,
   getDefaults, setDefaultField,
@@ -147,4 +206,6 @@ module.exports = {
   listSources, upsertSource,
   listDisagreements, setDisStatus, addDisagreement,
   fullSession,
+  countUsers, getUserByEmail, listUsers, createUser, countAdmins, updateUser, getUserById, deleteUser,
+  listAgents, getAgent, updateAgent,
 };

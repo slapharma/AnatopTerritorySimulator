@@ -44,7 +44,10 @@ module.exports = {
   MAX_TOKENS_DECISION: 32000,
 
   SEARCH: {
-    provider: process.env.BRAVE_API_KEY ? 'brave' : 'duckduckgo',
+    // DuckDuckGo (the no-key default) scrapes html.duckduckgo.com, which blocks
+    // Vercel's datacenter IPs with HTTP 403 — every search fails in production.
+    // Tavily is free (1000 req/month, no card) and a real API, not a scrape target.
+    provider: process.env.TAVILY_API_KEY ? 'tavily' : process.env.BRAVE_API_KEY ? 'brave' : 'duckduckgo',
     max_results: 8,
     max_searches_per_turn: 12,   // web_search calls one agent may make in a single turn
     max_opens_per_turn: 10,      // open_url calls per turn

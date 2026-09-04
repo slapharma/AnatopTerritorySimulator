@@ -52,9 +52,22 @@ async function searchBrave(query, max) {
   return ((data.web && data.web.results) || []).slice(0, max).map((r) => ({ title: r.title, url: r.url, snippet: stripTags(r.description || ''), age: r.age || r.page_age }));
 }
 
+async function searchTavily(query, max) {
+  const res = await fetchWithTimeout('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.TAVILY_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, max_results: max, search_depth: 'basic' }),
+  });
+  if (!res.ok) throw new Error(`Tavily Search returned HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.results || []).slice(0, max).map((r) => ({ title: r.title, url: r.url, snippet: stripTags(r.content || '') }));
+}
+
 async function webSearch(query, max = config.SEARCH.max_results) {
   const provider = config.SEARCH.provider;
-  const results = provider === 'brave' ? await searchBrave(query, max) : await searchDuckDuckGo(query, max);
+  const results = provider === 'tavily' ? await searchTavily(query, max)
+    : provider === 'brave' ? await searchBrave(query, max)
+      : await searchDuckDuckGo(query, max);
   return { provider, query, results };
 }
 

@@ -280,8 +280,11 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   const instruction = req.body.instruction || '';
   if (!prompts.AGENTS[speaker]) return res.status(400).json({ error: `Unknown speaker ${speaker}` });
   if (speaker === 'moderator' && mode !== 'decision') return res.status(400).json({ error: 'The moderator assistant only writes the decision output' });
-  if (running.has(id)) return res.status(409).json({ error: 'Another turn is already running for this session' });
-  running.add(id);
+  // Keyed on session+speaker (not just session) so Round 1 can run all three
+  // agents concurrently; still blocks the same agent double-firing.
+  const runKey = `${id}:${speaker}`;
+  if (running.has(runKey)) return res.status(409).json({ error: 'This agent already has a turn running for this session' });
+  running.add(runKey);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -329,7 +332,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     });
     send('error', { message_id: msg.id, message, code: err.code || (err.status ? `HTTP ${err.status}` : 'ERROR') });
   } finally {
-    running.delete(id);
+    running.delete(runKey);
     res.end();
   }
 });

@@ -124,6 +124,10 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .round-divider::before, .round-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .round-divider span { white-space: nowrap; }
 
+.round1-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: none; }
+.round1-col { display: flex; flex-direction: column; min-width: 0; }
+.round1-col .msg { max-width: none; }
+
 .fav-btn { border: none; background: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--muted); padding: 0 2px; }
 .fav-btn:hover { color: #B45309; }
 .fav-btn.on { color: #B45309; }
@@ -260,4 +264,5 @@ dialog::backdrop { background: rgba(15, 23, 42, .35); }
   .session-body { grid-template-columns: 1fr; }
   .panel { display: none; }
   .fields { grid-template-columns: 1fr; }
+  .round1-grid { grid-template-columns: 1fr; }
 }

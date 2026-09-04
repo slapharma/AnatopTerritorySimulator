@@ -298,14 +298,30 @@
     t.innerHTML = '';
     if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Round 1 to start.</div>'; return; }
     let lastMode = null;
-    for (const m of s.messages) {
+    let i = 0;
+    while (i < s.messages.length) {
+      const m = s.messages[i];
       if (m.mode && m.mode !== lastMode && m.role !== 'user') {
         const div = document.createElement('div'); div.className = 'round-divider'; div.dataset.mode = m.mode;
         div.innerHTML = `<span>${escapeHtml(MODE_LABEL[m.mode] || m.mode)}</span>`;
         t.appendChild(div);
         lastMode = m.mode;
       }
-      t.appendChild(messageElement(m));
+      if (m.mode === 'opening' && m.role !== 'user') {
+        // Round 1 runs all three agents in parallel — lay that batch out as
+        // side-by-side columns instead of stacking it like every other round.
+        const grid = document.createElement('div'); grid.className = 'round1-grid';
+        while (i < s.messages.length && s.messages[i].mode === 'opening' && s.messages[i].role !== 'user') {
+          const col = document.createElement('div'); col.className = 'round1-col';
+          col.appendChild(messageElement(s.messages[i]));
+          grid.appendChild(col);
+          i++;
+        }
+        t.appendChild(grid);
+      } else {
+        t.appendChild(messageElement(m));
+        i++;
+      }
     }
     applyFilter();
   }
@@ -319,8 +335,13 @@
     });
     $$('#transcript .round-divider').forEach((el) => {
       // Hide a divider only if every message in its group is filtered out.
+      // Round 1's group is wrapped in a .round1-grid, not flat .msg siblings.
       let sib = el.nextElementSibling; let anyVisible = false;
-      while (sib && !sib.classList.contains('round-divider')) { if (sib.classList.contains('msg') && !sib.hidden) anyVisible = true; sib = sib.nextElementSibling; }
+      while (sib && !sib.classList.contains('round-divider')) {
+        if (sib.classList.contains('msg') && !sib.hidden) anyVisible = true;
+        if (sib.classList.contains('round1-grid') && sib.querySelector('.msg:not([hidden])')) anyVisible = true;
+        sib = sib.nextElementSibling;
+      }
       el.hidden = !anyVisible;
     });
   }
@@ -512,14 +533,17 @@
 
   // ---------------- running turns ----------------
   // Streams one agent turn. Resolves when the turn is done or has failed.
-  function runTurn({ speaker, mode, instruction }) {
+  // `container` (optional): where to append the live element — a Round 1
+  // column instead of the flat transcript, when running in parallel.
+  function runTurn({ speaker, mode, instruction }, container) {
     return new Promise(async (resolve) => {
       const t = $('#transcript');
       $('.empty', t)?.remove();
+      const appendTarget = container || t;
       const el = document.createElement('article');
       el.className = `msg msg-${speaker}`;
       el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${MODE_LABEL[mode] || mode}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
-      t.appendChild(el);
+      appendTarget.appendChild(el);
       const body = $('.msg-body', el); const statusEl = $('.msg-status .txt', el); const searchesEl = $('.msg-searches', el);
       const turnTimerEl = $('.msg-status .turn-timer', el);
       const turnStart = Date.now();
@@ -554,7 +578,8 @@
             if (state.running) return;
             if (messageId) { await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${messageId}`); state.session.messages = state.session.messages.filter((x) => x.id !== messageId); }
             el.remove();
-            await runSequence([{ speaker, mode, instruction }]);
+            setRunning(true);
+            try { await runTurn({ speaker, mode, instruction }, container); } finally { setRunning(false); loadSessions(); }
           });
           err.appendChild(retry);
           el.appendChild(err);
@@ -617,6 +642,37 @@
     }
   }
 
+  // Round 1 specifically: its own prompt tells agents not to see or reference
+  // each other, so unlike every other round it's safe to run all three at
+  // once — shown as 3 columns via renderTranscript()'s round1-grid grouping.
+  async function runRound1Parallel() {
+    if (state.running) { toast('A turn is already running'); return; }
+    setRunning(true);
+    try {
+      const t = $('#transcript');
+      $('.empty', t)?.remove();
+      const grid = document.createElement('div'); grid.className = 'round1-grid';
+      const cols = {};
+      for (const a of ALL) {
+        const col = document.createElement('div'); col.className = 'round1-col';
+        grid.appendChild(col);
+        cols[a] = col;
+      }
+      t.appendChild(grid);
+      t.scrollTop = t.scrollHeight;
+      await Promise.allSettled(ALL.map((a) => runTurn({ speaker: a, mode: 'opening' }, cols[a])));
+      // Refresh from the server once all three have settled — each turn's own
+      // 'done' snapshot of sources/disagreements can be stale relative to a
+      // sibling turn that finished microseconds later; re-fetching guarantees
+      // the final render is consistent instead of racing on SSE arrival order.
+      state.session = await api.get(`/api/sessions/${state.session.id}`);
+      renderSession();
+    } finally {
+      setRunning(false);
+      loadSessions();
+    }
+  }
+
   const ALL = ['regulatory', 'clinical', 'commercial'];
 
   // ---------------- events ----------------
@@ -648,7 +704,7 @@
       const inputs = readForm($('#setup-form'));
       const created = await api.send('POST', '/api/sessions', { inputs });
       await openSession(created.id);
-      await runSequence(ALL.map((a) => ({ speaker: a, mode: 'opening' })));
+      await runRound1Parallel();
     });
 
     $('#session-inputs-form').addEventListener('submit', async (e) => {
@@ -661,7 +717,8 @@
       } catch (err) { toast(`Could not save inputs: ${err.message}`); }
     });
 
-    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () => runSequence(ALL.map((a) => ({ speaker: a, mode: b.dataset.round })))));
+    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () =>
+      b.dataset.round === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode: b.dataset.round })))));
     $('#btn-decision').addEventListener('click', () => {
       if (!state.session.messages.some((m) => m.role === 'agent' && !m.error)) return toast('Run at least one round first');
       runSequence([{ speaker: 'moderator', mode: 'decision' }]);

@@ -19,6 +19,9 @@
   // ---------------- helpers ----------------
   const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)' };
   const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
+  // Modes where all three agents answer independently within the round — laid
+  // out as a 3-column grid instead of stacked, both live and on reload.
+  const GRID_MODES = ['opening', 'round2', 'round3', 'crosstalk'];
   function fmtTime(utc) {
     if (!utc) return '';
     // Postgres timestamptz rows arrive already ISO-8601 with a "Z"/offset suffix;
@@ -307,12 +310,13 @@
         t.appendChild(div);
         lastMode = m.mode;
       }
-      if (m.mode === 'opening' && m.role !== 'user') {
-        // Round 1 runs all three agents in parallel — lay that batch out as
-        // side-by-side columns instead of stacking it like every other round.
-        const grid = document.createElement('div'); grid.className = 'round1-grid';
-        while (i < s.messages.length && s.messages[i].mode === 'opening' && s.messages[i].role !== 'user') {
-          const col = document.createElement('div'); col.className = 'round1-col';
+      if (GRID_MODES.includes(m.mode) && m.role !== 'user') {
+        // Every agent round (Round 1/2/3, cross-talk) is laid out as three
+        // side-by-side columns instead of stacking responses top to bottom.
+        const mode = m.mode;
+        const grid = document.createElement('div'); grid.className = 'agent-grid';
+        while (i < s.messages.length && s.messages[i].mode === mode && s.messages[i].role !== 'user') {
+          const col = document.createElement('div'); col.className = 'agent-col';
           col.appendChild(messageElement(s.messages[i]));
           grid.appendChild(col);
           i++;
@@ -335,11 +339,11 @@
     });
     $$('#transcript .round-divider').forEach((el) => {
       // Hide a divider only if every message in its group is filtered out.
-      // Round 1's group is wrapped in a .round1-grid, not flat .msg siblings.
+      // Agent rounds are wrapped in a .agent-grid, not flat .msg siblings.
       let sib = el.nextElementSibling; let anyVisible = false;
       while (sib && !sib.classList.contains('round-divider')) {
         if (sib.classList.contains('msg') && !sib.hidden) anyVisible = true;
-        if (sib.classList.contains('round1-grid') && sib.querySelector('.msg:not([hidden])')) anyVisible = true;
+        if (sib.classList.contains('agent-grid') && sib.querySelector('.msg:not([hidden])')) anyVisible = true;
         sib = sib.nextElementSibling;
       }
       el.hidden = !anyVisible;
@@ -388,6 +392,10 @@
       body.appendChild(renderMarkdown(m.text));
       linkAgentMentions(body, m);
       el.appendChild(body);
+      const openFullBtn = document.createElement('button');
+      openFullBtn.type = 'button'; openFullBtn.className = 'msg-openfull'; openFullBtn.title = 'Open full response in a wide view'; openFullBtn.textContent = '⤢';
+      openFullBtn.addEventListener('click', () => openMessageModal(m, speaker));
+      $('.msg-head', el).insertBefore(openFullBtn, $('.msg-head', el).firstChild);
       if ((m.text || '').length > 2500 && m.mode !== 'decision') {
         body.classList.add('collapsed');
         const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm msg-expand'; btn.textContent = 'Show full message';
@@ -503,6 +511,14 @@
     const dlg = $('#dlg-disagreement');
     dlg.dataset.n = d.n;
     dlg.showModal();
+  }
+
+  // Opens one response full-width — the inline card can be quite narrow when
+  // laid out 3-up, and "Show full message" only lifts the collapse height cap.
+  function openMessageModal(m, speaker) {
+    $('#msg-modal-title').textContent = `${AGENT_LABEL[speaker] || speaker}${m.mode ? ' · ' + (MODE_LABEL[m.mode] || m.mode) : ''} · #${m.seq}`;
+    $('#msg-modal-body').replaceChildren(renderMarkdown(m.text));
+    $('#dlg-message').showModal();
   }
 
   function renderCost() {
@@ -631,9 +647,26 @@
     if (state.running) { toast('A turn is already running'); return; }
     setRunning(true);
     try {
+      // These rounds still run one agent at a time, in order — Round 2/3 and
+      // cross-talk need each agent to see what came before. But when the full
+      // trio is running the same round, lay it out as 3 columns like Round 1,
+      // filling in left to right as each agent finishes.
+      const t = $('#transcript');
+      $('.empty', t)?.remove();
+      const gridEligible = turns.length === 3 && GRID_MODES.includes(turns[0].mode) &&
+        turns.every((x) => x.mode === turns[0].mode) && new Set(turns.map((x) => x.speaker)).size === 3 &&
+        turns.every((x) => ALL.includes(x.speaker));
+      let cols = null;
+      if (gridEligible) {
+        const grid = document.createElement('div'); grid.className = 'agent-grid';
+        cols = {};
+        for (const a of ALL) { const col = document.createElement('div'); col.className = 'agent-col'; grid.appendChild(col); cols[a] = col; }
+        t.appendChild(grid);
+        t.scrollTop = t.scrollHeight;
+      }
       for (const turn of turns) {
         if (state.stopRequested) { toast('Stopped'); break; }
-        const ok = await runTurn(turn);
+        const ok = await runTurn(turn, cols ? cols[turn.speaker] : undefined);
         if (!ok) break; // leave the retry button in place; don't cascade failures
       }
     } finally {
@@ -644,17 +677,17 @@
 
   // Round 1 specifically: its own prompt tells agents not to see or reference
   // each other, so unlike every other round it's safe to run all three at
-  // once — shown as 3 columns via renderTranscript()'s round1-grid grouping.
+  // once — shown as 3 columns via renderTranscript()'s agent-grid grouping.
   async function runRound1Parallel() {
     if (state.running) { toast('A turn is already running'); return; }
     setRunning(true);
     try {
       const t = $('#transcript');
       $('.empty', t)?.remove();
-      const grid = document.createElement('div'); grid.className = 'round1-grid';
+      const grid = document.createElement('div'); grid.className = 'agent-grid';
       const cols = {};
       for (const a of ALL) {
-        const col = document.createElement('div'); col.className = 'round1-col';
+        const col = document.createElement('div'); col.className = 'agent-col';
         grid.appendChild(col);
         cols[a] = col;
       }

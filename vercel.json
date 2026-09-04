@@ -2,7 +2,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 800,
-      "includeFiles": "{public/**,fonts/**}"
+      "includeFiles": "{public/**,fonts/**,node_modules/marked/lib/marked.umd.js}"
     }
   },
   "rewrites": [

@@ -78,7 +78,16 @@
             <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
           </div>
 
-          <div id="inputs-summary" class="inputs-summary"></div>
+          <details id="inputs-summary" class="inputs-summary">
+            <summary id="inputs-summary-label">Inputs</summary>
+            <form id="session-inputs-form">
+              <div class="fields"></div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save inputs</button>
+                <span class="muted" style="font-size:11.5px">Changes apply to turns run from now on, not messages already written.</span>
+              </div>
+            </form>
+          </details>
           <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
             <button type="button" class="chip active" data-speaker="all">All</button>
             <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>

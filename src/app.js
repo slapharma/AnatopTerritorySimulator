@@ -91,6 +91,11 @@ app.patch('/api/sessions/:id', async (req, res, next) => {
       if (!config.MODEL_OPTIONS.some((m) => m.id === req.body.model)) return res.status(400).json({ error: `Unknown model ${req.body.model}` });
       await db.setModel(id, req.body.model);
     }
+    if (req.body.inputs && typeof req.body.inputs === 'object') {
+      const inputs = {};
+      for (const f of prompts.INPUT_FIELDS) inputs[f.key] = (req.body.inputs[f.key] || '').toString();
+      await db.updateInputs(id, inputs);
+    }
     res.json(await db.fullSession(id));
   } catch (e) { next(e); }
 });

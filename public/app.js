@@ -141,8 +141,8 @@
   // ---------------- setup view ----------------
   const OTHER_SENTINEL = '__other__';
 
-  function buildForm() {
-    const wrap = $('#setup-fields');
+  function buildForm(root, { saveDefault = false } = {}) {
+    const wrap = $('.fields', root);
     wrap.innerHTML = '';
     for (const f of state.config.input_fields) {
       const div = document.createElement('div');
@@ -165,18 +165,20 @@
         const datalist = f.suggestions ? `<datalist id="${id}-suggestions">${f.suggestions.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>` : '';
         control = `<input id="${id}" name="${f.key}" type="text"${listAttr}>${datalist}`;
       }
-      div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}</label><button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">💾 Save as default</button></div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
+      div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}</label>${saveDefault ? `<button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">💾 Save as default</button>` : ''}</div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
     }
-    wrap.addEventListener('click', async (e) => {
-      const btn = e.target.closest('.save-default');
-      if (!btn) return;
-      const f = state.config.input_fields.find((x) => x.key === btn.dataset.key);
-      try {
-        await api.send('PATCH', '/api/defaults', { key: f.key, value: readField(f) });
-        toast(`Saved "${f.label}" as the new default.`);
-      } catch (err) { toast(`Could not save default: ${err.message}`); }
-    });
+    if (saveDefault) {
+      wrap.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.save-default');
+        if (!btn) return;
+        const f = state.config.input_fields.find((x) => x.key === btn.dataset.key);
+        try {
+          await api.send('PATCH', '/api/defaults', { key: f.key, value: readField(root, f) });
+          toast(`Saved "${f.label}" as the new default.`);
+        } catch (err) { toast(`Could not save default: ${err.message}`); }
+      });
+    }
     // select-other: reveal the free-text box only when "Other…" is picked.
     $$('.field select', wrap).forEach((sel) => {
       const other = $('.other-input', sel.closest('.field'));
@@ -189,9 +191,9 @@
     });
   }
 
-  function fillForm(values, { clear } = { clear: false }) {
+  function fillForm(root, values, { clear } = { clear: false }) {
     for (const f of state.config.input_fields) {
-      const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
+      const div = $(`.field[data-key="${f.key}"]`, root);
       if (!div) continue;
       const val = values[f.key] !== undefined ? values[f.key] : (clear ? '' : undefined);
       if (val === undefined) continue;
@@ -216,8 +218,8 @@
     }
   }
 
-  function readField(f) {
-    const div = $(`.field[data-key="${f.key}"]`, $('#setup-form'));
+  function readField(root, f) {
+    const div = $(`.field[data-key="${f.key}"]`, root);
     if (f.type === 'select-other') {
       const sel = $('select', div); const other = $('.other-input', div);
       return (sel.value === OTHER_SENTINEL ? other.value : sel.value).trim();
@@ -229,9 +231,9 @@
     }
     return ($(`[name="${f.key}"]`, div).value || '').trim();
   }
-  function readForm() {
+  function readForm(root) {
     const inputs = {};
-    for (const f of state.config.input_fields) inputs[f.key] = readField(f);
+    for (const f of state.config.input_fields) inputs[f.key] = readField(root, f);
     return inputs;
   }
   function showSetup() {
@@ -260,9 +262,10 @@
     $('#link-pdf').href = `/api/sessions/${s.id}/export.pdf`;
     renderModelSelect();
     updateActiveClock(0);
-    // inputs summary
+    // inputs summary — editable in place; changes only affect turns run after saving.
     const missing = state.config.input_fields.filter((f) => !(s.inputs[f.key] || '').trim());
-    $('#inputs-summary').innerHTML = `<details><summary>Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING</summary><dl>${state.config.input_fields.map((f) => `<dt>${escapeHtml(f.label)}</dt><dd class="${(s.inputs[f.key] || '').trim() ? '' : 'missing'}">${escapeHtml((s.inputs[f.key] || '').trim() || 'INPUT MISSING')}</dd>`).join('')}</dl></details>`;
+    $('#inputs-summary-label').textContent = `Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING`;
+    fillForm($('#session-inputs-form'), s.inputs, { clear: true });
     // transcript
     renderTranscript();
     renderSources(); renderDisagreements(); renderCost();
@@ -590,7 +593,8 @@
   // ---------------- events ----------------
   async function init() {
     state.config = await api.get('/api/config');
-    buildForm();
+    buildForm($('#setup-form'), { saveDefault: true });
+    buildForm($('#session-inputs-form'), { saveDefault: false });
     $('#sidebar-foot').innerHTML = `<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a><br>Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
     await loadSessions();
     if (state.sessions.length) await openSession(state.sessions[0].id);
@@ -598,18 +602,28 @@
     $('#btn-new').addEventListener('click', showSetup);
     $('#btn-load-korea').addEventListener('click', async () => {
       const defaults = await api.get('/api/defaults');
-      fillForm(defaults, { clear: true });
+      fillForm($('#setup-form'), defaults, { clear: true });
       toast('Default values restored. Remaining fields stay INPUT MISSING unless you fill them.');
     });
-    $('#btn-copy-last').addEventListener('click', async () => { const last = await api.get('/api/sessions/last-inputs'); if (!Object.keys(last).length) return toast('No previous session'); fillForm(last, { clear: true }); });
+    $('#btn-copy-last').addEventListener('click', async () => { const last = await api.get('/api/sessions/last-inputs'); if (!Object.keys(last).length) return toast('No previous session'); fillForm($('#setup-form'), last, { clear: true }); });
 
     $('#setup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!state.config.has_api_key) return toast('No API key set. Add ANTHROPIC_API_KEY to .env and restart the server.', 5000);
-      const inputs = readForm();
+      const inputs = readForm($('#setup-form'));
       const created = await api.send('POST', '/api/sessions', { inputs });
       await openSession(created.id);
       await runSequence(ALL.map((a) => ({ speaker: a, mode: 'opening' })));
+    });
+
+    $('#session-inputs-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inputs = readForm($('#session-inputs-form'));
+      try {
+        state.session = await api.send('PATCH', `/api/sessions/${state.session.id}`, { inputs });
+        renderSession();
+        toast('Inputs saved. Applies to turns run from now on.');
+      } catch (err) { toast(`Could not save inputs: ${err.message}`); }
     });
 
     $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () => runSequence(ALL.map((a) => ({ speaker: a, mode: b.dataset.round })))));

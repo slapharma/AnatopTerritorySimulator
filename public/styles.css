@@ -215,11 +215,13 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .src .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .src .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); margin-left: 4px; }
 .src .kind.cited { background: var(--verified-bg); color: var(--verified-fg); }
-.dis { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.dis { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer; border-radius: 6px; }
+.dis:hover { background: var(--surface-2); }
 .dis .topic { font-weight: 700; display: flex; align-items: center; gap: 8px; }
-.dis .status { margin-left: auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; cursor: pointer; border: 1px solid transparent; }
-.dis .status.unresolved { background: var(--estimate-bg); color: var(--estimate-fg); }
-.dis .status.resolved { background: var(--verified-bg); color: var(--verified-fg); }
+.status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; cursor: pointer; border: 1px solid transparent; }
+.dis .status { margin-left: auto; }
+.status.unresolved { background: var(--estimate-bg); color: var(--estimate-fg); }
+.status.resolved { background: var(--verified-bg); color: var(--verified-fg); }
 .dis .body { margin-top: 6px; font-size: 12px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
 .dis-row { padding: 5px 8px; border-radius: 6px; background: var(--surface-2); }
 .dis-row.dis-status-row { background: none; padding: 2px 0 0; }
@@ -244,6 +246,9 @@ dialog::backdrop { background: rgba(15, 23, 42, .35); }
 .agent-picks { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; display: flex; gap: 16px; }
 .agent-picks legend { font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 0 4px; }
 .agent-picks label { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; color: var(--text); cursor: pointer; }
+#dis-modal-status { align-self: flex-start; }
+.dis-modal-body { display: flex; flex-direction: column; gap: 5px; max-height: 300px; overflow-y: auto; }
+#dis-modal-back { align-self: flex-start; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 50; box-shadow: var(--shadow); }

@@ -440,19 +440,48 @@
     box.innerHTML = '';
     for (const d of s.disagreements) {
       const el = document.createElement('div'); el.className = 'dis';
-      const rows = parseDisagreementBody(d.body);
-      const rowsHtml = (rows.length ? rows : [{ label: '', text: d.body }])
-        .map((r) => `<div class="dis-row${/status/i.test(r.label) ? ' dis-status-row' : ''}">${r.label ? `<span class="dis-label">${escapeHtml(r.label)}</span>` : ''}<span class="dis-text">${escapeHtml(r.text)}</span></div>`)
-        .join('');
-      const backlink = d.message_id ? `<a href="#msg-${d.message_id}" class="dis-back">↑ view in message</a>` : '';
-      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${rowsHtml}</div>${backlink}`;
-      $('.status', el).addEventListener('click', async () => {
+      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${disRowsHtml(d)}</div>`;
+      $('.status', el).addEventListener('click', async (e) => {
+        e.stopPropagation();
         const next = d.status === 'resolved' ? 'unresolved' : 'resolved';
         state.session.disagreements = await api.send('PATCH', `/api/sessions/${s.id}/disagreements/${d.n}`, { status: next });
         renderDisagreements();
       });
+      el.addEventListener('click', () => openDisagreementModal(d));
       box.appendChild(el);
     }
+  }
+
+  function disRowsHtml(d) {
+    const rows = parseDisagreementBody(d.body);
+    return (rows.length ? rows : [{ label: '', text: d.body }])
+      .map((r) => `<div class="dis-row${/status/i.test(r.label) ? ' dis-status-row' : ''}">${r.label ? `<span class="dis-label">${escapeHtml(r.label)}</span>` : ''}<span class="dis-text">${escapeHtml(r.text)}</span></div>`)
+      .join('');
+  }
+
+  // Clicking a disagreement card opens the full detail, with the option to ask
+  // any subset of agents to weigh in on it directly (posts as a custom round).
+  function openDisagreementModal(d) {
+    const s = state.session;
+    $('#dis-modal-title').textContent = `#${d.n} ${d.topic}`;
+    const statusBtn = $('#dis-modal-status');
+    statusBtn.className = `status ${d.status}`;
+    statusBtn.textContent = d.status.toUpperCase();
+    statusBtn.onclick = async () => {
+      const next = d.status === 'resolved' ? 'unresolved' : 'resolved';
+      state.session.disagreements = await api.send('PATCH', `/api/sessions/${s.id}/disagreements/${d.n}`, { status: next });
+      renderDisagreements();
+      $('#dlg-disagreement').close();
+    };
+    $('#dis-modal-body').innerHTML = disRowsHtml(d);
+    const back = $('#dis-modal-back');
+    if (d.message_id) { back.href = `#msg-${d.message_id}`; back.hidden = false; back.onclick = () => $('#dlg-disagreement').close(); }
+    else back.hidden = true;
+    $$('#dlg-disagreement .agent-picks input').forEach((c) => { c.checked = false; });
+    $('#dis-modal-instruction').value = '';
+    const dlg = $('#dlg-disagreement');
+    dlg.dataset.n = d.n;
+    dlg.showModal();
   }
 
   function renderCost() {
@@ -642,6 +671,18 @@
         const picks = $$('#dlg-custom input[type=checkbox]:checked').map((c) => c.value);
         if (!instruction) { e.preventDefault(); return toast('Write an instruction first'); }
         if (!picks.length) { e.preventDefault(); return toast('Pick at least one agent'); }
+        setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
+      }
+    });
+
+    $('#dlg-disagreement form').addEventListener('submit', (e) => {
+      if (e.submitter && e.submitter.value === 'discuss') {
+        const picks = $$('#dlg-disagreement .agent-picks input:checked').map((c) => c.value);
+        if (!picks.length) { e.preventDefault(); return toast('Pick at least one agent'); }
+        const n = $('#dlg-disagreement').dataset.n;
+        const d = state.session.disagreements.find((x) => String(x.n) === n);
+        const note = $('#dis-modal-instruction').value.trim();
+        const instruction = `The moderator wants to discuss ⚠ DISAGREEMENT #${d.n} — ${d.topic} (see the full transcript above for both positions).${note ? ` ${note}` : ' State your current position and whether anything changes it.'}`;
         setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
       }
     });

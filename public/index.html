@@ -148,6 +148,27 @@
   </form>
 </dialog>
 
+<!-- Disagreement detail / discuss dialog -->
+<dialog id="dlg-disagreement">
+  <form method="dialog" class="dialog-form">
+    <h2 id="dis-modal-title">Disagreement</h2>
+    <button type="button" class="status" id="dis-modal-status" title="Click to toggle"></button>
+    <div id="dis-modal-body" class="dis-modal-body"></div>
+    <a href="#" id="dis-modal-back" class="dis-back">↑ view in message</a>
+    <fieldset class="agent-picks">
+      <legend>Ask for comment from</legend>
+      <label><input type="checkbox" value="regulatory"> Regulatory</label>
+      <label><input type="checkbox" value="clinical"> Clinical</label>
+      <label><input type="checkbox" value="commercial"> Commercial</label>
+    </fieldset>
+    <label>Your question or note (optional)<textarea id="dis-modal-instruction" rows="3" placeholder="e.g. What would it take to resolve this before Round 3?"></textarea></label>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Close</button>
+      <button value="discuss" class="btn btn-primary" type="submit" id="btn-dis-discuss">Ask selected agents</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="/vendor/marked.js"></script>
 <script src="/app.js"></script>
 </body>

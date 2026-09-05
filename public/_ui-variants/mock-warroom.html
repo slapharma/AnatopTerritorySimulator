@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>War Room tabs mock</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; background: var(--surface); }
+  .panel { position: static; height: auto; width: 340px; transform: none; box-shadow: none; border-left: none; border: 1px solid var(--border); }
+  /* fix=1 applies this override; kept as a separate rule so "before" is untouched real CSS */
+  .fixed .tabs { flex-wrap: wrap; overflow-x: visible; }
+  .fixed .tab { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<aside class="panel open" id="panel">
+  <div class="panel-head">
+    <span class="panel-title">War Room</span>
+    <button type="button" class="panel-close">✕</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" type="button">Sources <span class="count">3</span></button>
+    <button class="tab" type="button">Disagreements <span class="count">2</span></button>
+    <button class="tab" type="button">Cost</button>
+    <button class="tab" type="button">Minutes <span class="count">2</span></button>
+    <button class="tab" type="button">Intelligence</button>
+  </div>
+  <div class="tab-body">
+    <div class="src"><span class="n">[1]</span> mfds.go.kr — generic topical approval guidance</div>
+    <div class="src"><span class="n">[2]</span> Comparable topical generic BE precedent bulletin</div>
+    <div class="src"><span class="n">[3]</span> NHIS reimbursement formula, generic listings</div>
+  </div>
+</aside>
+<script>
+  if (new URLSearchParams(location.search).get('fix') === '1') {
+    document.getElementById('panel').classList.add('fixed');
+  }
+</script>
+</body>
+</html>

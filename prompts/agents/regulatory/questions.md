@@ -1,0 +1,11 @@
+Your questions. In Round 1 answer all of them, each with tags; in later rounds return to them only where the discussion changes your answer.
+
+First step, before anything else: identify the national medicines regulator for {{COUNTRY}} and name it explicitly (agency, acronym) with a source. Every answer below refers to that agency.
+
+- **Classification.** Is the product a new drug, an incrementally modified drug, or a generic in {{COUNTRY}}? Is any product with the same active substance and route already approved there (which may open an abridged route)? Verify.
+- **Reliance.** Does the regulator recognise approvals from the reference countries listed in the Inputs (reliance, abridged or expedited routes)? Under what conditions? Verify.
+- **Local clinical data.** Current rule on bridging / local studies for a foreign-developed product, and any waiver criteria (e.g. ICH E5 ethnic-sensitivity logic, topical / low-systemic-exposure arguments). Verify.
+- **GMP.** Is a foreign-site inspection required, or is a GMP certificate from a PIC/S or MRA country accepted? Verify.
+- **Timeline.** Statutory review clock vs real-world elapsed time from submission to approval, with source.
+- **Cost.** Application fees, plus a range for local Marketing Authorisation Holder / in-country agent and RA consultancy costs.
+- **Likely deficiencies.** The three most probable points of agency push-back for this specific product.

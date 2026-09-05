@@ -21,6 +21,14 @@
   .add-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 12px; color: var(--text-2); }
   .add-form input[type=email], .add-form input[type=password] { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; min-width: 220px; }
   .denied { padding: 40px 0; text-align: center; color: var(--text-2); }
+  .section-gap { margin-top: 40px; }
+  .kb-note { color: var(--text-2); }
+  .kb-sensitive { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #fee2e2; color: #991b1b; }
+  .add-form textarea, .add-form input[type=text], .add-form input[type=url] { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
+  .add-form input[type=text].title-input, .add-form input[type=url] { min-width: 240px; }
+  .add-form select { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
+  td.kb-title { max-width: 240px; }
+  td.kb-note { max-width: 320px; color: var(--text-2); font-size: 12.5px; }
 </style>
 </head>
 <body>
@@ -29,6 +37,12 @@
   <h1>Admin — Users</h1>
   <p class="lede">Anyone listed here can log in with their email and password. Admins can also manage users and edit agent profiles.</p>
   <div id="content">Loading…</div>
+
+  <div class="section-gap">
+    <h1>Knowledgebase</h1>
+    <p class="lede">Curated internal reference documents (Drive links) that the Regulatory, Clinical and Commercial agents are told about at the start of every turn. Everyone can view; admins can add, edit and delete.</p>
+    <div id="kb-content">Loading…</div>
+  </div>
 </div>
 <script>
 (() => {
@@ -114,10 +128,95 @@
     });
   }
 
+  async function renderKnowledge(isAdmin) {
+    const items = await api('GET', '/api/knowledge');
+    const kb = $('#kb-content');
+    const categories = [...new Set(items.map((i) => i.category))];
+    const actionsHead = isAdmin ? '<th></th>' : '';
+    kb.innerHTML = `
+      <table>
+        <tr><th>Category</th><th>Title</th><th>Note</th><th></th>${actionsHead}</tr>
+        ${items.map((i) => `
+          <tr data-id="${i.id}">
+            <td>${escapeHtml(i.category)}</td>
+            <td class="kb-title"><a href="${escapeHtml(i.url)}" target="_blank" rel="noopener">${escapeHtml(i.title)}</a></td>
+            <td class="kb-note">${escapeHtml(i.note || '')}</td>
+            <td>${i.sensitive ? '<span class="kb-sensitive">SENSITIVE</span>' : ''}</td>
+            ${isAdmin ? `<td class="row-actions">
+              <button type="button" class="btn btn-sm edit-kb">Edit</button>
+              <button type="button" class="btn btn-sm btn-danger-ghost remove-kb">Delete</button>
+            </td>` : ''}
+          </tr>`).join('')}
+      </table>
+      ${isAdmin ? `
+      <div class="add-form">
+        <h2>Add a knowledgebase item</h2>
+        <form id="add-kb-form">
+          <div class="row">
+            <label>Category<input type="text" id="kb-category" class="title-input" list="kb-categories" required></label>
+            <datalist id="kb-categories">${categories.map((c) => `<option value="${escapeHtml(c)}">`).join('')}</datalist>
+            <label>Title<input type="text" id="kb-title" class="title-input" required></label>
+            <label>URL<input type="url" id="kb-url" required></label>
+            <label>Note<input type="text" id="kb-note-input" class="title-input"></label>
+            <label><input type="checkbox" id="kb-sensitive"> Sensitive</label>
+            <button type="submit" class="btn btn-primary">Add item</button>
+          </div>
+        </form>
+      </div>` : ''}`;
+
+    if (!isAdmin) return;
+
+    for (const tr of kb.querySelectorAll('tr[data-id]')) {
+      const id = tr.dataset.id;
+      const item = items.find((i) => String(i.id) === id);
+      tr.querySelector('.edit-kb').addEventListener('click', async () => {
+        const category = prompt('Category:', item.category);
+        if (category === null) return;
+        const title = prompt('Title:', item.title);
+        if (title === null) return;
+        const url = prompt('URL:', item.url);
+        if (url === null) return;
+        const note = prompt('Note:', item.note || '');
+        if (note === null) return;
+        const sensitive = confirm('Mark as sensitive (commercially sensitive — pricing/royalties/deal terms)? OK = yes, Cancel = no.');
+        try {
+          await api('PATCH', `/api/knowledge/${id}`, { category, title, url, note, sensitive });
+          toast('Updated.');
+          renderKnowledge(isAdmin);
+        } catch (e) { toast(e.message); }
+      });
+      tr.querySelector('.remove-kb').addEventListener('click', async () => {
+        if (!confirm(`Delete "${item.title}" from the knowledgebase?`)) return;
+        try { await api('DELETE', `/api/knowledge/${id}`); toast('Deleted.'); renderKnowledge(isAdmin); }
+        catch (e) { toast(e.message); }
+      });
+    }
+
+    $('#add-kb-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('POST', '/api/knowledge', {
+          category: $('#kb-category').value.trim(),
+          title: $('#kb-title').value.trim(),
+          url: $('#kb-url').value.trim(),
+          note: $('#kb-note-input').value.trim(),
+          sensitive: $('#kb-sensitive').checked,
+        });
+        toast('Item added.');
+        renderKnowledge(isAdmin);
+      } catch (err) { toast(err.message); }
+    });
+  }
+
   async function init() {
     const me = await api('GET', '/api/me').catch(() => ({ authenticated: false }));
-    if (!me.is_admin) { $('#content').innerHTML = '<div class="denied">Admin access required.</div>'; return; }
+    if (!me.is_admin) {
+      $('#content').innerHTML = '<div class="denied">Admin access required.</div>';
+      renderKnowledge(false).catch((e) => { $('#kb-content').innerHTML = `<div class="denied">${escapeHtml(e.message)}</div>`; });
+      return;
+    }
     render();
+    renderKnowledge(true);
   }
   init();
 })();

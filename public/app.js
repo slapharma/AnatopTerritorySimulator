@@ -4,7 +4,7 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0 };
+  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, intelCut: 'agent' };
 
   // ---------------- API ----------------
   const api = {
@@ -18,7 +18,7 @@
 
   // ---------------- helpers ----------------
   const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)' };
-  const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
+  const MODE_LABEL = { opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom meeting', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
   // Modes where all three agents answer independently within the round — laid
   // out as a 3-column grid instead of stacked, both live and on reload.
   const GRID_MODES = ['opening', 'round2', 'round3', 'crosstalk'];
@@ -61,6 +61,9 @@
   // Markdown -> HTML, then decorate badges, citations, question blocks and disagreement blocks.
   function renderMarkdown(text) {
     let html = window.marked ? marked.parse(normalizeSpacing(text) || '', { breaks: true, gfm: true }) : `<p>${escapeHtml(text)}</p>`;
+    // Agent/human message text is rendered as Markdown -> raw HTML; sanitize
+    // before it ever touches innerHTML (marked itself does not sanitize).
+    if (window.DOMPurify) html = DOMPurify.sanitize(html);
     html = html.replace(/\[(VERIFIED|ESTIMATE|UNKNOWN)\b\s*(?:&#8212;|—|–|:|-)?\s*([^\]]*)\]/g, (m, tag, detail) => {
       const d = detail.trim();
       return `<span class="badge badge-${tag.toLowerCase()}" title="${escapeHtml(d.replace(/<[^>]+>/g, ''))}">${tag}${d ? ` <span class="d">${d}</span>` : ''}</span>`;
@@ -68,8 +71,14 @@
     const max = state.session ? state.session.sources.length : 0;
     html = html.replace(/\[(\d{1,3})\]/g, (m, n) => (Number(n) >= 1 && Number(n) <= max ? `<a class="cite" href="#src-${n}" data-src="${n}" title="Source ${n}">[${n}]</a>` : m));
     // Closing-block labels required by FORMATTING RULES (Next step / Question / Consideration / Conclusion).
-    html = html.replace(/<p>(\s*)<strong>(Next step|Question|Consideration|Conclusion):<\/strong>/g,
-      (m, lead, label) => `<p>${lead}<span class="badge badge-endpoint badge-${label.toLowerCase().replace(/\s+/g, '')}">${label}</span>`);
+    // Tolerant of case drift and the colon landing inside or outside the bold —
+    // the model is prompted for an exact literal, but treating any deviation
+    // as "not a closing block" would just silently drop the badge, not fail loudly.
+    html = html.replace(/<p>(\s*)<strong>\s*(Next step|Question|Consideration|Conclusion)\s*:?\s*<\/strong>\s*:?/gi,
+      (m, lead, label) => {
+        const norm = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+        return `<p>${lead}<span class="badge badge-endpoint badge-${norm.toLowerCase().replace(/\s+/g, '')}">${norm}</span>`;
+      });
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     const root = tpl.content;
@@ -160,15 +169,15 @@
         control = `<div class="check-grid">${f.options.map((o) => `<label class="check-item"><input type="checkbox" value="${escapeHtml(o)}"> ${escapeHtml(o)}</label>`).join('')}</div>
           <input type="text" class="other-input" placeholder="Other companies (comma-separated)…">`;
       } else if (f.options) {
-        control = `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
+        control = `<select id="${id}" name="${f.key}"${f.required ? ' required' : ''}><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
       } else if (f.multiline) {
         control = `<textarea id="${id}" name="${f.key}"></textarea>`;
       } else {
         const listAttr = f.suggestions ? ` list="${id}-suggestions"` : '';
         const datalist = f.suggestions ? `<datalist id="${id}-suggestions">${f.suggestions.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>` : '';
-        control = `<input id="${id}" name="${f.key}" type="text"${listAttr}>${datalist}`;
+        control = `<input id="${id}" name="${f.key}" type="text"${f.required ? ' required' : ''}${listAttr}>${datalist}`;
       }
-      div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}</label>${saveDefault ? `<button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">💾 Save as default</button>` : ''}</div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
+      div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}${f.required ? ' <span class="required-star" title="Required">*</span>' : ''}</label>${saveDefault ? `<button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">Save as default</button>` : ''}</div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
     }
     if (saveDefault) {
@@ -241,15 +250,54 @@
   }
   function showSetup() {
     state.session = null;
+    $('#view-dashboard').hidden = true;
     $('#view-session').hidden = true;
     $('#view-setup').hidden = false;
     $$('.session-item').forEach((el) => el.classList.remove('active'));
+  }
+
+  function showDashboard() {
+    state.session = null;
+    $('#view-setup').hidden = true;
+    $('#view-session').hidden = true;
+    $('#view-dashboard').hidden = false;
+    $$('.session-item').forEach((el) => el.classList.remove('active'));
+    renderDashboard();
+  }
+
+  // Groups the flat session list by country into cards, newest-updated first
+  // within each group; countries themselves are ordered by most-recent activity.
+  function renderDashboard() {
+    const box = $('#dashboard-body');
+    if (!state.sessions.length) { box.innerHTML = '<div class="dashboard-empty">No sessions yet. Click "New session" to start one.</div>'; return; }
+    const byCountry = new Map();
+    for (const s of state.sessions) {
+      const country = s.country || 'Unspecified';
+      if (!byCountry.has(country)) byCountry.set(country, []);
+      byCountry.get(country).push(s);
+    }
+    const countries = [...byCountry.keys()].sort((a, b) => {
+      const ta = Math.max(...byCountry.get(a).map((s) => new Date(s.updated_at).getTime() || 0));
+      const tb = Math.max(...byCountry.get(b).map((s) => new Date(s.updated_at).getTime() || 0));
+      return tb - ta;
+    });
+    box.innerHTML = countries.map((country) => {
+      const sessions = byCountry.get(country);
+      const cards = sessions.map((s) => `
+        <button type="button" class="dashboard-card" data-id="${s.id}">
+          <div class="t">${escapeHtml(s.title)}</div>
+          <div class="m"><span>${escapeHtml(s.product || 'Product: INPUT MISSING')}</span><span>${fmtTime(s.updated_at)}</span><span>${s.message_count} msgs</span>${s.has_decision ? '<span>✓ decision</span>' : ''}</div>
+        </button>`).join('');
+      return `<div class="dashboard-country"><div class="dashboard-country-head"><h2>${escapeHtml(country)}</h2><span class="count">${sessions.length}</span></div><div class="dashboard-grid">${cards}</div></div>`;
+    }).join('');
+    box.querySelectorAll('.dashboard-card').forEach((c) => c.addEventListener('click', () => openSession(Number(c.dataset.id))));
   }
 
   // ---------------- session view ----------------
   async function openSession(id) {
     state.session = await api.get(`/api/sessions/${id}`);
     state.sessionActiveMs = 0; // per-tab stopwatch; not persisted, resets when (re)opening a session
+    $('#view-dashboard').hidden = true;
     $('#view-setup').hidden = true;
     $('#view-session').hidden = false;
     renderSession();
@@ -270,11 +318,25 @@
     $('#inputs-summary-label').textContent = `Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING`;
     fillForm($('#session-inputs-form'), s.inputs, { clear: true });
     // transcript
+    renderDecisionBanner();
     renderTranscript();
-    renderSources(); renderDisagreements(); renderCost();
+    renderSources(); renderDisagreements(); renderCost(); renderMinutes(); renderIntelligence();
+    renderMeetingNav();
     setRunning(state.running);
     const t = $('#transcript');
     t.scrollTop = t.scrollHeight;
+  }
+
+  // Pinned above the transcript once a decision exists — the recommendation is
+  // the single most important thing in the session and should not require
+  // scrolling past the full multi-round debate to find.
+  function renderDecisionBanner() {
+    const el = $('#decision-banner');
+    const text = state.session.decision_text;
+    if (!text) { el.hidden = true; return; }
+    el.hidden = false;
+    const body = $('#decision-banner-body');
+    body.replaceChildren(renderMarkdown(text));
   }
 
   // extraMs: the running turn's not-yet-committed elapsed time, added on top of
@@ -287,10 +349,15 @@
   function renderModelSelect() {
     const sel = $('#model-select');
     const current = state.session.model || state.config.model;
-    const opts = state.config.model_options.some((o) => o.id === current)
-      ? state.config.model_options
-      : [{ id: current, label: current }, ...state.config.model_options]; // keep a legacy/unlisted model selectable
-    sel.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+    const isAdmin = Boolean(state.me && state.me.is_admin);
+    // Paid models cost real spend with no per-user budget anywhere — offering
+    // them to a non-admin would just earn a 403 from the server on save, so
+    // don't show them as choices in the first place. The currently selected
+    // model always stays visible/selected even if it's paid and the viewer
+    // isn't an admin, so the dropdown never silently misrepresents state.
+    const opts = state.config.model_options.filter((o) => o.free !== false || o.id === current || isAdmin);
+    const known = opts.some((o) => o.id === current) ? opts : [{ id: current, label: current }, ...opts]; // keep a legacy/unlisted model selectable
+    sel.innerHTML = known.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
   }
 
   // Speaker filter (chips above the transcript) + round/mode dividers, so a long
@@ -299,7 +366,7 @@
     const s = state.session;
     const t = $('#transcript');
     t.innerHTML = '';
-    if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Round 1 to start.</div>'; return; }
+    if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Baselines to start.</div>'; return; }
     let lastMode = null;
     let i = 0;
     while (i < s.messages.length) {
@@ -358,7 +425,7 @@
     el.dataset.speaker = speaker;
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` → ${AGENT_LABEL[m.addressed_to]}` : '';
     const responseTime = m.duration_ms != null ? `⏱ ${fmtElapsed(m.duration_ms)}` : fmtTime(m.created_at);
-    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
+    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${escapeHtml(MODE_LABEL[m.mode] || m.mode)}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta msg-cost">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
     const favBtn = $('.fav-btn', el);
     favBtn.addEventListener('click', async () => {
       const next = !favBtn.classList.contains('on');
@@ -388,6 +455,23 @@
       });
       err.appendChild(retry);
       el.appendChild(err);
+    } else if (m.text === null || m.text === undefined) {
+      // A row with no text and no error is a turn that was mid-flight when this
+      // page loaded — on Vercel the server-side turn dies with the connection
+      // that started it, so this row will otherwise sit here forever looking
+      // like a blank response with no indication anything is wrong.
+      const pending = document.createElement('div'); pending.className = 'msg-error';
+      pending.innerHTML = '<span>This turn was still running when the page loaded, or the connection to it was interrupted. It will not resume on its own.</span>';
+      const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-sm'; retry.textContent = 'Retry';
+      retry.addEventListener('click', async () => {
+        if (state.running) return;
+        await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${m.id}`);
+        state.session.messages = state.session.messages.filter((x) => x.id !== m.id);
+        el.remove();
+        await runSequence([{ speaker: m.speaker, mode: m.mode }]);
+      });
+      pending.appendChild(retry);
+      el.appendChild(pending);
     } else {
       body.appendChild(renderMarkdown(m.text));
       linkAgentMentions(body, m);
@@ -413,7 +497,11 @@
           await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${m.id}`);
           state.session.messages = state.session.messages.filter((x) => x.id !== m.id);
           el.remove();
-          await runSequence([{ speaker: m.speaker, mode: m.mode }]);
+          // dive_deeper's instruction isn't stored on the message row, but it's
+          // always this same deterministic template (see the Dive Deeper button
+          // below) — reconstruct it so regenerate doesn't silently drop it.
+          const instruction = m.mode === 'dive_deeper' ? `Expand your response #${m.seq} above.` : undefined;
+          await runSequence([{ speaker: m.speaker, mode: m.mode, instruction }]);
         });
         el.appendChild(regen);
       }
@@ -432,16 +520,30 @@
     return el;
   }
 
+  function sourceRowHtml(src) {
+    const by = [...new Set(src.cited_by.map((c) => AGENT_LABEL[c.speaker] || c.speaker))].join(', ');
+    const backlink = src.first_message_id ? ` · <a href="#msg-${src.first_message_id}" class="src-back" data-msg="${src.first_message_id}">↑ view in message</a>` : '';
+    return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${src.kind}">${src.kind === 'cited' ? 'cited' : 'searched'}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}${backlink}</div></div>`;
+  }
+
   function renderSources() {
     const s = state.session;
-    $('#count-sources').textContent = s.sources.length;
+    $('#count-sources').textContent = s.sources.filter((src) => src.kind === 'cited').length;
     const box = $('#tab-sources');
     if (!s.sources.length) { box.innerHTML = '<div class="empty">No sources yet. Every URL the agents search or cite appears here, numbered.</div>'; return; }
-    box.innerHTML = s.sources.map((src) => {
-      const by = [...new Set(src.cited_by.map((c) => AGENT_LABEL[c.speaker] || c.speaker))].join(', ');
-      const backlink = src.first_message_id ? ` · <a href="#msg-${src.first_message_id}" class="src-back" data-msg="${src.first_message_id}">↑ view in message</a>` : '';
-      return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${src.kind}">${src.kind === 'cited' ? 'cited' : 'searched'}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}${backlink}</div></div>`;
-    }).join('');
+    // Default to cited sources only — a research turn can search a dozen pages
+    // and cite two; listing every search result as if it were evidence used
+    // buries the sources actually backing the claims. The rest stay one click away.
+    const cited = s.sources.filter((src) => src.kind === 'cited');
+    const searchedOnly = s.sources.filter((src) => src.kind !== 'cited');
+    const citedHtml = cited.length ? cited.map(sourceRowHtml).join('') : '<div class="empty">No sources have been cited in a claim yet.</div>';
+    const toggleHtml = searchedOnly.length
+      ? `<button type="button" class="btn btn-sm" id="btn-toggle-searched">${state.showAllSources ? 'Hide' : 'Show'} ${searchedOnly.length} more searched but not cited</button>`
+      : '';
+    const searchedHtml = state.showAllSources ? searchedOnly.map(sourceRowHtml).join('') : '';
+    box.innerHTML = citedHtml + toggleHtml + searchedHtml;
+    const toggleBtn = $('#btn-toggle-searched', box);
+    if (toggleBtn) toggleBtn.addEventListener('click', () => { state.showAllSources = !state.showAllSources; renderSources(); });
   }
 
   // Splits the stored ⚠ DISAGREEMENT block into its fixed rows (Position A/B,
@@ -468,7 +570,7 @@
     if (!s.disagreements.length) { box.innerHTML = '<div class="empty">No disagreements logged. Agents mark genuine disputes with ⚠ DISAGREEMENT; they appear here with a status you can toggle.</div>'; return; }
     box.innerHTML = '';
     for (const d of s.disagreements) {
-      const el = document.createElement('div'); el.className = 'dis';
+      const el = document.createElement('div'); el.className = 'dis'; el.id = `dis-${d.n}`;
       el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${disRowsHtml(d)}</div>`;
       $('.status', el).addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -540,6 +642,95 @@
     <p class="muted" style="margin-top:10px">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check the Anthropic console for billing.</p>`;
   }
 
+  // Marks each meeting-nav pill as "ran" once at least one message exists for its mode.
+  function renderMeetingNav() {
+    const s = state.session;
+    $$('#toolbar [data-round]').forEach((b) => {
+      b.classList.toggle('ran', s.messages.some((m) => m.mode === b.dataset.round));
+    });
+  }
+
+  function renderMinutes() {
+    const s = state.session;
+    const list = s.meeting_minutes || [];
+    $('#count-minutes').textContent = list.length;
+    const box = $('#tab-minutes');
+    if (!list.length) { box.innerHTML = '<div class="empty">No meeting minutes yet. They\'re written automatically once a meeting (Baselines/Challenge/Converge/Cross-talk) finishes.</div>'; return; }
+    box.innerHTML = list.map((mm) => `
+      <div class="minutes-card">
+        <div class="minutes-head">
+          <span class="label">${escapeHtml(mm.label)}</span>
+          <span class="spacer"></span>
+          <span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending approval'}</span>
+        </div>
+        <div class="minutes-body"></div>
+        ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ view meeting</a>` : ''}
+      </div>`).join('');
+    $$('#tab-minutes .minutes-card').forEach((el, i) => { $('.minutes-body', el).replaceChildren(renderMarkdown(list[i].text)); });
+  }
+
+  // Client-only "cuts" through the transcript already in state.session — no server call.
+  function renderIntelligence() {
+    const box = $('#tab-intelligence');
+    box.innerHTML = `<div class="intel-cuts">
+        <button type="button" class="chip${state.intelCut === 'agent' ? ' active' : ''}" data-cut="agent">By Agent</button>
+        <button type="button" class="chip${state.intelCut === 'meeting' ? ' active' : ''}" data-cut="meeting">By Meeting</button>
+        <button type="button" class="chip${state.intelCut === 'disagreement' ? ' active' : ''}" data-cut="disagreement">By Disagreement</button>
+        <button type="button" class="chip${state.intelCut === 'resolution' ? ' active' : ''}" data-cut="resolution">By Resolution</button>
+      </div>
+      <div id="intel-body"></div>`;
+    $$('.intel-cuts .chip', box).forEach((c) => c.addEventListener('click', () => { state.intelCut = c.dataset.cut; renderIntelligence(); }));
+    renderIntelligenceBody($('#intel-body', box));
+  }
+
+  function intelRow(href, title, meta) {
+    return `<div class="intel-row"><a href="${href}">${escapeHtml(title)}</a><span class="muted">${escapeHtml(meta || '')}</span></div>`;
+  }
+
+  function renderIntelligenceBody(body) {
+    const s = state.session;
+    if (state.intelCut === 'agent') {
+      const groups = ['regulatory', 'clinical', 'commercial', 'moderator', 'user'].map((sp) => ({
+        key: sp, label: AGENT_LABEL[sp], rows: s.messages.filter((m) => (m.role === 'user' ? 'user' : m.speaker) === sp && !m.error),
+      })).filter((g) => g.rows.length);
+      body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelRow(`#msg-${m.id}`, `#${m.seq} · ${MODE_LABEL[m.mode] || m.mode || ''}`, fmtTime(m.created_at))).join('')}</div>`).join('')
+        : '<div class="empty">No messages yet.</div>';
+    } else if (state.intelCut === 'meeting') {
+      const modes = [...new Set(s.messages.filter((m) => m.mode).map((m) => m.mode))];
+      body.innerHTML = modes.length ? modes.map((mode) => {
+        const rows = s.messages.filter((m) => m.mode === mode && !m.error);
+        const mm = (s.meeting_minutes || []).find((x) => x.round === mode);
+        return `<div class="intel-group"><h4>${escapeHtml(MODE_LABEL[mode] || mode)}${mm ? ' · minutes ✓' : ''}</h4>${rows.map((m) => intelRow(`#msg-${m.id}`, `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker]} #${m.seq}`, fmtTime(m.created_at))).join('')}</div>`;
+      }).join('') : '<div class="empty">No meetings run yet.</div>';
+    } else if (state.intelCut === 'disagreement') {
+      body.innerHTML = s.disagreements.length ? s.disagreements.map((d) => intelRow(`#dis-${d.n}`, `#${d.n} ${d.topic}`, d.status.toUpperCase())).join('')
+        : '<div class="empty">No disagreements logged.</div>';
+    } else {
+      const resolved = s.disagreements.filter((d) => d.status === 'resolved');
+      const unresolved = s.disagreements.filter((d) => d.status !== 'resolved');
+      body.innerHTML = s.disagreements.length ? `
+        <div class="intel-group"><h4>Unresolved (${unresolved.length})</h4>${unresolved.map((d) => intelRow(`#dis-${d.n}`, `#${d.n} ${d.topic}`, '')).join('') || '<div class="empty">None.</div>'}</div>
+        <div class="intel-group"><h4>Resolved (${resolved.length})</h4>${resolved.map((d) => intelRow(`#dis-${d.n}`, `#${d.n} ${d.topic}`, '')).join('') || '<div class="empty">None.</div>'}</div>`
+        : '<div class="empty">No disagreements logged.</div>';
+    }
+  }
+
+  // Sends { round, label, anchor_message_id } to the moderator; the response is
+  // pushed into state.session.meeting_minutes and the Minutes tab re-rendered.
+  // Fire-and-forget from the caller's point of view — failures just toast.
+  async function generateMeetingMinutes(mode) {
+    const anchor = state.session.messages.find((m) => m.mode === mode);
+    try {
+      toast(`Writing meeting minutes for ${MODE_LABEL[mode] || mode}…`);
+      const row = await api.send('POST', `/api/sessions/${state.session.id}/meeting-minutes`, {
+        round: mode, label: MODE_LABEL[mode] || mode, anchor_message_id: anchor ? anchor.id : null,
+      });
+      state.session.meeting_minutes = [...(state.session.meeting_minutes || []), row];
+      renderMinutes(); renderIntelligence();
+      toast('Meeting minutes ready');
+    } catch (e) { toast(`Could not write meeting minutes: ${e.message}`); }
+  }
+
   function setRunning(on) {
     state.running = on;
     $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (b.id !== 'btn-stop') b.disabled = on; });
@@ -558,7 +749,7 @@
       const appendTarget = container || t;
       const el = document.createElement('article');
       el.className = `msg msg-${speaker}`;
-      el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${MODE_LABEL[mode] || mode}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
+      el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${escapeHtml(MODE_LABEL[mode] || mode)}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
       appendTarget.appendChild(el);
       const body = $('.msg-body', el); const statusEl = $('.msg-status .txt', el); const searchesEl = $('.msg-searches', el);
       const turnTimerEl = $('.msg-status .turn-timer', el);
@@ -626,7 +817,7 @@
             else if (name === 'text') { raw += data.delta; paint(false); }
             else if (name === 'done') {
               state.session.messages.push(data.message); state.session.sources = data.sources; state.session.disagreements = data.disagreements;
-              if (data.message.mode === 'decision') state.session.decision_text = data.message.text;
+              if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionBanner(); }
               renderSources(); renderDisagreements(); renderCost();
               if (data.new_disagreements.length) toast(`${data.new_disagreements.length} disagreement(s) logged`);
               done = true;
@@ -641,6 +832,13 @@
         return finish(false, e.message || String(e));
       }
     });
+  }
+
+  // Agents in `agents` that don't already have a successful (non-error) response
+  // for this round — what re-clicking the round button should actually run.
+  function turnsForRound(mode, agents) {
+    const done = new Set(state.session.messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error).map((m) => m.speaker));
+    return agents.filter((a) => !done.has(a));
   }
 
   async function runSequence(turns) {
@@ -664,11 +862,15 @@
         t.appendChild(grid);
         t.scrollTop = t.scrollHeight;
       }
+      let allOk = true;
       for (const turn of turns) {
-        if (state.stopRequested) { toast('Stopped'); break; }
+        if (state.stopRequested) { toast('Stopped'); allOk = false; break; }
         const ok = await runTurn(turn, cols ? cols[turn.speaker] : undefined);
-        if (!ok) break; // leave the retry button in place; don't cascade failures
+        if (!ok) { allOk = false; break; } // leave the retry button in place; don't cascade failures
       }
+      // Meeting minutes only for the four standard meetings run as a full trio —
+      // not for custom rounds, replies, or dive-deeper follow-ups.
+      if (allOk && gridEligible && turns[0].mode !== 'custom') generateMeetingMinutes(turns[0].mode);
     } finally {
       setRunning(false);
       loadSessions();
@@ -700,6 +902,7 @@
       // the final render is consistent instead of racing on SSE arrival order.
       state.session = await api.get(`/api/sessions/${state.session.id}`);
       renderSession();
+      if (!state.stopRequested) generateMeetingMinutes('opening');
     } finally {
       setRunning(false);
       loadSessions();
@@ -714,14 +917,31 @@
     buildForm($('#setup-form'), { saveDefault: true });
     buildForm($('#session-inputs-form'), { saveDefault: false });
     const me = await api.get('/api/me').catch(() => ({ authenticated: false }));
+    state.me = me;
+    // Model picker, run-time stopwatch and $/£ cost meter are operational
+    // detail an admin cares about — for anyone here to read a launch
+    // recommendation they're pure header noise. Dev-bypass (me.authenticated
+    // false, no auth configured at all) is treated as admin, same as every
+    // server-side admin gate in this app (auth.js noAuthConfigured()).
+    document.body.classList.toggle('non-admin', Boolean(me.authenticated) && !me.is_admin);
     const links = [
       '<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a>',
       '<a href="/agents.html" target="_blank" rel="noopener">Agents ↗</a>',
       me.is_admin ? '<a href="/admin.html" target="_blank" rel="noopener">Admin ↗</a>' : '',
     ].filter(Boolean).join(' · ');
-    $('#sidebar-foot').innerHTML = `${links}<br>Model <code>${escapeHtml(state.config.model)}</code>${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
+    const modelLine = document.body.classList.contains('non-admin') ? '' : `<br>Model <code>${escapeHtml(state.config.model)}</code>`;
+    $('#sidebar-foot').innerHTML = `${links}${modelLine}${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
     await loadSessions();
-    if (state.sessions.length) await openSession(state.sessions[0].id);
+    // Deep link from a meeting-minutes email (?session=<id>); otherwise land on
+    // the dashboard rather than silently reopening whatever session was last used.
+    const params = new URLSearchParams(location.search);
+    const linkedId = Number(params.get('session'));
+    if (linkedId && state.sessions.some((s) => s.id === linkedId)) {
+      await openSession(linkedId);
+      if (params.get('approved')) toast(`Meeting approved: ${MODE_LABEL[params.get('approved')] || params.get('approved')}`);
+    } else {
+      showDashboard();
+    }
 
     $('#btn-new').addEventListener('click', showSetup);
     $('#btn-load-korea').addEventListener('click', async () => {
@@ -734,7 +954,10 @@
     $('#setup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!state.config.has_api_key) return toast('No API key set. Add ANTHROPIC_API_KEY to .env and restart the server.', 5000);
-      const inputs = readForm($('#setup-form'));
+      const form = e.target;
+      if (!form.reportValidity()) return; // native tooltip on the first missing required field
+      const inputs = readForm(form);
+      if (!(inputs.product || '').trim() || !(inputs.country || '').trim()) return toast('PRODUCT and COUNTRY are required to start a session.');
       const created = await api.send('POST', '/api/sessions', { inputs });
       await openSession(created.id);
       await runRound1Parallel();
@@ -750,13 +973,38 @@
       } catch (err) { toast(`Could not save inputs: ${err.message}`); }
     });
 
-    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () =>
-      b.dataset.round === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode: b.dataset.round })))));
+    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () => {
+      const mode = b.dataset.round;
+      // Mirrors the server's round-order check (src/app.js) so a premature
+      // click gets one clear toast instead of three separate "Turn failed"
+      // messages, one per agent.
+      const seqIdx = GRID_MODES.indexOf(mode);
+      for (let i = 0; i < seqIdx; i++) {
+        const prior = GRID_MODES[i];
+        const done = new Set(state.session.messages.filter((m) => m.mode === prior && m.role === 'agent' && !m.error).map((m) => m.speaker));
+        if (ALL.some((a) => !done.has(a))) return toast(`Run ${MODE_LABEL[prior] || prior} for all three agents before starting ${MODE_LABEL[mode] || mode}.`);
+      }
+      const pending = turnsForRound(mode, ALL);
+      if (pending.length === ALL.length) return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
+      if (!pending.length) {
+        if (!confirm(`${MODE_LABEL[mode] || mode} already has a response from every agent. Run it again? This adds new responses; it does not replace the old ones.`)) return;
+        return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
+      }
+      // A previous run of this round failed partway through — only run the
+      // agents that don't already have a response, instead of duplicating
+      // the ones that succeeded.
+      toast(`Resuming ${MODE_LABEL[mode] || mode}: ${pending.length} agent(s) haven't answered yet.`);
+      return runSequence(pending.map((a) => ({ speaker: a, mode })));
+    }));
     $('#btn-decision').addEventListener('click', () => {
       if (!state.session.messages.some((m) => m.role === 'agent' && !m.error)) return toast('Run at least one round first');
       runSequence([{ speaker: 'moderator', mode: 'decision' }]);
     });
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
+    $('#btn-decision-jump').addEventListener('click', () => {
+      const m = [...state.session.messages].reverse().find((x) => x.mode === 'decision');
+      if (m) $(`#msg-${m.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
@@ -803,8 +1051,10 @@
     });
     $('#btn-delete').addEventListener('click', async () => {
       if (!confirm(`Delete "${state.session.title}"? This cannot be undone.`)) return;
-      await api.send('DELETE', `/api/sessions/${state.session.id}`);
-      showSetup(); await loadSessions();
+      try {
+        await api.send('DELETE', `/api/sessions/${state.session.id}`);
+        showSetup(); await loadSessions();
+      } catch (err) { toast(`Could not delete session: ${err.message}`); }
     });
     $('#model-select').addEventListener('change', async (e) => {
       const model = e.target.value;
@@ -818,9 +1068,21 @@
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'cost'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'cost', 'minutes', 'intelligence'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
+
+    // War Room: floating pop-out panel toggle.
+    function setWarRoom(open) {
+      state.warRoomOpen = open;
+      $('#war-room').classList.toggle('open', open);
+    }
+    $('#btn-warroom').addEventListener('click', () => setWarRoom(!state.warRoomOpen));
+    $('#btn-warroom-close').addEventListener('click', () => setWarRoom(false));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.warRoomOpen) setWarRoom(false); });
+
+    $('#brand-home').addEventListener('click', showDashboard);
+    $('#btn-dashboard-new').addEventListener('click', showSetup);
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');
@@ -829,6 +1091,16 @@
       const target = $(`#src-${a.dataset.src}`);
       if (target) { target.scrollIntoView({ block: 'center' }); target.style.background = 'var(--primary-soft)'; setTimeout(() => (target.style.background = ''), 1500); }
       e.preventDefault();
+    });
+    // Intelligence tab: disagreement rows open the Disagreements tab's detail modal
+    // instead of anchor-scrolling into a hidden tab body.
+    $('#tab-intelligence').addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#dis-"]');
+      if (!a) return;
+      e.preventDefault();
+      const n = a.getAttribute('href').replace('#dis-', '');
+      const d = state.session.disagreements.find((x) => String(x.n) === n);
+      if (d) openDisagreementModal(d);
     });
   }
 

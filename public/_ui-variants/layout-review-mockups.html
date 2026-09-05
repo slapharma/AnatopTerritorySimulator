@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layout review — before/after mockups</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { max-width: 1000px; margin: 0 auto; padding: 32px 24px 80px; }
+  .rev-h1 { font-size: 20px; margin: 0 0 6px; }
+  .rev-lede { color: var(--text-2); margin: 0 0 32px; }
+  .finding { margin-bottom: 48px; }
+  .finding h2 { font-size: 15px; margin: 0 0 4px; }
+  .finding .sev { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); margin-right: 8px; vertical-align: middle; }
+  .finding .loc { font-family: Consolas, monospace; font-size: 12px; color: var(--muted); margin: 4px 0 14px; }
+  .ba-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .ba-col h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .ba-frame { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface-2); }
+  .ba-frame.before { box-shadow: 0 0 0 2px var(--danger-soft) inset; }
+  .ba-frame.after { box-shadow: 0 0 0 2px var(--verified-bg) inset; }
+  .ba-frame iframe { width: 100%; border: 0; display: block; background: var(--surface); }
+  .why { margin-top: 10px; font-size: 12.5px; color: var(--text-2); }
+  @media (max-width: 900px) { .ba-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1 class="rev-h1">Layout review — mockups</h1>
+<p class="rev-lede">Two verified HIGH findings from a live check against <code>/interfaces:better-layout</code>. Each frame below is the real chrome and real CSS — only the one rule named under "After" changed.</p>
+
+<div class="finding">
+  <h2><span class="sev">HIGH</span>War Room tabs: 2 of 5 hidden with no scroll cue</h2>
+  <div class="loc">public/styles.css:228 — .tabs { overflow-x: auto }</div>
+  <div class="ba-grid">
+    <div class="ba-col">
+      <h3>Before</h3>
+      <div class="ba-frame before"><iframe src="./mock-warroom.html?fix=0" height="200"></iframe></div>
+      <div class="why">Minutes and Intelligence are entirely off-screen at the panel's default 340px width. No fade, arrow, or partial-tab peek hints they exist — a viewer has to know to scroll a tab strip sideways to find them.</div>
+    </div>
+    <div class="ba-col">
+      <h3>After — <code>.tabs { flex-wrap: wrap }</code>, drop overflow-x</h3>
+      <div class="ba-frame after"><iframe src="./mock-warroom.html?fix=1" height="200"></iframe></div>
+      <div class="why">All 5 tabs visible at once, wrapped to a second row. No hidden content, no scrolling, same panel width.</div>
+    </div>
+  </div>
+</div>
+
+<div class="finding">
+  <h2><span class="sev">HIGH</span>Admin table: row actions clipped off-screen on mobile</h2>
+  <div class="loc">public/admin.html:17 — .row-actions { display: flex; gap: 8px } (no wrap, no scroll container)</div>
+  <div class="ba-grid">
+    <div class="ba-col">
+      <h3>Before, 375px viewport</h3>
+      <div class="ba-frame before"><iframe src="./mock-admin-table.html?fix=0" height="220"></iframe></div>
+      <div class="why">Three unwrapped buttons force the table wider than the viewport. The whole page scrolls horizontally to reach "Remove" — verified: last button's right edge lands past the visible viewport, page requires a horizontal scroll the layout gives no visual hint exists.</div>
+    </div>
+    <div class="ba-col">
+      <h3>After — <code>.row-actions { flex-wrap: wrap }</code></h3>
+      <div class="ba-frame after"><iframe src="./mock-admin-table.html?fix=1" height="220"></iframe></div>
+      <div class="why">Buttons wrap onto a second line inside their own cell. Table stays within the viewport, page doesn't scroll, every action reachable without hunting.</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

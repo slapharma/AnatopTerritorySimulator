@@ -23,12 +23,15 @@ module.exports = {
   // choice (sessions.model); a new session defaults to MODEL above. Paid options
   // are here for testing without free-tier rate limits — they cost real money per
   // OpenRouter's reported usage.cost, shown in the Cost tab as normal.
+  // `free: false` gates a model to admins only (src/app.js PATCH /sessions/:id)
+  // — otherwise any authenticated user could switch a session onto a paid
+  // model and run up real OpenRouter spend with no budget check anywhere.
   MODEL_OPTIONS: [
-    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free)' },
-    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)' },
-    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)' },
-    { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)' },
-    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (paid, cheapest — ~$0.02/$0.03 per M tok)' },
+    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free)', free: true },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)', free: true },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)', free: false },
+    { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)', free: false },
+    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (paid, cheapest — ~$0.02/$0.03 per M tok)', free: false },
   ],
 
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.
@@ -59,5 +62,9 @@ module.exports = {
   // Free models on OpenRouter are rate-limited (roughly 20 requests/min; a daily cap that is
   // higher once the account holds $10 of credit). Each tool exchange is one request.
   RETRY_ON_429: 4,
+  // A turn that hits this stops itself with a clear, catchable error instead of
+  // running until Vercel's 800s function cap kills it with no explanation and
+  // the message row stuck looking "in progress" forever.
+  TURN_TIMEOUT_MS: 750000,
   PORT: Number(process.env.PORT) || 3000,
 };

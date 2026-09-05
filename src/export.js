@@ -22,9 +22,27 @@ function speakerName(m) {
 }
 function speakerColour(m) { return COLOURS[m.role === 'user' ? 'user' : m.speaker] || COLOURS.moderator; }
 function modeLabel(mode) {
-  return { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output' }[mode] || mode || '';
+  return {
+    opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply',
+    custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper', meeting_minutes: 'Meeting minutes',
+  }[mode] || mode || '';
 }
 function sourceMap(s) { const m = new Map(); for (const src of s.sources) m.set(src.n, src); return m; }
+// node-postgres returns timestamptz columns as JS Date objects; a bare
+// template-literal interpolation stringifies with Date.toString() (local
+// time zone, no "UTC" in the format) — explicit and unambiguous instead.
+function fmtUTC(d) {
+  if (!d) return '';
+  const dt = d instanceof Date ? d : new Date(d);
+  return isNaN(dt) ? String(d) : `${dt.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+}
+// The model that generated a message lives in content_json, not as its own
+// column — parse it defensively since older rows or a failed turn may have
+// no content_json at all.
+function messageModel(m) {
+  if (!m.content_json) return null;
+  try { return JSON.parse(m.content_json).model || null; } catch { return null; }
+}
 
 // ============================ DOCX ============================
 function docxRuns(runs, base = {}) {
@@ -66,7 +84,7 @@ function docxBlocks(md) {
 }
 
 async function toDocx(s) {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, PageBreak, AlignmentType, ExternalHyperlink } = docx;
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, PageBreak, AlignmentType, ExternalHyperlink, TableOfContents, Footer, PageNumber } = docx;
   const date = new Date().toISOString().slice(0, 10);
   const smap = sourceMap(s);
   const children = [];
@@ -82,6 +100,23 @@ async function toDocx(s) {
     new Paragraph({ children: [new PageBreak()] }),
   );
 
+  // Table of contents — Word regenerates the page numbers itself on open
+  // (that's what `updateFields` on the Document below is for); this heading
+  // list is what makes a 10+ page board document navigable instead of a
+  // single unbroken scroll.
+  children.push(
+    new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Contents', font: FONT })] }),
+    new TableOfContents('Contents', { hyperlink: true, headingStyleRange: '1-2' }),
+    new Paragraph({ children: [new PageBreak()] }),
+  );
+
+  // Decision output — leads the document; this is the answer a board-level
+  // reader needs, not the last thing after the full transcript.
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Decision output', font: FONT })] }));
+  if (s.decision_text) children.push(...docxBlocks(s.decision_text));
+  else children.push(new Paragraph({ children: [new TextRun({ text: 'No decision output has been written for this session yet.', font: FONT, italics: true, color: COLOURS.muted })] }));
+  children.push(new Paragraph({ children: [new PageBreak()] }));
+
   // Inputs
   children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Inputs', font: FONT })] }));
   children.push(new Table({
@@ -93,38 +128,23 @@ async function toDocx(s) {
   }));
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
-  // Transcript
-  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Transcript', font: FONT })] }));
-  for (const m of s.messages) {
-    children.push(new Paragraph({
-      heading: HeadingLevel.HEADING_2, spacing: { before: 300 },
-      children: [new TextRun({ text: `${m.seq}. ${speakerName(m)}`, font: FONT, color: speakerColour(m) }),
-        new TextRun({ text: `   ${modeLabel(m.mode)} · ${m.created_at} UTC`, font: FONT, size: 18, color: COLOURS.muted, bold: false })],
-    }));
-    if (m.error) children.push(new Paragraph({ children: [new TextRun({ text: `Turn failed: ${m.error}`, italics: true, color: '991B1B', font: FONT })] }));
-    else children.push(...docxBlocks(m.text || ''));
-  }
-
   // Disagreements
-  children.push(new Paragraph({ children: [new PageBreak()] }));
   children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Disagreement log', font: FONT })] }));
   if (!s.disagreements.length) children.push(new Paragraph({ children: [new TextRun({ text: 'No disagreements were logged.', font: FONT, italics: true })] }));
   for (const d of s.disagreements) {
     children.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [new TextRun({ text: `#${d.n} ${d.topic}  —  ${d.status.toUpperCase()}`, font: FONT, color: d.status === 'resolved' ? COLOURS.verified : COLOURS.estimate })] }));
     children.push(...docxBlocks(d.body));
   }
-
-  // Decision
-  if (s.decision_text) {
-    children.push(new Paragraph({ children: [new PageBreak()] }));
-    children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Decision output', font: FONT })] }));
-    children.push(...docxBlocks(s.decision_text));
-  }
-
-  // Sources
   children.push(new Paragraph({ children: [new PageBreak()] }));
-  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Sources', font: FONT })] }));
-  for (const src of s.sources) {
+
+  // Verification — sources actually cited in a claim, not every page a search
+  // turned up. A research turn can open a dozen pages and cite two; listing
+  // all of them here would bury the ones the decision actually rests on.
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Verification', font: FONT })] }));
+  const citedSources = s.sources.filter((src) => src.kind === 'cited');
+  const searchedOnlyCount = s.sources.length - citedSources.length;
+  if (!citedSources.length) children.push(new Paragraph({ children: [new TextRun({ text: 'No sources have been cited in a claim yet.', font: FONT, italics: true, color: COLOURS.muted })] }));
+  for (const src of citedSources) {
     const by = src.cited_by.map((c) => prompts.AGENTS[c.speaker] ? prompts.AGENTS[c.speaker].label : c.speaker).filter((v, i, a) => a.indexOf(v) === i).join(', ');
     children.push(new Paragraph({
       spacing: { after: 80 },
@@ -132,15 +152,34 @@ async function toDocx(s) {
         new TextRun({ text: `[${src.n}] `, bold: true, font: FONT, size: 18 }),
         new TextRun({ text: `${src.title || src.url}  `, font: FONT, size: 18 }),
         new ExternalHyperlink({ children: [new TextRun({ text: src.url, style: 'Hyperlink', font: FONT, size: 16 })], link: src.url }),
-        new TextRun({ text: `  ·  ${src.kind === 'cited' ? 'cited' : 'search result'} · first ${src.first_cited_at} UTC · ${by}`, font: FONT, size: 16, color: COLOURS.muted }),
+        new TextRun({ text: `  ·  cited · first ${fmtUTC(src.first_cited_at)} · ${by}`, font: FONT, size: 16, color: COLOURS.muted }),
       ],
     }));
   }
+  if (searchedOnlyCount) children.push(new Paragraph({ children: [new TextRun({ text: `${searchedOnlyCount} additional page(s) were searched but not cited in any claim.`, font: FONT, italics: true, size: 16, color: COLOURS.muted })] }));
   void smap;
+
+  // Transcript — appendix. Everyone who needs the decision has it already;
+  // this is the working record for whoever wants to see how it was reached.
+  children.push(new Paragraph({ children: [new PageBreak()] }));
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Transcript (appendix)', font: FONT })] }));
+  for (const m of s.messages) {
+    const model = messageModel(m);
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_2, spacing: { before: 300 },
+      children: [new TextRun({ text: `${m.seq}. ${speakerName(m)}`, font: FONT, color: speakerColour(m) }),
+        new TextRun({ text: `   ${modeLabel(m.mode)} · ${fmtUTC(m.created_at)}${model ? ` · ${model}` : ''}`, font: FONT, size: 18, color: COLOURS.muted, bold: false })],
+    }));
+    if (m.error) children.push(new Paragraph({ children: [new TextRun({ text: `Turn failed: ${m.error}`, italics: true, color: '991B1B', font: FONT })] }));
+    else children.push(...docxBlocks(m.text || ''));
+  }
 
   const doc = new Document({
     creator: 'Anatop Territory Evaluation',
     title: s.title,
+    // Tells Word to recalculate field codes (the TOC and page numbers below)
+    // when the document is opened, rather than showing them empty/stale.
+    features: { updateFields: true },
     styles: {
       default: { document: { run: { font: FONT, size: 20 } } },
       paragraphStyles: [1, 2, 3, 4, 5].map((lvl) => ({
@@ -149,7 +188,23 @@ async function toDocx(s) {
         paragraph: { spacing: { before: 240, after: 120 } },
       })),
     },
-    sections: [{ properties: {}, children }],
+    sections: [{
+      properties: {},
+      footers: {
+        default: new Footer({
+          children: [new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({ text: `${s.title}  ·  `, font: FONT, size: 15, color: COLOURS.muted }),
+              new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 15, color: COLOURS.muted }),
+              new TextRun({ text: ' / ', font: FONT, size: 15, color: COLOURS.muted }),
+              new TextRun({ children: [PageNumber.TOTAL_PAGES], font: FONT, size: 15, color: COLOURS.muted }),
+            ],
+          })],
+        }),
+      },
+      children,
+    }],
   });
   return Packer.toBuffer(doc);
 }
@@ -208,35 +263,42 @@ async function toPdf(s) {
     { text: `Session record · exported ${date}`, fontSize: 11, color: '#' + COLOURS.muted, alignment: 'center', margin: [0, 20, 0, 0] },
     { text: `${s.messages.length} messages · ${s.sources.length} sources · ${s.disagreements.length} disagreements logged`, fontSize: 10, color: '#' + COLOURS.muted, alignment: 'center', pageBreak: 'after' },
   );
-  content.push({ text: 'Inputs', style: 'h1' });
+  // Decision output leads — this is the answer, not the last page after the
+  // full transcript.
+  content.push({ text: 'Decision output', style: 'h1' });
+  if (s.decision_text) content.push(...pdfBlocks(s.decision_text));
+  else content.push({ text: 'No decision output has been written for this session yet.', italics: true, color: '#' + COLOURS.muted });
+  content.push({ text: 'Inputs', style: 'h1', pageBreak: 'before' });
   content.push({
     table: { widths: ['30%', '70%'], body: prompts.INPUT_FIELDS.map((f) => [{ text: f.label, bold: true, fontSize: 8.5 }, { text: (s.inputs[f.key] || '').trim() || 'INPUT MISSING', fontSize: 8.5, italics: !s.inputs[f.key], color: s.inputs[f.key] ? undefined : '#' + COLOURS.unknown }]) },
     layout: 'lightHorizontalLines', pageBreak: 'after',
   });
-  content.push({ text: 'Transcript', style: 'h1' });
-  for (const m of s.messages) {
-    content.push({ text: [{ text: `${m.seq}. ${speakerName(m)}`, color: '#' + speakerColour(m) }, { text: `   ${modeLabel(m.mode)} · ${m.created_at} UTC`, fontSize: 8, color: '#' + COLOURS.muted, bold: false }], style: 'h2', margin: [0, 14, 0, 6] });
-    if (m.error) content.push({ text: `Turn failed: ${m.error}`, italics: true, color: '#991B1B' });
-    else content.push(...pdfBlocks(m.text || ''));
-  }
-  content.push({ text: 'Disagreement log', style: 'h1', pageBreak: 'before' });
+  content.push({ text: 'Disagreement log', style: 'h1' });
   if (!s.disagreements.length) content.push({ text: 'No disagreements were logged.', italics: true });
   for (const d of s.disagreements) {
     content.push({ text: `#${d.n} ${d.topic}  —  ${d.status.toUpperCase()}`, style: 'h3', color: '#' + (d.status === 'resolved' ? COLOURS.verified : COLOURS.estimate) });
     content.push(...pdfBlocks(d.body));
   }
-  if (s.decision_text) {
-    content.push({ text: 'Decision output', style: 'h1', pageBreak: 'before' });
-    content.push(...pdfBlocks(s.decision_text));
-  }
-  content.push({ text: 'Sources', style: 'h1', pageBreak: 'before' });
-  for (const src of s.sources) {
+  content.push({ text: 'Verification', style: 'h1', pageBreak: 'before' });
+  const citedSourcesPdf = s.sources.filter((src) => src.kind === 'cited');
+  const searchedOnlyCountPdf = s.sources.length - citedSourcesPdf.length;
+  if (!citedSourcesPdf.length) content.push({ text: 'No sources have been cited in a claim yet.', italics: true, color: '#' + COLOURS.muted });
+  for (const src of citedSourcesPdf) {
     const by = src.cited_by.map((c) => prompts.AGENTS[c.speaker] ? prompts.AGENTS[c.speaker].label : c.speaker).filter((v, i, a) => a.indexOf(v) === i).join(', ');
     content.push({
       text: [{ text: `[${src.n}] `, bold: true }, { text: `${src.title || src.url}\n` }, { text: src.url, link: src.url, color: '#' + COLOURS.link, fontSize: 7.5 },
-        { text: `\n${src.kind === 'cited' ? 'cited' : 'search result'} · first ${src.first_cited_at} UTC · ${by}`, fontSize: 7.5, color: '#' + COLOURS.muted }],
+        { text: `\ncited · first ${fmtUTC(src.first_cited_at)} · ${by}`, fontSize: 7.5, color: '#' + COLOURS.muted }],
       fontSize: 8.5, margin: [0, 0, 0, 6],
     });
+  }
+  if (searchedOnlyCountPdf) content.push({ text: `${searchedOnlyCountPdf} additional page(s) were searched but not cited in any claim.`, italics: true, fontSize: 8, color: '#' + COLOURS.muted });
+  // Transcript — appendix.
+  content.push({ text: 'Transcript (appendix)', style: 'h1', pageBreak: 'before' });
+  for (const m of s.messages) {
+    const model = messageModel(m);
+    content.push({ text: [{ text: `${m.seq}. ${speakerName(m)}`, color: '#' + speakerColour(m) }, { text: `   ${modeLabel(m.mode)} · ${fmtUTC(m.created_at)}${model ? ` · ${model}` : ''}`, fontSize: 8, color: '#' + COLOURS.muted, bold: false }], style: 'h2', margin: [0, 14, 0, 6] });
+    if (m.error) content.push({ text: `Turn failed: ${m.error}`, italics: true, color: '#991B1B' });
+    else content.push(...pdfBlocks(m.text || ''));
   }
 
   const docDefinition = {

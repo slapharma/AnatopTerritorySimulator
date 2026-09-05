@@ -10,10 +10,10 @@
 <div class="app">
   <aside class="sidebar">
     <div class="sidebar-head">
-      <div class="brand brand-stack">
+      <button type="button" id="brand-home" class="brand brand-stack brand-btn" title="Back to dashboard">
         <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
         <span>Anatop Territory Evaluation</span>
-      </div>
+      </button>
       <button id="btn-new" class="btn btn-primary btn-block" type="button">New session</button>
     </div>
     <div id="session-list" class="session-list" aria-label="Saved sessions"></div>
@@ -21,8 +21,21 @@
   </aside>
 
   <main class="main">
+    <!-- ============ DASHBOARD VIEW ============ -->
+    <section id="view-dashboard" class="view">
+      <header class="topbar">
+        <h1>Dashboard</h1>
+        <div class="topbar-actions">
+          <button id="btn-dashboard-new" class="btn btn-primary" type="button">New session</button>
+        </div>
+      </header>
+      <div class="scroll">
+        <div id="dashboard-body" class="dashboard"></div>
+      </div>
+    </section>
+
     <!-- ============ SETUP VIEW ============ -->
-    <section id="view-setup" class="view">
+    <section id="view-setup" class="view" hidden>
       <header class="topbar">
         <h1>New session</h1>
         <div class="topbar-actions">
@@ -35,7 +48,7 @@
           <p class="lede">Every field below is Section 0 of the spec. Blank fields are allowed: they are passed to the agents as <code>INPUT MISSING</code>, and the agents must say what they assumed instead.</p>
           <div id="setup-fields" class="fields"></div>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-lg">Start session and run Round 1</button>
+            <button type="submit" class="btn btn-primary btn-lg">Start session and run Baselines</button>
             <span class="muted">Runs the Regulatory, Clinical and Commercial agents in turn, each with live web search.</span>
           </div>
         </form>
@@ -60,23 +73,34 @@
               <a id="link-pdf" href="#" download>PDF</a>
             </div>
           </div>
-          <button class="btn btn-danger-ghost" type="button" id="btn-delete" title="Delete this session">Delete</button>
+          <button class="btn btn-sm" type="button" id="btn-warroom" title="Sources, disagreements, cost, meeting minutes, intelligence">War Room</button>
+          <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this session">Delete</button>
         </div>
       </header>
 
+      <div id="decision-banner" class="decision-banner" hidden>
+        <div class="decision-banner-head">
+          <span class="decision-banner-label">Recommendation</span>
+          <button type="button" class="decision-banner-jump" id="btn-decision-jump">View in transcript ↓</button>
+        </div>
+        <div class="decision-banner-body" id="decision-banner-body"></div>
+      </div>
+
       <div class="session-body">
         <div class="transcript-col">
-          <div class="toolbar" id="toolbar">
-            <span class="toolbar-label">Rounds</span>
-            <button class="btn btn-sm" data-round="opening" type="button" title="Each agent answers its own questions independently">Round 1 · Baselines</button>
-            <button class="btn btn-sm" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence">Round 2 · Challenge</button>
-            <button class="btn btn-sm" data-round="round3" type="button" title="Agents give base / upside / downside figures">Round 3 · Converge</button>
-            <button class="btn btn-sm" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far">Let the agents respond to each other</button>
-            <button class="btn btn-sm" id="btn-custom" type="button" title="Write your own instruction for a round">Custom round…</button>
+          <nav class="meeting-nav" id="toolbar" aria-label="Meetings">
+            <span class="toolbar-label">Meetings</span>
+            <div class="meeting-steps">
+              <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
+              <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
+              <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
+              <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
+            </div>
+            <button class="btn btn-sm" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
             <span class="spacer"></span>
-            <button class="btn btn-sm btn-accent" id="btn-decision" type="button" title="Moderator assistant writes Section 4 from the whole transcript">Write the decision output</button>
+            <button class="btn btn-sm btn-accent" id="btn-decision" type="button" title="Moderator assistant writes Section 4 from the whole transcript">Decision output</button>
             <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
-          </div>
+          </nav>
 
           <details id="inputs-summary" class="inputs-summary">
             <summary id="inputs-summary-label">Inputs</summary>
@@ -114,15 +138,23 @@
           </form>
         </div>
 
-        <aside class="panel">
+        <aside class="panel" id="war-room" aria-label="War Room">
+          <div class="panel-head">
+            <span class="panel-title">War Room</span>
+            <button type="button" class="panel-close" id="btn-warroom-close" title="Close">✕</button>
+          </div>
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
             <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
             <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
+            <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
+            <button class="tab" data-tab="intelligence" role="tab" type="button">Intelligence</button>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
           <div class="tab-body" id="tab-cost" hidden></div>
+          <div class="tab-body" id="tab-minutes" hidden></div>
+          <div class="tab-body" id="tab-intelligence" hidden></div>
         </aside>
       </div>
     </section>
@@ -132,7 +164,7 @@
 <!-- Custom round dialog -->
 <dialog id="dlg-custom">
   <form method="dialog" class="dialog-form">
-    <h2>Custom round</h2>
+    <h2>Custom meeting</h2>
     <p class="muted">Your instruction replaces the built-in round text. The evidence rules still apply.</p>
     <label>Instruction<textarea id="custom-instruction" rows="5" placeholder="e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only."></textarea></label>
     <fieldset class="agent-picks">
@@ -143,7 +175,7 @@
     </fieldset>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Cancel</button>
-      <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Run round</button>
+      <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Run meeting</button>
     </div>
   </form>
 </dialog>
@@ -161,7 +193,7 @@
       <label><input type="checkbox" value="clinical"> Clinical</label>
       <label><input type="checkbox" value="commercial"> Commercial</label>
     </fieldset>
-    <label>Your question or note (optional)<textarea id="dis-modal-instruction" rows="3" placeholder="e.g. What would it take to resolve this before Round 3?"></textarea></label>
+    <label>Your question or note (optional)<textarea id="dis-modal-instruction" rows="3" placeholder="e.g. What would it take to resolve this before Converge?"></textarea></label>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Close</button>
       <button value="discuss" class="btn btn-primary" type="submit" id="btn-dis-discuss">Ask selected agents</button>
@@ -181,6 +213,7 @@
 </dialog>
 
 <script src="/vendor/marked.js"></script>
+<script src="/vendor/dompurify.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

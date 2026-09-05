@@ -36,14 +36,50 @@ function ensureSeeded() {
       for (let i = 0; i < emails.length; i++) {
         await db.createUser({ email: emails[i], password_hash, is_admin: i === 0 });
       }
-    })();
+    })().catch((e) => {
+      // A rejected promise stays cached forever otherwise — one transient DB
+      // error while seeding would pin every request to the catch-and-401
+      // branch below for the rest of the process's life. Clear the cache so
+      // the next request retries instead of replaying the same failure.
+      seedPromise = null;
+      throw e;
+    });
   }
   return seedPromise;
 }
 
+// True local dev only: never silently open a real deployment just because
+// nobody has created a user row yet (unset/misconfigured AUTH_USERS on Vercel,
+// or seeding having failed, would otherwise leave the whole app unauthenticated).
+async function noAuthConfigured() {
+  return !process.env.VERCEL && (await db.countUsers()) === 0;
+}
+
+// Best-effort brute-force throttle, keyed by IP. In-memory, so it resets on
+// cold start and doesn't share state across Vercel lambda instances — not
+// airtight on serverless, but still meaningfully raises the cost of hammering
+// login with guesses, and scrypt itself is CPU-heavy enough that unthrottled
+// attempts are also a cheap DoS against the server.
+const failedAttempts = new Map();
+const MAX_ATTEMPTS = 10;
+const LOCKOUT_MS = 5 * 60 * 1000;
+function isLockedOut(key) {
+  const rec = failedAttempts.get(key);
+  if (!rec) return false;
+  if (Date.now() > rec.resetAt) { failedAttempts.delete(key); return false; }
+  return rec.count >= MAX_ATTEMPTS;
+}
+function recordFailure(key) {
+  const rec = failedAttempts.get(key) || { count: 0, resetAt: Date.now() + LOCKOUT_MS };
+  rec.count++;
+  failedAttempts.set(key, rec);
+}
+function recordSuccess(key) { failedAttempts.delete(key); }
+
 async function basicAuth(req, res, next) {
   try {
     await ensureSeeded();
+    if (isLockedOut(req.ip)) return res.status(429).json({ error: 'Too many failed login attempts. Try again in a few minutes.' });
     const header = req.headers.authorization || '';
     const [scheme, encoded] = header.split(' ');
     if (scheme === 'Basic' && encoded) {
@@ -51,11 +87,13 @@ async function basicAuth(req, res, next) {
       const email = String(emailRaw || '').trim().toLowerCase();
       const user = await db.getUserByEmail(email);
       if (user && pass && (await verifyPassword(pass, user.password_hash))) {
+        recordSuccess(req.ip);
         req.user = { id: user.id, email: user.email, is_admin: user.is_admin };
         return next();
       }
+      if (scheme === 'Basic') recordFailure(req.ip);
     }
-    if ((await db.countUsers()) === 0) return next(); // no users configured at all (local dev)
+    if (await noAuthConfigured()) return next();
   } catch (e) {
     console.error('auth error:', e.message); // fail closed on any DB/hash error
   }
@@ -63,8 +101,12 @@ async function basicAuth(req, res, next) {
   res.status(401).send('Authentication required.');
 }
 
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
   if (req.user && req.user.is_admin) return next();
+  // Consistent with basicAuth's own bypass: no users configured at all means
+  // no auth is enforced anywhere (local dev), so an admin-only route should
+  // not be the one place that still 403s.
+  if (await noAuthConfigured()) return next();
   res.status(403).json({ error: 'Admin access required' });
 }
 

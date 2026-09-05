@@ -40,23 +40,24 @@
     <li>Fill in what you know. Every field is optional — anything left blank is passed to the agents as <code>INPUT MISSING</code>, and they are required to say what they assumed instead rather than silently guessing.</li>
     <li><strong>Restore Default Values</strong> pre-fills the form with the saved default example (a real product, useful for a demo or a quick test). Any field you've saved as a default (see below) is included.</li>
     <li><strong>Copy from last session</strong> pre-fills the form with whatever you entered last time.</li>
-    <li>Click <strong>Start session and run Round 1</strong>. This runs all three agents in turn, each with live web search.</li>
+    <li>Click <strong>Start session and run Baselines</strong>. This runs all three agents in turn, each with live web search.</li>
   </ol>
   <p>Note: Regulator and Reimbursement Bodies are not asked for — they follow from the Country you pick, and the agents identify them themselves as their first research step.</p>
 
   <h3>Saving your own defaults</h3>
-  <p>Hover any field in the New Session form and a small <strong>💾 Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
+  <p>Hover any field in the New Session form and a small <strong>Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
 
-  <h2>The rounds</h2>
+  <h2>The meetings</h2>
   <table>
-    <tr><th>Round</th><th>What happens</th></tr>
-    <tr><td>Round 1 · Baselines</td><td>Each agent answers its own questions independently, with no visibility of what the others will say.</td></tr>
-    <tr><td>Round 2 · Challenge</td><td>Each agent attacks at least two assumptions made by the others, backed by evidence — concede, rebut, or log a formal disagreement.</td></tr>
-    <tr><td>Round 3 · Converge</td><td>Agents give base / upside / downside figures for timelines, cost, and revenue, working from the whole discussion so far.</td></tr>
-    <tr><td>Let the agents respond to each other</td><td>One free-form round: every agent reacts to the discussion so far, only where something genuinely changed their view.</td></tr>
-    <tr><td>Custom round…</td><td>Write your own instruction and pick which agents respond to it.</td></tr>
+    <tr><th>Meeting</th><th>What happens</th></tr>
+    <tr><td>Baselines</td><td>Each agent answers its own questions independently, with no visibility of what the others will say.</td></tr>
+    <tr><td>Challenge</td><td>Each agent attacks at least two assumptions made by the others, backed by evidence — concede, rebut, or log a formal disagreement.</td></tr>
+    <tr><td>Converge</td><td>Agents give base / upside / downside figures for timelines, cost, and revenue, working from the whole discussion so far.</td></tr>
+    <tr><td>Cross-talk</td><td>One free-form meeting: every agent reacts to the discussion so far, only where something genuinely changed their view.</td></tr>
+    <tr><td>Custom meeting…</td><td>Write your own instruction and pick which agents respond to it.</td></tr>
   </table>
   <p>You can also type directly into the message box at the bottom as the moderator — address it to one agent or all of them — and they'll reply.</p>
+  <p>After each of the four standard meetings finishes, the Moderator Assistant automatically writes up meeting minutes — a summary per agent plus collated action points — into the <strong>War Room</strong> panel's <strong>Minutes</strong> tab, and emails them to you with links to view the session, jump to that meeting's transcript, or approve moving to the next one.</p>
 
   <h2>Reading a response</h2>
   <h3>Evidence badges</h3>
@@ -70,7 +71,7 @@
   <div class="example-badges">
     <span class="badge badge-unknown">UNKNOWN <span class="d">needs a local in-market expert to settle</span></span>
   </div>
-  <p>Numbered links like <code>[1]</code> next to a claim jump to that source in the Sources panel on the right, which lists every URL an agent searched or cited.</p>
+  <p>Numbered links like <code>[1]</code> next to a claim jump to that source in the <strong>Sources</strong> tab of the War Room panel (click <strong>War Room</strong> in the top bar to open it), which lists every URL an agent searched or cited.</p>
 
   <h3>Closing labels</h3>
   <p>Every response ends with at least one of these, called out as a small coloured label — the single most important takeaway of that message, not a recap of the whole thing:</p>
@@ -82,10 +83,13 @@
   </div>
 
   <h3>Cross-references</h3>
-  <p>In Round 2/3 and cross-talk responses, a mention of another agent's name (e.g. "Clinical Agent") is a link — click it to jump straight to what that agent actually said.</p>
+  <p>In Challenge/Converge and cross-talk responses, a mention of another agent's name (e.g. "Clinical Agent") is a link — click it to jump straight to what that agent actually said.</p>
 
   <h2>Disagreements</h2>
-  <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
+  <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the War Room's <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
+
+  <h2>War Room</h2>
+  <p>Click <strong>War Room</strong> in the top bar to pop out the right-hand panel: <strong>Sources</strong>, <strong>Disagreements</strong>, <strong>Cost</strong>, <strong>Minutes</strong> (auto-written meeting minutes) and <strong>Intelligence</strong> (the transcript sliced by agent, by meeting, by disagreement, or by resolution status). Close it with the ✕ or Esc.</p>
 
   <h2>Favourites, Regenerate, Dive Deeper</h2>
   <ul>

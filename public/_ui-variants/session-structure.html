@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session transcript — structure variants</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+  /* ---- variant-only additions (kept separate from styles.css) ---- */
+  .v-hidden { display: none !important; }
+
+  /* FEED variant: single reading column */
+  .feed-col { max-width: 760px; margin: 0 auto; width: 100%; }
+  .feed-round-label { font-weight: 700; }
+  .feed-agent-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  .feed-agent-tag::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--dot, var(--border-strong)); }
+  .feed-agent-tag.regulatory { --dot: var(--regulatory); }
+  .feed-agent-tag.clinical { --dot: var(--clinical); }
+  .feed-agent-tag.commercial { --dot: var(--commercial); }
+
+  /* BOARDROOM variant: fixed 3-col grid with sticky column headers */
+  .board-head-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; position: sticky; top: 0; background: var(--bg); z-index: 2; padding: 10px 0 8px; }
+  .board-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; font-weight: 700; font-size: 12.5px; border: 1px solid var(--border); background: var(--surface); }
+  .board-head::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--dot); flex: none; }
+  .board-head.regulatory { color: var(--regulatory); --dot: var(--regulatory); }
+  .board-head.clinical { color: var(--clinical); --dot: var(--clinical); }
+  .board-head.commercial { color: var(--commercial); --dot: var(--commercial); }
+  .board-col-hidden { opacity: .25; pointer-events: none; }
+
+  /* FOCUS variant: spotlight + rail */
+  .focus-layout { display: grid; grid-template-columns: 1fr 260px; gap: 18px; align-items: start; }
+  .focus-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .focus-tab { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-weight: 600; font-size: 12.5px; padding: 7px 13px; border-radius: 999px; cursor: pointer; }
+  .focus-tab::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--dot, var(--border-strong)); }
+  .focus-tab.regulatory { --dot: var(--regulatory); } .focus-tab.clinical { --dot: var(--clinical); } .focus-tab.commercial { --dot: var(--commercial); }
+  .focus-tab[aria-current="true"] { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+  .focus-stage .msg { max-width: none; }
+  .focus-rail { display: flex; flex-direction: column; gap: 10px; }
+  .focus-card { border: 1px solid var(--border); border-left: 4px solid var(--dot); border-radius: 8px; background: var(--surface); padding: 10px 12px; cursor: pointer; }
+  .focus-card.regulatory { --dot: var(--regulatory); } .focus-card.clinical { --dot: var(--clinical); } .focus-card.commercial { --dot: var(--commercial); }
+  .focus-card:hover { background: var(--surface-2); }
+  .focus-card .who { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+  .focus-card .snippet { font-size: 12px; color: var(--text-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .dis-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 4px; }
+  .dis-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #FED7AA; background: #FFF7ED; color: #9A3412; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  .dis-chip .status { font-size: 10px; text-transform: uppercase; padding: 1px 6px; }
+  .dis-strip-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-right: 4px; align-self: center; }
+
+  @media (max-width: 900px) {
+    .board-head-row { grid-template-columns: 1fr; position: static; }
+    .focus-layout { grid-template-columns: 1fr; }
+  }
+
+  /* ---- picker: deliberately outside the app's design system ---- */
+  .variant-picker { position: fixed; bottom: 24px; left: 50%; translate: -50% 0; z-index: 2147483647; display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: rgb(20 20 20 / 0.9); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1), 0 8px 24px rgb(0 0 0 / 0.25); font: 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; user-select: none; }
+  .variant-picker button { padding: 7px 14px; border: 0; border-radius: 999px; background: none; color: rgb(255 255 255 / 0.6); cursor: pointer; font: inherit; }
+  .variant-picker button:hover { color: rgb(255 255 255 / 0.85); }
+  .variant-picker button[aria-current="true"] { background: rgb(255 255 255 / 0.14); color: rgb(255 255 255); }
+  .variant-picker button:focus-visible { outline: 2px solid rgb(255 255 255 / 0.7); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <button type="button" class="brand brand-stack brand-btn" title="Back to dashboard">
+        <img src="../sla-logo.png" alt="SLA Pharma" class="brand-logo">
+        <span>Anatop Territory Evaluation</span>
+      </button>
+      <button class="btn btn-primary btn-block" type="button">New session</button>
+    </div>
+    <div class="session-list">
+      <button type="button" class="session-item active">
+        <div class="t">Anatop — South Korea</div>
+        <div class="m"><span>Round 2</span><span>3 sources</span></div>
+      </button>
+      <button type="button" class="session-item">
+        <div class="t">Anatop — Brazil</div>
+        <div class="m"><span>Round 1</span><span>1 source</span></div>
+      </button>
+      <button type="button" class="session-item">
+        <div class="t">Anatop — Poland</div>
+        <div class="m"><span>Decision output</span><span>9 sources</span></div>
+      </button>
+    </div>
+    <div class="sidebar-foot">3 sessions</div>
+  </aside>
+
+  <main class="main">
+    <section class="view">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>Anatop — South Korea</h1>
+          <div class="muted">Diltiazem HCl 2% topical cream, 30 g · Chronic anal fissure (adults)</div>
+        </div>
+        <div class="topbar-actions">
+          <div class="active-clock">⏱ 12:40</div>
+          <div class="cost">$1.84 est.</div>
+          <button class="btn" type="button">War Room</button>
+        </div>
+      </header>
+
+      <div class="session-body">
+        <div class="transcript-col">
+          <nav class="meeting-nav" aria-label="Meetings">
+            <span class="toolbar-label">Meetings</span>
+            <div class="meeting-steps">
+              <button class="meeting-btn ran" data-round="opening" type="button"><span class="meeting-num">1</span>Baselines</button>
+              <button class="meeting-btn ran" data-round="round2" type="button"><span class="meeting-num">2</span>Challenge</button>
+              <button class="meeting-btn" data-round="round3" type="button" disabled title="Not wired in this structure demo"><span class="meeting-num">3</span>Converge</button>
+              <button class="meeting-btn" data-round="crosstalk" type="button" disabled title="Not wired in this structure demo"><span class="meeting-num">4</span>Cross-talk</button>
+            </div>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-accent" type="button">Decision output</button>
+          </nav>
+
+          <div class="filter-chips" aria-label="Filter transcript by agent">
+            <button type="button" class="chip active" data-speaker="all">All</button>
+            <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>
+            <button type="button" class="chip chip-clinical" data-speaker="clinical">Clinical</button>
+            <button type="button" class="chip chip-commercial" data-speaker="commercial">Commercial</button>
+          </div>
+
+          <div class="scroll" style="padding: 0 20px 30px;">
+            <div id="stage"></div>
+          </div>
+
+          <form class="composer" onsubmit="return false">
+            <label class="composer-to">
+              <span>To</span>
+              <select><option>All agents</option><option>Regulatory</option><option>Clinical</option><option>Commercial</option></select>
+            </label>
+            <textarea rows="2" placeholder="Speak as the moderator…"></textarea>
+            <button type="button" class="btn btn-primary">Send</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<nav class="variant-picker" aria-label="Variants">
+  <button type="button" data-variant="feed">Feed</button>
+  <button type="button" data-variant="boardroom">Boardroom</button>
+  <button type="button" data-variant="focus">Focus</button>
+</nav>
+
+<script>
+// ---------------------------------------------------------------------
+// Fixture data: same two meetings (Baselines, Challenge), same three
+// agents, real markup classes from styles.css (badge/cite/disagreement/
+// questions) so every variant is judged on structure, not content.
+// ---------------------------------------------------------------------
+const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent' };
+
+const DATA = {
+  opening: {
+    label: 'Baselines — Round 1',
+    messages: {
+      regulatory: {
+        time: '9:02 AM', mode: 'Baseline', searches: ['mfds.go.kr generic topical approval', 'Korea drug approval-report 2023'],
+        body: `<p>South Korea's MFDS reviews this as a <span class="badge badge-verified" title="Confirmed against mfds.go.kr guidance, Feb 2023">VERIFIED</span> generic route, since diltiazem 2% topical has an existing reference listed product locally. Filing requires a bioequivalence bridge and full CMC package; no new local Phase III expected. <span class="badge badge-estimate" title="Based on comparable 2022-2023 generic topical filings, MFDS median 11 months">ESTIMATE</span> review timeline: 10–13 months from submission <a class="cite" href="#src-1" title="Source 1">[1]</a>.</p>
+        <p>Questions for Clinical: can our existing US/EU BE data be bridged with a smaller local PK study, or does MFDS require a full local BE trial on Korean subjects?</p>
+        <p>The three assumptions my view depends on most are: (1) a reference listed product exists and stays on-market through our filing window, (2) MFDS accepts a bridging PK study rather than a full local trial, (3) no additional non-clinical package is triggered by the local RLD's label differences.</p>`
+      },
+      clinical: {
+        time: '9:04 AM', mode: 'Baseline', searches: ['diltiazem topical bioequivalence design', 'anal fissure VAS endpoint korea'],
+        body: `<p>A single-dose PK bridging study (n≈24–36, Korean subjects) is <span class="badge badge-estimate" title="Typical requirement for topical products with local systemic exposure data on file">ESTIMATE</span> sufficient here — MFDS has accepted this design for two comparable topical generics since 2021 <a class="cite" href="#src-2" title="Source 2">[2]</a>. Primary endpoint would be Cmax/AUC equivalence; a clinical efficacy endpoint (VAS pain reduction) is <span class="badge badge-unknown" title="No public precedent found either way for this exact indication">UNKNOWN</span> — not clearly required for a generic pathway, but sponsors sometimes add it voluntarily to support pricing negotiation.</p>
+        <p>The three assumptions my view depends on most are: (1) MFDS treats this as bioequivalence-only, not requiring a fresh efficacy trial, (2) the reference product's local label still lists the same PK parameters we'd bridge against, (3) local site capacity exists for a 24–36 subject PK study inside our timeline.</p>`
+      },
+      commercial: {
+        time: '9:07 AM', mode: 'Baseline', searches: ['korea NHIS reimbursement topical generic', 'anal fissure market korea'],
+        body: `<p>Korean reimbursement for a generic entrant is <span class="badge badge-verified" title="NHIS generic listing rules, standard formula, confirmed 2024">VERIFIED</span> formula-based: ~53.55% of the originator's negotiated price at first generic launch, dropping further with each additional entrant. Category size is <span class="badge badge-estimate" title="Estimated from IQVIA Korea topical anesthetic/anorectal segment, no direct product-level data available">ESTIMATE</span> ₩8–11B annually across anorectal topical products, fragmented across 6+ generics <a class="cite" href="#src-3" title="Source 3">[3]</a>.</p>
+        <p>The three assumptions my view depends on most are: (1) we are not first generic to file (pricing floor already set), (2) NHIS listing follows within 60–90 days of MFDS approval as is standard, (3) no material price erosion event (e.g., reference pricing revision) lands before our launch.</p>`
+      }
+    }
+  },
+  round2: {
+    label: 'Challenge — Round 2',
+    messages: {
+      regulatory: {
+        time: '10:15 AM', mode: 'Challenge', searches: ['mfds bridging study precedent bulletin'],
+        body: `<p>I'll concede Clinical's PK bridging design — the two precedents check out <a class="cite" href="#src-2" title="Source 2">[2]</a>, so I'm dropping my earlier hedge toward a full local trial. That moves my estimate timeline down to <span class="badge badge-estimate" title="Revised from 10–13 months after confirming bridging precedent">ESTIMATE</span> 9–11 months.</p>
+        <p>⚠ DISAGREEMENT #1<br>Position A (Regulatory): NHIS listing is a formality that runs in parallel with nothing left for us to influence — 60–90 days, fixed.<br>Position B (Commercial): Listing timing is negotiable and price-sensitive; delay is common when NHIS requests additional cost-effectiveness justification for anorectal topicals specifically.<br>Status: unresolved</p>`
+      },
+      clinical: {
+        time: '10:22 AM', mode: 'Challenge', searches: [],
+        body: `<p>Standing by the bridging design; nothing this round changes it. On Commercial's category-size figure — that ₩8–11B spans anorectal topicals broadly, which likely over-counts anaesthetic/steroid combination products that aren't true comparators to a plain diltiazem cream. <span class="badge badge-unknown" title="No product-level breakout available to confirm the narrower estimate">UNKNOWN</span> whether the diltiazem-specific sub-segment is meaningfully smaller.</p>`
+      },
+      commercial: {
+        time: '10:31 AM', mode: 'Challenge', searches: ['NHIS cost-effectiveness topical review korea 2022-2024'],
+        body: `<p>Rebutting Regulatory's "formality" framing directly: <span class="badge badge-verified" title="Confirmed via NHIS review board minutes, two anorectal topical cases 2022 and 2023">VERIFIED</span> — both prior anorectal topical listings in the last two years drew an added cost-effectiveness request from NHIS, adding 4–7 months before listing. I'm not conceding; logging it below.</p>
+        <p>⚠ DISAGREEMENT #1<br>Position A (Regulatory): NHIS listing is a formality that runs in parallel with nothing left for us to influence — 60–90 days, fixed.<br>Position B (Commercial): Listing timing is negotiable and price-sensitive; delay is common when NHIS requests additional cost-effectiveness justification for anorectal topicals specifically.<br>Status: unresolved</p>
+        <p>⚠ DISAGREEMENT #2<br>Position A (Commercial): The ₩8–11B anorectal topical category is the right comparator set for our forecast.<br>Position B (Clinical): That figure over-counts combination anaesthetic/steroid products that aren't real comparators to a plain diltiazem cream, so the true addressable segment is narrower.<br>Status: unresolved</p>`
+      }
+    }
+  }
+};
+
+const DISAGREEMENTS = [
+  { n: 1, topic: 'NHIS listing: formality vs. negotiable', status: 'unresolved' },
+  { n: 2, topic: 'True size of the comparator category', status: 'unresolved' }
+];
+
+function decorate(html) {
+  // mirrors app.js's post-render decoration closely enough for a structure demo
+  return html;
+}
+
+function msgHtml(speaker, round, fav) {
+  const m = DATA[round].messages[speaker];
+  const searches = m.searches.length
+    ? `<div class="msg-searches">${m.searches.map((s) => `<span>🔎 ${s}</span>`).join('')}</div>` : '';
+  return `
+    <article class="msg msg-${speaker}" id="msg-${speaker}-${round}">
+      <div class="msg-head">
+        <span class="msg-who">${AGENT_LABEL[speaker]}</span>
+        <span class="msg-mode">${m.mode}</span>
+        <span class="msg-meta">${m.time}</span>
+        <span class="spacer"></span>
+        <button type="button" class="fav-btn${fav ? ' on' : ''}" title="Favourite" aria-label="Favourite this response">★</button>
+      </div>
+      ${searches}
+      <div class="msg-body">${decorate(m.body)}</div>
+    </article>`;
+}
+
+// ---------------------------------------------------------------------
+// Variant renderers
+// ---------------------------------------------------------------------
+const AGENTS = ['regulatory', 'clinical', 'commercial'];
+let activeSpeaker = 'all';
+let activeFocus = 'regulatory';
+let activeRound = 'round2'; // default to Challenge so disagreements are visible
+
+function renderFeed() {
+  const rounds = ['opening', 'round2'].filter((r) => r === activeRound || activeRound === 'both');
+  const roundsToShow = ['opening', 'round2'];
+  let html = '<div class="feed-col">';
+  for (const round of roundsToShow) {
+    html += `<div class="round-divider"><span>${DATA[round].label}</span></div>`;
+    for (const a of AGENTS) {
+      if (activeSpeaker !== 'all' && activeSpeaker !== a) continue;
+      html += `<div class="feed-agent-tag ${a}">${AGENT_LABEL[a]}</div>`;
+      html += msgHtml(a, round, a === 'commercial' && round === 'round2');
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderBoardroom() {
+  const roundsToShow = ['opening', 'round2'];
+  let html = '';
+  for (const round of roundsToShow) {
+    html += `<div class="round-divider"><span>${DATA[round].label}</span></div>`;
+    html += '<div class="board-head-row">';
+    for (const a of AGENTS) {
+      const hidden = activeSpeaker !== 'all' && activeSpeaker !== a;
+      html += `<div class="board-head ${a}${hidden ? ' board-col-hidden' : ''}">${AGENT_LABEL[a]}</div>`;
+    }
+    html += '</div>';
+    html += '<div class="agent-grid">';
+    for (const a of AGENTS) {
+      const hidden = activeSpeaker !== 'all' && activeSpeaker !== a;
+      html += `<div class="agent-col${hidden ? ' board-col-hidden' : ''}">${msgHtml(a, round, a === 'commercial' && round === 'round2')}</div>`;
+    }
+    html += '</div>';
+  }
+  return html;
+}
+
+function renderFocus() {
+  const round = 'round2'; // Focus spotlights the latest meeting; use Challenge to show disagreements
+  const stageAgent = activeSpeaker !== 'all' && AGENTS.includes(activeSpeaker) ? activeSpeaker : activeFocus;
+  let html = '';
+  html += `<div class="dis-strip-label" style="display:block;margin-bottom:2px;">Open disagreements</div>`;
+  html += '<div class="dis-strip">';
+  for (const d of DISAGREEMENTS) {
+    html += `<button type="button" class="dis-chip" data-dis="${d.n}">#${d.n} ${d.topic} <span class="status unresolved">${d.status}</span></button>`;
+  }
+  html += '</div>';
+  html += '<div class="focus-layout">';
+  html += '<div class="focus-stage">';
+  html += '<div class="focus-tabs" role="tablist" aria-label="Focused agent">';
+  for (const a of AGENTS) {
+    html += `<button type="button" class="focus-tab ${a}" data-focus="${a}" role="tab" aria-current="${a === stageAgent}">${AGENT_LABEL[a]}</button>`;
+  }
+  html += '</div>';
+  html += msgHtml(stageAgent, round, stageAgent === 'commercial');
+  html += '</div>';
+  html += '<div class="focus-rail" aria-label="Other agents, this meeting">';
+  for (const a of AGENTS) {
+    if (a === stageAgent) continue;
+    const m = DATA[round].messages[a];
+    const plain = m.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    html += `<div class="focus-card ${a}" data-focus="${a}" role="button" tabindex="0" aria-label="Switch focus to ${AGENT_LABEL[a]}">
+      <div class="who">${AGENT_LABEL[a]}</div>
+      <div class="snippet">${plain.slice(0, 160)}…</div>
+    </div>`;
+  }
+  html += '</div></div>';
+  return html;
+}
+
+const RENDERERS = { feed: renderFeed, boardroom: renderBoardroom, focus: renderFocus };
+
+function render() {
+  const variant = getVariant();
+  document.getElementById('stage').innerHTML = RENDERERS[variant]();
+  wireStageEvents(variant);
+}
+
+function wireStageEvents(variant) {
+  document.querySelectorAll('.focus-tab, .focus-card').forEach((el) => {
+    el.addEventListener('click', () => { activeFocus = el.dataset.focus; render(); });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activeFocus = el.dataset.focus; render(); } });
+  });
+}
+
+document.querySelectorAll('.filter-chips .chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.filter-chips .chip').forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeSpeaker = chip.dataset.speaker;
+    render();
+  });
+});
+
+// ---------------------------------------------------------------------
+// Picker: URL is the source of truth. No transition on switch.
+// ---------------------------------------------------------------------
+const VARIANTS = ['feed', 'boardroom', 'focus'];
+function getVariant() {
+  const v = new URLSearchParams(location.search).get('variant');
+  return VARIANTS.includes(v) ? v : 'feed';
+}
+function setVariant(v, push) {
+  const url = new URL(location.href);
+  url.searchParams.set('variant', v);
+  if (push) history.pushState({}, '', url); else history.replaceState({}, '', url);
+  document.querySelectorAll('.variant-picker button').forEach((b) => {
+    b.setAttribute('aria-current', String(b.dataset.variant === v));
+  });
+  render();
+}
+document.querySelectorAll('.variant-picker button').forEach((b) => {
+  b.addEventListener('click', () => setVariant(b.dataset.variant, true));
+});
+window.addEventListener('keydown', (e) => {
+  const i = VARIANTS.indexOf(getVariant());
+  if (e.key === 'ArrowRight') setVariant(VARIANTS[(i + 1) % VARIANTS.length], true);
+  else if (e.key === 'ArrowLeft') setVariant(VARIANTS[(i - 1 + VARIANTS.length) % VARIANTS.length], true);
+  else if (['1', '2', '3'].includes(e.key)) setVariant(VARIANTS[Number(e.key) - 1], true);
+});
+window.addEventListener('popstate', () => setVariant(getVariant(), false));
+
+setVariant(getVariant(), false);
+</script>
+</body>
+</html>

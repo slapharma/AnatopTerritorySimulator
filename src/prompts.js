@@ -68,9 +68,9 @@ const INDICATION_SUGGESTIONS = [
 // determined by COUNTRY, and the agents identify them themselves as their first
 // research step (see prompts/regulatory.md, prompts/commercial.md).
 const INPUT_FIELDS = [
-  { key: 'product',              label: 'PRODUCT' },
+  { key: 'product',              label: 'PRODUCT', required: true },
   { key: 'indication',           label: 'INDICATION', suggestions: INDICATION_SUGGESTIONS },
-  { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS },
+  { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS, required: true },
   { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', multiline: true,
     hint: 'Each country, approval date, pathway used, and whether a CPP is available' },
   { key: 'dossier',              label: 'DOSSIER ON HAND', multiline: true,
@@ -131,6 +131,33 @@ async function personaFor(agentKey) {
   return parts.filter(Boolean).join('\n\n');
 }
 
+// Curated Drive knowledgebase (Admin > Knowledgebase page), titles + notes only.
+// Links point into the company's private Drive — the agent's web tool cannot
+// open them, so they're named as internal references to cite, not fetch.
+async function knowledgeBlock() {
+  const items = await db.listKnowledgeItems();
+  if (!items.length) return '';
+  const byCategory = new Map();
+  for (const it of items) {
+    if (!byCategory.has(it.category)) byCategory.set(it.category, []);
+    byCategory.get(it.category).push(it);
+  }
+  const lines = [];
+  for (const [category, rows] of byCategory) {
+    lines.push(`### ${category}`);
+    for (const r of rows) {
+      const flag = r.sensitive ? ' [SENSITIVE — commercial terms; do not quote figures]' : '';
+      lines.push(`- ${r.title}${r.note ? ` — ${r.note}` : ''}${flag}`);
+    }
+  }
+  return [
+    '## INTERNAL KNOWLEDGEBASE (curated company Drive index — titles/notes only)',
+    'These are real internal documents the company holds. You cannot open their Drive links with your web tool — cite them by title as internal references ("per the company\'s [title]") when relevant, do not invent their content, and never present a title as something you have read in full.',
+    '',
+    lines.join('\n'),
+  ].join('\n');
+}
+
 async function systemPrompt(agentKey, inputs) {
   const agent = AGENTS[agentKey];
   if (!agent) throw new Error(`Unknown agent ${agentKey}`);
@@ -138,6 +165,7 @@ async function systemPrompt(agentKey, inputs) {
   const rules = fill(readPrompt('evidence-rules.md'), inputs);
   const today = new Date().toISOString().slice(0, 10);
   const others = AGENT_ORDER.filter((k) => k !== agentKey).map((k) => AGENTS[k].label).join(', ');
+  const knowledge = agentKey === 'moderator' ? '' : await knowledgeBlock();
   return [
     persona,
     '',
@@ -147,6 +175,7 @@ async function systemPrompt(agentKey, inputs) {
     '```',
     '',
     rules,
+    knowledge ? `\n${knowledge}` : '',
     '',
     `Today's date is ${today}. The other agents in the room are: ${others}. The human moderator is addressed as "Moderator".`,
   ].join('\n');
@@ -166,34 +195,64 @@ function speakerLabel(msg) {
   return AGENTS[msg.speaker] ? AGENTS[msg.speaker].label.toUpperCase() : String(msg.speaker).toUpperCase();
 }
 
+// Characters, not tokens (no tokenizer here) — a conservative ~4 chars/token
+// budget so a long session doesn't silently overflow a free model's context
+// window mid-turn. Older messages drop first; the full record is always in
+// the export, so nothing is actually lost, just not re-sent every turn.
+const MAX_TRANSCRIPT_CHARS = 60000;
+
 function transcriptText(messages) {
   const usable = messages.filter((m) => !m.error && m.text);
   if (!usable.length) return '(no messages yet. This is the first turn)';
-  return usable
-    .map((m) => {
-      const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` (to ${AGENTS[m.addressed_to] ? AGENTS[m.addressed_to].label : m.addressed_to})` : '';
-      return `--- [${m.seq}] ${speakerLabel(m)}${to} · ${m.created_at} ---\n${m.text}`;
-    })
-    .join('\n\n');
+  const blocks = usable.map((m) => {
+    const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` (to ${AGENTS[m.addressed_to] ? AGENTS[m.addressed_to].label : m.addressed_to})` : '';
+    return `--- [${m.seq}] ${speakerLabel(m)}${to} · ${m.created_at} ---\n${m.text}`;
+  });
+  let total = blocks.reduce((n, b) => n + b.length + 2, 0);
+  let dropped = 0;
+  while (total > MAX_TRANSCRIPT_CHARS && blocks.length > 1) {
+    total -= blocks.shift().length + 2;
+    dropped++;
+  }
+  if (dropped) blocks.unshift(`--- ${dropped} earlier message(s) omitted here to stay within the model's context budget; the full transcript is in the session record and export. ---`);
+  return blocks.join('\n\n');
 }
 
-const COMPACT_SUFFIX = "\n\nKeep this response compact: lead with your conclusion, use tight bullet points, and do not restate context or repeat earlier messages. Full depth and nuance are for if the moderator clicks \"Dive Deeper\" on this response — until then, favour brevity.";
+const COMPACT_SUFFIX = "\n\nKeep this response compact: under 350 words, lead with your conclusion, use tight bullet points, and do not restate context or repeat earlier messages. Full depth and nuance are for if the moderator clicks \"Dive Deeper\" on this response — until then, favour brevity.";
 
-function turnUserMessage({ agentKey, mode, instruction, messages }) {
+// The human moderator's RESOLVED/UNRESOLVED toggles (War Room > Disagreements)
+// otherwise never reach the model — an agent would keep re-litigating a topic
+// the moderator already marked settled, or "resolve" one still flagged open.
+function disagreementLogText(disagreements) {
+  if (!disagreements || !disagreements.length) return '';
+  const lines = disagreements.map((d) => `- #${d.n} [${d.status.toUpperCase()}] ${d.topic}`);
+  return [
+    '## DISAGREEMENT LOG (status as set by the human moderator — do not contradict without new evidence)',
+    lines.join('\n'),
+  ].join('\n');
+}
+
+function turnUserMessage({ agentKey, mode, instruction, messages, disagreements }) {
   const r = rounds();
   let roundText = r[mode] || r.crosstalk;
   if (mode === 'custom') roundText = `${r.custom}\n\nCUSTOM INSTRUCTION:\n${instruction || '(none given)'}`;
   if (mode === 'decision') roundText = 'Write the DECISION OUTPUT now from the transcript above.';
   if (mode === 'dive_deeper') roundText = `${r.dive_deeper}\n\n${instruction || ''}`;
+  else if (mode === 'meeting_minutes') roundText = `${r.meeting_minutes}\n\nMEETING: ${instruction || mode}`;
   else if (mode !== 'decision') roundText += COMPACT_SUFFIX;
   const who = agentKey === 'moderator' ? 'the MODERATOR ASSISTANT' : `the ${AGENTS[agentKey].label.toUpperCase()}`;
-  return [
-    '## TRANSCRIPT SO FAR',
-    transcriptText(messages),
-    '',
-    `## YOUR TURN. You are ${who}.`,
-    roundText,
-  ].join('\n');
+  const disText = disagreementLogText(disagreements);
+  // Round 1 (opening) is answered independently by design — the round text
+  // itself says not to reference other agents. Showing the real transcript
+  // here would leak later rounds' content into it if opening is ever re-run
+  // or resumed after other rounds already happened, so it never sees one.
+  const parts = mode === 'opening'
+    ? ['## TRANSCRIPT SO FAR', '(Round 1: Baselines. Answer independently — do not reference other agents or any other message, even if some exist.)']
+    : ['## TRANSCRIPT SO FAR', transcriptText(messages)];
+  if (disText) parts.push('', disText);
+  parts.push('', `## YOUR TURN. You are ${who}.`, roundText);
+  return parts.join('\n');
 }
 
 module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, turnUserMessage, inputsBlock, speakerLabel, rounds };
+

@@ -133,8 +133,8 @@ async function addDisagreement(sessionId, messageId, topic, body, status) {
 async function fullSession(id) {
   const session = await getSession(id);
   if (!session) return null;
-  const [messages, sources, disagreements] = await Promise.all([
-    listMessages(id), listSources(id), listDisagreements(id),
+  const [messages, sources, disagreements, autopilot_runs, reports] = await Promise.all([
+    listMessages(id), listSources(id), listDisagreements(id), listAutopilotRuns(id), listReports(id),
   ]);
   return {
     ...session,
@@ -142,8 +142,51 @@ async function fullSession(id) {
     messages,
     sources: sources.map((s) => ({ ...s, cited_by: JSON.parse(s.cited_by_json) })),
     disagreements,
+    autopilot_runs,
+    reports,
   };
 }
+
+// ---------- autopilot runs ----------
+async function createAutopilotRun(sessionId, { scope, disagreement_n, settings }) {
+  return one(
+    `INSERT INTO autopilot_runs (session_id, scope, disagreement_n, settings_json) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [sessionId, scope, disagreement_n ?? null, JSON.stringify(settings || {})],
+  );
+}
+async function updateAutopilotRun(id, { cycles_run, outcome, cost_usd, ended_at }) {
+  const sets = []; const vals = []; let i = 1;
+  const set = (col, val) => { sets.push(`${col} = $${i++}`); vals.push(val); };
+  if (cycles_run !== undefined) set('cycles_run', cycles_run);
+  if (outcome !== undefined) set('outcome', outcome);
+  if (cost_usd !== undefined) set('cost_usd', cost_usd);
+  if (ended_at !== undefined) set('ended_at', ended_at);
+  if (!sets.length) return getAutopilotRun(id);
+  vals.push(id);
+  return one(`UPDATE autopilot_runs SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+}
+async function getAutopilotRun(id) { return one('SELECT * FROM autopilot_runs WHERE id = $1', [id]); }
+async function listAutopilotRuns(sessionId) { return q('SELECT * FROM autopilot_runs WHERE session_id = $1 ORDER BY id', [sessionId]); }
+
+// ---------- reports ----------
+async function addReport(sessionId, { kind, depth, text, model, cost_usd, created_by }) {
+  return one(
+    `INSERT INTO reports (session_id, kind, depth, text, model, cost_usd, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [sessionId, kind, depth, text, model || null, cost_usd || 0, created_by || null],
+  );
+}
+async function listReports(sessionId) { return q('SELECT * FROM reports WHERE session_id = $1 ORDER BY id DESC', [sessionId]); }
+async function getReport(id, sessionId) { return one('SELECT * FROM reports WHERE id = $1 AND session_id = $2', [id, sessionId]); }
+async function deleteReport(id, sessionId) { await q('DELETE FROM reports WHERE id = $1 AND session_id = $2', [id, sessionId]); }
+
+// ---------- report emails ----------
+async function addReportEmail(reportId, { to, format, sent_by, provider_id }) {
+  return one(
+    `INSERT INTO report_emails (report_id, to_json, format, sent_by, provider_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [reportId, JSON.stringify(to || []), format, sent_by || null, provider_id || null],
+  );
+}
+async function listReportEmails(reportId) { return q('SELECT * FROM report_emails WHERE report_id = $1 ORDER BY id DESC', [reportId]); }
 
 async function getDefaults() {
   const row = await one('SELECT values_json FROM app_defaults WHERE id = true', []);
@@ -205,6 +248,9 @@ module.exports = {
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, setFavourite,
   listSources, upsertSource,
   listDisagreements, setDisStatus, addDisagreement,
+  createAutopilotRun, updateAutopilotRun, getAutopilotRun, listAutopilotRuns,
+  addReport, listReports, getReport, deleteReport,
+  addReportEmail, listReportEmails,
   fullSession,
   countUsers, getUserByEmail, listUsers, createUser, countAdmins, updateUser, getUserById, deleteUser,
   listAgents, getAgent, updateAgent,

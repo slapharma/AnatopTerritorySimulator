@@ -9,20 +9,32 @@ const FONT_DIR = path.join(__dirname, '..', 'fonts');
 const FONT = 'Montserrat';
 const COLOURS = {
   regulatory: '1D4ED8', clinical: '0F766E', commercial: '6D28D9', moderator: '334155', user: 'B45309',
-  verified: '166534', estimate: '92400E', unknown: '4B5563', link: '0891B2', muted: '64748B',
+  verified: '166534', estimate: '92400E', unknown: '4B5563', link: '0891B2', muted: '64748B', system: '94A3B8',
 };
 
 function fileName(s) {
   return `${s.title}`.replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').slice(0, 80) || 'session';
 }
+const KIND_LABEL = { interim: 'Interim', final: 'Final' };
+const DEPTH_LABEL = { brief: 'Brief', standard: 'Standard', full: 'Full' };
+function reportFileName(s, report) {
+  const date = new Date(report.created_at || Date.now()).toISOString().slice(0, 10).replace(/-/g, '');
+  const parts = [s.product || s.inputs?.product, s.country || s.inputs?.country, `${report.kind}-${report.depth}`, date]
+    .filter(Boolean).join('_');
+  return parts.replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').slice(0, 100) || `report_${report.id}`;
+}
 function speakerName(m) {
   if (m.role === 'user') return 'Moderator (human)';
+  if (m.role === 'system') return `System (${m.speaker})`;
   if (m.speaker === 'moderator') return 'Moderator Assistant';
   return prompts.AGENTS[m.speaker] ? prompts.AGENTS[m.speaker].label : m.speaker;
 }
-function speakerColour(m) { return COLOURS[m.role === 'user' ? 'user' : m.speaker] || COLOURS.moderator; }
+function speakerColour(m) { return COLOURS[m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : m.speaker] || COLOURS.moderator; }
 function modeLabel(mode) {
-  return { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output' }[mode] || mode || '';
+  return {
+    opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply',
+    custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper', autopilot: 'Autopilot',
+  }[mode] || mode || '';
 }
 function sourceMap(s) { const m = new Map(); for (const src of s.sources) m.set(src.n, src); return m; }
 
@@ -65,11 +77,55 @@ function docxBlocks(md) {
   return out;
 }
 
-async function toDocx(s) {
+// Rounds/cross-talk/autopilot runs completed so far, one line, for the report
+// footer's "About this report" block.
+function roundsSummaryLine(s) {
+  const seen = new Set();
+  for (const m of s.messages) if (m.mode && m.role !== 'user' && m.role !== 'system') seen.add(modeLabel(m.mode));
+  const runs = (s.autopilot_runs || []).length;
+  const parts = [...seen];
+  if (runs) parts.push(`${runs} autopilot run(s)`);
+  return parts.length ? parts.join(', ') : 'none run yet';
+}
+
+async function toDocx(s, opts = {}) {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, PageBreak, AlignmentType, ExternalHyperlink } = docx;
   const date = new Date().toISOString().slice(0, 10);
   const smap = sourceMap(s);
   const children = [];
+
+  if (opts.report) {
+    const r = opts.report;
+    children.push(
+      new Paragraph({ spacing: { before: 2400 } }),
+      new Paragraph({ children: [new TextRun({ text: 'Anatop Territory Evaluation', font: FONT, size: 24, color: COLOURS.muted })], alignment: AlignmentType.CENTER }),
+      new Paragraph({ children: [new TextRun({ text: `${KIND_LABEL[r.kind] || r.kind} report — ${DEPTH_LABEL[r.depth] || r.depth}`, font: FONT, size: 40, bold: true })], alignment: AlignmentType.CENTER, spacing: { before: 200 } }),
+      new Paragraph({ children: [new TextRun({ text: s.inputs.product || 'Product: INPUT MISSING', font: FONT, size: 30 })], alignment: AlignmentType.CENTER, spacing: { before: 160 } }),
+      new Paragraph({ children: [new TextRun({ text: s.inputs.country || 'Country: INPUT MISSING', font: FONT, size: 24 })], alignment: AlignmentType.CENTER }),
+      new Paragraph({ children: [new TextRun({ text: `${date} · ${r.created_by || 'unattributed'}`, font: FONT, size: 20, color: COLOURS.muted })], alignment: AlignmentType.CENTER, spacing: { before: 300 } }),
+      new Paragraph({ children: [new PageBreak()] }),
+    );
+    children.push(...docxBlocks(r.text || ''));
+    children.push(new Paragraph({ children: [new PageBreak()] }));
+    children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: 'About this report', font: FONT })] }));
+    children.push(new Paragraph({ children: [new TextRun({
+      text: `Session #${s.id} · ${s.title} · rounds run: ${roundsSummaryLine(s)} · model: ${r.model || 'n/a'} · cost: $${(r.cost_usd || 0).toFixed(3)}`,
+      font: FONT, size: 18, color: COLOURS.muted,
+    })] }));
+    const doc = new Document({
+      creator: 'Anatop Territory Evaluation', title: `${s.title} — ${r.kind} ${r.depth}`,
+      styles: {
+        default: { document: { run: { font: FONT, size: 20 } } },
+        paragraphStyles: [1, 2, 3, 4, 5].map((lvl) => ({
+          id: `Heading${lvl}`, name: `Heading ${lvl}`, basedOn: 'Normal', next: 'Normal', quickFormat: true,
+          run: { font: FONT, bold: true, size: [36, 28, 24, 22, 20][lvl - 1], color: '0F172A' },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        })),
+      },
+      sections: [{ properties: {}, children }],
+    });
+    return Packer.toBuffer(doc);
+  }
 
   // Title page
   children.push(
@@ -198,9 +254,41 @@ function pdfBlocks(md) {
   return out;
 }
 
-async function toPdf(s) {
+async function toPdf(s, opts = {}) {
   const date = new Date().toISOString().slice(0, 10);
   const content = [];
+
+  if (opts.report) {
+    const r = opts.report;
+    content.push(
+      { text: 'Anatop Territory Evaluation', color: '#' + COLOURS.muted, fontSize: 12, alignment: 'center', margin: [0, 160, 0, 8] },
+      { text: `${KIND_LABEL[r.kind] || r.kind} report — ${DEPTH_LABEL[r.depth] || r.depth}`, fontSize: 20, bold: true, alignment: 'center' },
+      { text: s.inputs.product || 'Product: INPUT MISSING', fontSize: 15, alignment: 'center', margin: [0, 8, 0, 0] },
+      { text: s.inputs.country || 'Country: INPUT MISSING', fontSize: 12, alignment: 'center' },
+      { text: `${date} · ${r.created_by || 'unattributed'}`, fontSize: 9, color: '#' + COLOURS.muted, alignment: 'center', margin: [0, 16, 0, 0], pageBreak: 'after' },
+    );
+    content.push(...pdfBlocks(r.text || ''));
+    content.push({ text: 'About this report', style: 'h3', pageBreak: 'before' });
+    content.push({
+      text: `Session #${s.id} · ${s.title} · rounds run: ${roundsSummaryLine(s)} · model: ${r.model || 'n/a'} · cost: $${(r.cost_usd || 0).toFixed(3)}`,
+      fontSize: 8.5, color: '#' + COLOURS.muted,
+    });
+    const docDefinition = {
+      info: { title: `${s.title} — ${r.kind} ${r.depth}`, author: 'Anatop Territory Evaluation' },
+      pageSize: 'A4', pageMargins: [50, 50, 50, 50],
+      defaultStyle: { font: FONT, fontSize: 9.5, lineHeight: 1.25 },
+      styles: {
+        h1: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] },
+        h2: { fontSize: 13, bold: true, margin: [0, 10, 0, 5] },
+        h3: { fontSize: 11, bold: true, margin: [0, 8, 0, 4] },
+        h4: { fontSize: 10, bold: true, margin: [0, 6, 0, 3] },
+      },
+      footer: (page, pages) => ({ text: `${s.title} · ${r.kind}/${r.depth} · ${page} / ${pages}`, alignment: 'center', fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 15, 0, 0] }),
+      content,
+    };
+    return pdfmake.createPdf(docDefinition).getBuffer();
+  }
+
   content.push(
     { text: 'Anatop Territory Evaluation', color: '#' + COLOURS.muted, fontSize: 14, alignment: 'center', margin: [0, 200, 0, 8] },
     { text: s.inputs.product || 'Product: INPUT MISSING', fontSize: 24, bold: true, alignment: 'center' },
@@ -256,4 +344,4 @@ async function toPdf(s) {
   return doc.getBuffer();
 }
 
-module.exports = { toDocx, toPdf, fileName };
+module.exports = { toDocx, toPdf, fileName, reportFileName };

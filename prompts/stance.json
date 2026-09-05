@@ -1,0 +1,8 @@
+{
+  "_comment": "Per-run stance override sentence bank for Autopilot, keyed by slider stop 1-5 (very passive .. very aggressive). Wording is a placeholder pending the agent-profile stance rename in another session — edit freely without a deploy.",
+  "1": "For this discussion, default to conceding quickly: only hold your position where the evidence is unambiguous and directly contradicts the other agent.",
+  "2": "For this discussion, lean toward conceding: raise objections only when the evidence clearly supports your view.",
+  "3": "For this discussion, weigh objections and concessions on the evidence alone, with no lean either way.",
+  "4": "For this discussion, lean toward holding your position: only concede when the other agent's evidence is clearly stronger than yours.",
+  "5": "For this discussion, hold your position firmly: concede only when the counter-evidence is overwhelming and leaves no reasonable basis for your original view."
+}

@@ -72,9 +72,16 @@
             <button class="btn btn-sm" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence">Round 2 · Challenge</button>
             <button class="btn btn-sm" data-round="round3" type="button" title="Agents give base / upside / downside figures">Round 3 · Converge</button>
             <button class="btn btn-sm" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far">Let the agents respond to each other</button>
+            <button class="btn btn-sm" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
             <button class="btn btn-sm" id="btn-custom" type="button" title="Write your own instruction for a round">Custom round…</button>
             <span class="spacer"></span>
-            <button class="btn btn-sm btn-accent" id="btn-decision" type="button" title="Moderator assistant writes Section 4 from the whole transcript">Write the decision output</button>
+            <div class="menu">
+              <button class="btn btn-sm btn-accent" type="button" id="btn-reports">Reports ▾</button>
+              <div class="menu-items" id="reports-menu" hidden>
+                <button type="button" id="btn-report-interim">Interim report…</button>
+                <button type="button" id="btn-report-final">Final report…</button>
+              </div>
+            </div>
             <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
           </div>
 
@@ -118,10 +125,12 @@
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
             <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
+            <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
             <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
+          <div class="tab-body" id="tab-reports" hidden></div>
           <div class="tab-body" id="tab-cost" hidden></div>
         </aside>
       </div>
@@ -165,6 +174,7 @@
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Close</button>
       <button value="discuss" class="btn btn-primary" type="submit" id="btn-dis-discuss">Ask selected agents</button>
+      <button value="autopilot" class="btn btn-accent" type="submit" id="btn-dis-autopilot">Autopilot on this disagreement…</button>
     </div>
   </form>
 </dialog>
@@ -176,6 +186,71 @@
     <div id="msg-modal-body" class="msg-body msg-modal-body"></div>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Autopilot dialog -->
+<dialog id="dlg-autopilot" class="dlg-wide">
+  <form method="dialog" class="dialog-form">
+    <h2>Autopilot</h2>
+    <p class="muted" id="autopilot-subtitle">Let the agents talk it out. Set the limits, then watch.</p>
+    <fieldset class="agent-picks">
+      <legend>Agents</legend>
+      <label><input type="checkbox" value="regulatory" checked> Regulatory</label>
+      <label><input type="checkbox" value="clinical" checked> Clinical</label>
+      <label><input type="checkbox" value="commercial" checked> Commercial</label>
+    </fieldset>
+    <label>Response length
+      <input type="range" id="autopilot-length" min="0" max="4" step="1" value="1">
+      <span class="range-label" id="autopilot-length-label"></span>
+    </label>
+    <label>Interactions (cycles)
+      <input type="range" id="autopilot-interactions" min="3" max="21" step="1" value="6">
+      <span class="range-label" id="autopilot-interactions-label"></span>
+    </label>
+    <label class="check-inline"><input type="checkbox" id="autopilot-stop-unanimous" checked> Stop when unanimous</label>
+    <label class="check-inline" id="autopilot-auto-resolve-row" hidden><input type="checkbox" id="autopilot-auto-resolve" checked> Auto-resolve this disagreement when unanimous</label>
+    <div id="autopilot-stances"></div>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Cancel</button>
+      <button value="start" class="btn btn-primary" type="submit" id="btn-autopilot-start">Start autopilot</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Report generation dialog -->
+<dialog id="dlg-report">
+  <form method="dialog" class="dialog-form">
+    <h2 id="report-modal-title">Report</h2>
+    <p class="muted" id="report-modal-warning" hidden>Round 3 has not run yet. A Final report can still be generated, but the recommendation may be premature.</p>
+    <label>Depth
+      <input type="range" id="report-depth" min="0" max="2" step="1" value="1">
+      <span class="range-label" id="report-depth-label"></span>
+    </label>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Cancel</button>
+      <button value="generate" class="btn btn-primary" type="submit" id="btn-report-generate">Generate</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Email report dialog -->
+<dialog id="dlg-email-report">
+  <form method="dialog" class="dialog-form">
+    <h2>Email report</h2>
+    <label>Recipients (comma-separated)<input type="text" id="email-to" placeholder="name@example.com, name2@example.com"></label>
+    <label>Format
+      <select id="email-format">
+        <option value="pdf">PDF</option>
+        <option value="docx">Word (.docx)</option>
+        <option value="both">Both</option>
+      </select>
+    </label>
+    <label>Note (optional)<textarea id="email-note" rows="3"></textarea></label>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Cancel</button>
+      <button value="send" class="btn btn-primary" type="submit" id="btn-email-send">Send</button>
     </div>
   </form>
 </dialog>

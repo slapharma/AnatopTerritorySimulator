@@ -103,6 +103,23 @@ function readPrompt(file) {
 function rounds() {
   return JSON.parse(readPrompt('rounds.json'));
 }
+function stanceBank() {
+  return JSON.parse(readPrompt('stance.json'));
+}
+
+// Splits a report-*.md file into its `## NAME` sections (COMMON / BRIEF / STANDARD / FULL).
+function reportSections(file) {
+  const text = readPrompt(file);
+  const out = {};
+  let key = null;
+  for (const line of text.split('\n')) {
+    const h = line.match(/^##\s+(\w+)\s*$/);
+    if (h) { key = h[1].toLowerCase(); out[key] = []; continue; }
+    if (key) out[key].push(line);
+  }
+  for (const k of Object.keys(out)) out[k] = out[k].join('\n').trim();
+  return out;
+}
 
 function fill(template, inputs) {
   const v = (k) => (inputs[k] && String(inputs[k]).trim()) || 'INPUT MISSING';
@@ -179,13 +196,52 @@ function transcriptText(messages) {
 
 const COMPACT_SUFFIX = "\n\nKeep this response compact: lead with your conclusion, use tight bullet points, and do not restate context or repeat earlier messages. Full depth and nuance are for if the moderator clicks \"Dive Deeper\" on this response — until then, favour brevity.";
 
-function turnUserMessage({ agentKey, mode, instruction, messages }) {
+// Builds the "REPORT METADATA" block passed to the moderator for report mode —
+// assembled server-side from data the model would otherwise have to re-derive
+// from the raw transcript (disagreement statuses, autopilot run summaries,
+// sources count, missing inputs).
+function reportMetaBlock({ disagreements, autopilotRuns, sourcesCount, inputs }) {
+  const disLines = (disagreements || []).length
+    ? disagreements.map((d) => `- #${d.n} ${d.topic} — ${d.status.toUpperCase()}`).join('\n')
+    : '(none logged)';
+  const runLines = (autopilotRuns || []).length
+    ? autopilotRuns.map((r) => `- Run ${r.id}: scope ${r.scope}${r.disagreement_n ? ` (disagreement #${r.disagreement_n})` : ''}, ${r.cycles_run} cycle(s), outcome: ${r.outcome || 'in progress'}`).join('\n')
+    : '(none run)';
+  const missing = INPUT_FIELDS.filter((f) => !(inputs[f.key] || '').trim()).map((f) => `- ${f.label}`);
+  const missingLines = missing.length ? missing.join('\n') : '(none — all inputs provided)';
+  return [
+    '## REPORT METADATA (assembled by the app — use this instead of re-deriving it from the transcript)',
+    '### Disagreement log',
+    disLines,
+    '',
+    '### Autopilot runs',
+    runLines,
+    '',
+    `### Sources cited so far: ${sourcesCount || 0}`,
+    '',
+    '### Inputs still marked INPUT MISSING',
+    missingLines,
+  ].join('\n');
+}
+
+function turnUserMessage({ agentKey, mode, instruction, messages, max_chars, stance, disagreementTopic, report, inputs }) {
   const r = rounds();
   let roundText = r[mode] || r.crosstalk;
   if (mode === 'custom') roundText = `${r.custom}\n\nCUSTOM INSTRUCTION:\n${instruction || '(none given)'}`;
   if (mode === 'decision') roundText = 'Write the DECISION OUTPUT now from the transcript above.';
   if (mode === 'dive_deeper') roundText = `${r.dive_deeper}\n\n${instruction || ''}`;
-  else if (mode !== 'decision') roundText += COMPACT_SUFFIX;
+  else if (mode === 'autopilot') {
+    roundText = r.autopilot;
+    if (disagreementTopic) roundText += `\n\nThis discussion is scoped to Disagreement — ${disagreementTopic}. Your POSITION line's sentence must name this topic.`;
+    if (max_chars && max_chars !== 'as_required') roundText += `\n\nHard limit: ${max_chars} characters.`;
+    if (stance) roundText += `\n\n${stance}`;
+  } else if (mode === 'report') {
+    const file = report.kind === 'interim' ? 'report-interim.md' : 'report-final.md';
+    const sections = reportSections(file);
+    const depthBody = sections[report.depth] || sections.full;
+    roundText = fill([sections.common, '', depthBody].join('\n'), inputs || {});
+    roundText += `\n\n${reportMetaBlock(report.meta || {})}`;
+  } else if (mode !== 'decision') roundText += COMPACT_SUFFIX;
   const who = agentKey === 'moderator' ? 'the MODERATOR ASSISTANT' : `the ${AGENTS[agentKey].label.toUpperCase()}`;
   return [
     '## TRANSCRIPT SO FAR',
@@ -196,4 +252,7 @@ function turnUserMessage({ agentKey, mode, instruction, messages }) {
   ].join('\n');
 }
 
-module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, turnUserMessage, inputsBlock, speakerLabel, rounds };
+module.exports = {
+  AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, turnUserMessage, inputsBlock,
+  speakerLabel, rounds, stanceBank,
+};

@@ -7,6 +7,7 @@ const db = require('./db');
 const prompts = require('./prompts');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
+const email = require('./email');
 const { basicAuth, requireAdmin, hashPassword } = require('./auth');
 
 const app = express();
@@ -36,6 +37,11 @@ app.get('/api/config', (req, res) => {
     has_api_key: Boolean(process.env.OPENROUTER_API_KEY),
     search_provider: config.SEARCH.provider,
     rounds: prompts.rounds(),
+    stance_bank: prompts.stanceBank(),
+    autopilot_char_stops: config.AUTOPILOT_CHAR_STOPS,
+    autopilot: config.AUTOPILOT,
+    report_depth: config.REPORT_DEPTH,
+    email_configured: Boolean(process.env.RESEND_API_KEY),
   });
 });
 
@@ -172,6 +178,42 @@ app.patch('/api/sessions/:id/disagreements/:n', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ---------- autopilot runs ----------
+app.post('/api/sessions/:id/autopilot-runs', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
+    const scope = req.body.scope === 'disagreement' ? 'disagreement' : 'discussion';
+    const disagreement_n = scope === 'disagreement' ? Number(req.body.disagreement_n) : null;
+    const run = await db.createAutopilotRun(id, { scope, disagreement_n, settings: req.body.settings || {} });
+    res.json(run);
+  } catch (e) { next(e); }
+});
+app.patch('/api/sessions/:id/autopilot-runs/:runId', async (req, res, next) => {
+  try {
+    const run = await db.updateAutopilotRun(Number(req.params.runId), {
+      cycles_run: req.body.cycles_run, outcome: req.body.outcome, cost_usd: req.body.cost_usd,
+      ended_at: req.body.ended_at ? new Date(req.body.ended_at) : undefined,
+    });
+    if (!run) return res.status(404).json({ error: 'Autopilot run not found' });
+    res.json(run);
+  } catch (e) { next(e); }
+});
+
+// A visible, exportable note in the transcript explaining why an autopilot run
+// stopped (reused for anything that needs a system-authored line, not agent turns).
+app.post('/api/sessions/:id/system-note', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
+    const text = String(req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Empty note' });
+    const speaker = String(req.body.speaker || 'autopilot');
+    const msg = await db.addMessage(id, { role: 'system', speaker, mode: req.body.mode || null, text });
+    res.json(msg);
+  } catch (e) { next(e); }
+});
+
 // Human moderator posts a message; the client then asks each respondent to reply.
 app.post('/api/sessions/:id/messages', async (req, res, next) => {
   try {
@@ -271,6 +313,26 @@ async function assembleText(sessionId, messageId, speaker, text, trace) {
   return out.trim();
 }
 
+// Autopilot's "Hard limit: N characters" is only a prompt instruction — small/
+// free models routinely ignore it (observed: a 300-char cap produced a 2,000+
+// char reply). Back it with a real truncation so the limit holds regardless of
+// model compliance, while preserving the trailing POSITION line the unanimity
+// check depends on. 10% slack matches what the plan's own verification allows.
+function enforceCharLimit(text, maxChars) {
+  if (!maxChars || maxChars === 'as_required') return text;
+  const limit = Math.round(Number(maxChars) * 1.1);
+  if (text.length <= limit) return text;
+  const posMatch = /\n*POSITION:\s*(AGREE|DISAGREE)\s*[—-]\s*.*$/i.exec(text);
+  const positionLine = posMatch ? posMatch[0].trim() : '';
+  const body = posMatch ? text.slice(0, posMatch.index) : text;
+  const bodyLimit = Math.max(0, limit - positionLine.length - 40);
+  let cut = body.slice(0, bodyLimit);
+  const lastSpace = cut.lastIndexOf(' ');
+  if (lastSpace > bodyLimit * 0.6) cut = cut.slice(0, lastSpace);
+  const note = `[…truncated to the ${maxChars}-character limit]`;
+  return positionLine ? `${cut.trimEnd()} ${note}\n\n${positionLine}` : `${cut.trimEnd()} ${note}`;
+}
+
 app.post('/api/sessions/:id/turn', async (req, res) => {
   const id = Number(req.params.id);
   const session = await db.fullSession(id);
@@ -279,7 +341,8 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   const mode = req.body.mode || 'crosstalk';
   const instruction = req.body.instruction || '';
   if (!prompts.AGENTS[speaker]) return res.status(400).json({ error: `Unknown speaker ${speaker}` });
-  if (speaker === 'moderator' && mode !== 'decision') return res.status(400).json({ error: 'The moderator assistant only writes the decision output' });
+  if (speaker === 'moderator' && !['decision', 'report'].includes(mode)) return res.status(400).json({ error: 'The moderator assistant only writes the decision output or a report' });
+  if (mode === 'report' && speaker !== 'moderator') return res.status(400).json({ error: 'Only the moderator assistant writes reports' });
   // Keyed on session+speaker (not just session) so Round 1 can run all three
   // agents concurrently; still blocks the same agent double-firing.
   const runKey = `${id}:${speaker}`;
@@ -292,21 +355,80 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   res.flushHeaders();
   const send = (event, data) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
-  // Row first so sources can reference it; filled in when the turn completes.
-  const msg = await db.addMessage(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode, text: '' });
-  send('start', { message_id: msg.id, seq: msg.seq, speaker, mode, created_at: msg.created_at });
+  // Autopilot: resolve the stance sentence server-side from its slider index,
+  // and the disagreement topic (if scoped) so the model gets a plain sentence.
+  let stanceText = null;
+  let disagreementTopic = null;
+  if (mode === 'autopilot') {
+    if (req.body.stance_index) stanceText = (prompts.stanceBank()[String(req.body.stance_index)]) || null;
+    if (req.body.disagreement_n) {
+      const d = session.disagreements.find((x) => x.n === Number(req.body.disagreement_n));
+      disagreementTopic = d ? d.topic : null;
+    }
+  }
+
+  // Reports don't join the transcript: no message row up front. Final reports
+  // still get one at the end (see below) for backward compatibility.
+  const isReport = mode === 'report';
+  const msg = isReport ? null : await db.addMessage(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode, text: '' });
+  if (!isReport) send('start', { message_id: msg.id, seq: msg.seq, speaker, mode, created_at: msg.created_at });
+  else send('start', { report: true, kind: req.body.kind, depth: req.body.depth });
   const searches = [];
   const turnStarted = Date.now();
   try {
     const result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
       model: session.model || config.MODEL,
+      max_chars: req.body.max_chars, stance: stanceText, disagreementTopic,
+      report: isReport ? {
+        kind: req.body.kind === 'final' ? 'final' : 'interim',
+        depth: ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard',
+        meta: {
+          disagreements: session.disagreements, autopilotRuns: session.autopilot_runs,
+          sourcesCount: session.sources.length, inputs: session.inputs,
+        },
+      } : undefined,
       onEvent: (name, payload) => { if (name === 'search') searches.push(payload.query); send(name, payload); },
     });
-    const text = await assembleText(id, msg.id, speaker, result.text, result.trace);
+
+    if (isReport) {
+      const kind = req.body.kind === 'final' ? 'final' : 'interim';
+      const depth = ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard';
+      // No message row backs a report (except Final, added below), so pass no
+      // message id to link citations to — reports still get [n] markers against
+      // the session's existing source list, just without a "first seen here" link.
+      const text = await assembleText(id, null, 'moderator', result.text, result.trace);
+      const report = await db.addReport(id, {
+        kind, depth, text, model: result.model, cost_usd: result.cost_usd,
+        created_by: (req.user && req.user.email) || null,
+      });
+      // Backward compat: a Final report still leaves a transcript message and
+      // mirrors to sessions.decision_text, so old sessions/exports render unchanged.
+      let finalMessage = null;
+      if (kind === 'final') {
+        const finalMsg = await db.addMessage(id, { role: 'moderator', speaker: 'moderator', mode: 'decision', text });
+        await db.updateMessage(finalMsg.id, {
+          text, content_json: JSON.stringify({ model: result.model, trace: result.trace, usage: result.usage, report_id: report.id }),
+          input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
+          searches: result.usage.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
+        });
+        await db.setDecision(id, text);
+        finalMessage = await db.getMessage(finalMsg.id);
+      }
+      await db.touchSession(id);
+      send('done', { report, message: finalMessage });
+      running.delete(runKey);
+      return res.end();
+    }
+
+    let text = await assembleText(id, msg.id, speaker, result.text, result.trace);
+    if (mode === 'autopilot') text = enforceCharLimit(text, req.body.max_chars);
     const u = result.usage;
     await db.updateMessage(msg.id, {
-      text, content_json: JSON.stringify({ model: result.model, trace: result.trace, usage: u }),
+      text, content_json: JSON.stringify({
+        model: result.model, trace: result.trace, usage: u,
+        ...(mode === 'autopilot' ? { max_chars: req.body.max_chars, stance_index: req.body.stance_index, autopilot: req.body.autopilot } : {}),
+      }),
       input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
       searches: u.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
     });
@@ -325,16 +447,80 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     });
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
-    console.error(`[turn ${msg.id}] ${speaker}/${mode} failed:`, message);
-    await db.updateMessage(msg.id, {
-      text: '', content_json: null, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
-      searches: 0, cost_usd: 0, error: message, duration_ms: Date.now() - turnStarted,
-    });
-    send('error', { message_id: msg.id, message, code: err.code || (err.status ? `HTTP ${err.status}` : 'ERROR') });
+    console.error(`[turn ${msg ? msg.id : 'report'}] ${speaker}/${mode} failed:`, message);
+    if (msg) {
+      await db.updateMessage(msg.id, {
+        text: '', content_json: null, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+        searches: 0, cost_usd: 0, error: message, duration_ms: Date.now() - turnStarted,
+      });
+    }
+    send('error', { message_id: msg ? msg.id : null, message, code: err.code || (err.status ? `HTTP ${err.status}` : 'ERROR') });
   } finally {
     running.delete(runKey);
     res.end();
   }
+});
+
+// ---------- reports ----------
+app.get('/api/sessions/:id/reports', async (req, res, next) => {
+  try { res.json(await db.listReports(Number(req.params.id))); } catch (e) { next(e); }
+});
+app.get('/api/sessions/:id/reports/:rid', async (req, res, next) => {
+  try {
+    const r = await db.getReport(Number(req.params.rid), Number(req.params.id));
+    if (!r) return res.status(404).json({ error: 'Report not found' });
+    res.json(r);
+  } catch (e) { next(e); }
+});
+app.delete('/api/sessions/:id/reports/:rid', async (req, res, next) => {
+  try { await db.deleteReport(Number(req.params.rid), Number(req.params.id)); res.json({ ok: true }); } catch (e) { next(e); }
+});
+
+async function loadReportForExport(req, res) {
+  const s = await db.fullSession(Number(req.params.id));
+  if (!s) { res.status(404).send('Session not found'); return null; }
+  const report = await db.getReport(Number(req.params.rid), s.id);
+  if (!report) { res.status(404).send('Report not found'); return null; }
+  return { s, report };
+}
+app.get('/api/sessions/:id/reports/:rid/export.docx', async (req, res, next) => {
+  try {
+    const loaded = await loadReportForExport(req, res);
+    if (!loaded) return;
+    const buf = await exporter.toDocx(loaded.s, { report: loaded.report });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.reportFileName(loaded.s, loaded.report)}.docx"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+app.get('/api/sessions/:id/reports/:rid/export.pdf', async (req, res, next) => {
+  try {
+    const loaded = await loadReportForExport(req, res);
+    if (!loaded) return;
+    const buf = await exporter.toPdf(loaded.s, { report: loaded.report });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.reportFileName(loaded.s, loaded.report)}.pdf"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/sessions/:id/reports/:rid/email', async (req, res, next) => {
+  try {
+    if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'Email not configured (RESEND_API_KEY is not set)' });
+    const loaded = await loadReportForExport(req, res);
+    if (!loaded) return;
+    const { s, report } = loaded;
+    const to = Array.isArray(req.body.to) ? req.body.to.map((x) => String(x).trim()).filter(Boolean) : [];
+    if (!to.length) return res.status(400).json({ error: 'At least one recipient is required' });
+    const format = ['pdf', 'docx', 'both'].includes(req.body.format) ? req.body.format : 'pdf';
+    const attachments = [];
+    if (format === 'pdf' || format === 'both') attachments.push({ filename: `${exporter.reportFileName(s, report)}.pdf`, content: await exporter.toPdf(s, { report }) });
+    if (format === 'docx' || format === 'both') attachments.push({ filename: `${exporter.reportFileName(s, report)}.docx`, content: await exporter.toDocx(s, { report }) });
+    const sentBy = (req.user && req.user.email) || null;
+    const result = await email.sendReportEmail({ session: s, report, to, attachments, note: req.body.note || '', sentBy });
+    const row = await db.addReportEmail(report.id, { to, format, sent_by: sentBy, provider_id: result.id });
+    res.json({ ok: true, provider_id: result.id, row });
+  } catch (e) { next(e); }
 });
 
 // ---------- exports ----------

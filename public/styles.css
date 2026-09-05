@@ -270,3 +270,30 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .fields { grid-template-columns: 1fr; }
   .agent-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- autopilot ---------- */
+.menu-items button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; color: var(--text); border-radius: 6px; font-size: 13px; cursor: pointer; }
+.menu-items button:hover { background: var(--surface-2); }
+.cycle-header { display: flex; align-items: center; gap: 10px; margin: 10px 0 -4px; color: var(--primary-hover); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.cycle-header::before, .cycle-header::after { content: ''; flex: 1; height: 1px; background: var(--primary-soft); }
+.cycle-header span { white-space: nowrap; }
+.check-inline { flex-direction: row !important; align-items: center; gap: 6px !important; cursor: pointer; }
+.check-inline input { margin: 0; }
+.range-label { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+#autopilot-stances { display: flex; flex-direction: column; gap: 8px; }
+.stance-row { display: flex; flex-direction: column; gap: 4px; }
+.badge-position { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; margin-left: 6px; }
+.badge-position.agree { color: var(--verified-fg); background: var(--verified-bg); }
+.badge-position.disagree { color: var(--estimate-fg); background: var(--estimate-bg); }
+.badge-position.missing { color: var(--muted); background: var(--surface-2); }
+.msg-system .msg-body { color: var(--muted); font-style: italic; font-size: 12.5px; }
+.msg-system { border-left: 3px solid var(--border-strong); padding-left: 10px; }
+
+/* ---------- reports ---------- */
+.report-card { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.report-card .rc-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.report-card .rc-meta { color: var(--muted); font-size: 11.5px; margin: 2px 0 6px; }
+.report-card .rc-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.report-card .rc-actions button, .report-card .rc-actions a { border: none; background: none; color: var(--primary); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; }
+.report-card .rc-actions button.danger, .report-card .rc-actions a.danger { color: var(--danger); }
+.report-kind-final { color: var(--accent); }

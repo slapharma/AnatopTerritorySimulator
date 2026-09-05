@@ -17,11 +17,28 @@
   };
 
   // ---------------- helpers ----------------
-  const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)' };
-  const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper' };
+  const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)', autopilot: 'Autopilot' };
+  const MODE_LABEL = { opening: 'Round 1', round2: 'Round 2', round3: 'Round 3', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom round', decision: 'Decision output', dive_deeper: 'Dive Deeper', autopilot: 'Autopilot' };
   // Modes where all three agents answer independently within the round — laid
   // out as a 3-column grid instead of stacked, both live and on reload.
   const GRID_MODES = ['opening', 'round2', 'round3', 'crosstalk'];
+  const LENGTH_LABELS = ['300 characters', '600 characters', '1,200 characters', '2,500 characters', 'As required'];
+  const LENGTH_VALUES = [300, 600, 1200, 2500, 'as_required'];
+  const STANCE_LABELS = ['Very passive', 'Passive', 'Neutral', 'Aggressive', 'Very aggressive'];
+  const DEPTH_LABELS = ['Brief · ~1 page', 'Standard · 3–5 pages', 'Full · 8–12 pages'];
+  const DEPTH_VALUES = ['brief', 'standard', 'full'];
+  const AUTOPILOT_OUTCOME_LABEL = {
+    stopped_by_moderator: 'Stopped by the moderator', failed: 'A turn failed', unanimous: 'All agents reached AGREE',
+    cost_cap: 'Cost cap reached', cycle_cap: 'Cycle limit reached', safety_cap: 'Safety cycle cap reached',
+  };
+  function parsePosition(text) {
+    const m = /POSITION:\s*(AGREE|DISAGREE)\b/i.exec(text || '');
+    return m ? m[1].toUpperCase() : null;
+  }
+  function autopilotMeta(m) {
+    if (!m.content_json) return null;
+    try { return JSON.parse(m.content_json).autopilot || null; } catch { return null; }
+  }
   function fmtTime(utc) {
     if (!utc) return '';
     // Postgres timestamptz rows arrive already ISO-8601 with a "Z"/offset suffix;
@@ -271,7 +288,7 @@
     fillForm($('#session-inputs-form'), s.inputs, { clear: true });
     // transcript
     renderTranscript();
-    renderSources(); renderDisagreements(); renderCost();
+    renderSources(); renderDisagreements(); renderReports(); renderCost();
     setRunning(state.running);
     const t = $('#transcript');
     t.scrollTop = t.scrollHeight;
@@ -310,7 +327,24 @@
         t.appendChild(div);
         lastMode = m.mode;
       }
-      if (GRID_MODES.includes(m.mode) && m.role !== 'user') {
+      if (m.mode === 'autopilot' && m.role !== 'user') {
+        // Cycle boundary, not mode boundary: group consecutive autopilot
+        // messages that share the same cycle number into one grid with its
+        // own header, so a whole run doesn't render as a single giant grid.
+        const meta = autopilotMeta(m) || {};
+        const header = document.createElement('div'); header.className = 'cycle-header';
+        header.innerHTML = `<span>Cycle ${meta.cycle ?? '?'}${meta.run_id ? ` · run ${meta.run_id}` : ''}</span>`;
+        t.appendChild(header);
+        const grid = document.createElement('div'); grid.className = 'agent-grid';
+        const cycle = meta.cycle;
+        while (i < s.messages.length && s.messages[i].mode === 'autopilot' && s.messages[i].role !== 'user' && (autopilotMeta(s.messages[i]) || {}).cycle === cycle) {
+          const col = document.createElement('div'); col.className = 'agent-col';
+          col.appendChild(messageElement(s.messages[i]));
+          grid.appendChild(col);
+          i++;
+        }
+        t.appendChild(grid);
+      } else if (GRID_MODES.includes(m.mode) && m.role !== 'user') {
         // Every agent round (Round 1/2/3, cross-talk) is laid out as three
         // side-by-side columns instead of stacking responses top to bottom.
         const mode = m.mode;
@@ -352,28 +386,38 @@
 
   function messageElement(m) {
     const speaker = m.role === 'user' ? 'user' : m.speaker;
+    const isSystem = m.role === 'system';
     const el = document.createElement('article');
-    el.className = `msg msg-${speaker}${m.favourite ? ' favourited' : ''}`;
+    el.className = `msg msg-${speaker}${isSystem ? ' msg-system' : ''}${m.favourite ? ' favourited' : ''}`;
     el.id = `msg-${m.id}`;
     el.dataset.speaker = speaker;
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` → ${AGENT_LABEL[m.addressed_to]}` : '';
     const responseTime = m.duration_ms != null ? `⏱ ${fmtElapsed(m.duration_ms)}` : fmtTime(m.created_at);
-    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span><button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button></div>`;
-    const favBtn = $('.fav-btn', el);
-    favBtn.addEventListener('click', async () => {
-      const next = !favBtn.classList.contains('on');
-      favBtn.disabled = true;
-      try {
-        const updated = await api.send('PATCH', `/api/sessions/${state.session.id}/messages/${m.id}/favourite`, { favourite: next });
-        m.favourite = updated.favourite;
-        favBtn.classList.toggle('on', m.favourite);
-        favBtn.textContent = m.favourite ? '★' : '☆';
-        favBtn.title = m.favourite ? 'Remove from favourites' : 'Favourite this response';
-        favBtn.setAttribute('aria-pressed', m.favourite ? 'true' : 'false');
-        el.classList.toggle('favourited', m.favourite);
-        if (state.filterSpeaker === 'favourites') applyFilter();
-      } catch (e) { toast(`Could not update favourite: ${e.message}`); } finally { favBtn.disabled = false; }
-    });
+    el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${MODE_LABEL[m.mode] || m.mode}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta">${m.cost_usd ? money(m.cost_usd) : ''}</span>${isSystem ? '' : `<button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button>`}</div>`;
+    if (m.mode === 'autopilot' && !m.error) {
+      const pos = parsePosition(m.text);
+      const badge = document.createElement('span');
+      badge.className = `badge-position ${pos === 'AGREE' ? 'agree' : pos === 'DISAGREE' ? 'disagree' : 'missing'}`;
+      badge.textContent = pos || 'no position line';
+      $('.msg-head', el).appendChild(badge);
+    }
+    if (!isSystem) {
+      const favBtn = $('.fav-btn', el);
+      favBtn.addEventListener('click', async () => {
+        const next = !favBtn.classList.contains('on');
+        favBtn.disabled = true;
+        try {
+          const updated = await api.send('PATCH', `/api/sessions/${state.session.id}/messages/${m.id}/favourite`, { favourite: next });
+          m.favourite = updated.favourite;
+          favBtn.classList.toggle('on', m.favourite);
+          favBtn.textContent = m.favourite ? '★' : '☆';
+          favBtn.title = m.favourite ? 'Remove from favourites' : 'Favourite this response';
+          favBtn.setAttribute('aria-pressed', m.favourite ? 'true' : 'false');
+          el.classList.toggle('favourited', m.favourite);
+          if (state.filterSpeaker === 'favourites') applyFilter();
+        } catch (e) { toast(`Could not update favourite: ${e.message}`); } finally { favBtn.disabled = false; }
+      });
+    }
     const body = document.createElement('div'); body.className = 'msg-body';
     if (m.error) {
       const err = document.createElement('div'); err.className = 'msg-error';
@@ -392,10 +436,12 @@
       body.appendChild(renderMarkdown(m.text));
       linkAgentMentions(body, m);
       el.appendChild(body);
+      if (!isSystem) {
       const openFullBtn = document.createElement('button');
       openFullBtn.type = 'button'; openFullBtn.className = 'msg-openfull'; openFullBtn.title = 'Open full response in a wide view'; openFullBtn.textContent = '⤢';
       openFullBtn.addEventListener('click', () => openMessageModal(m, speaker));
       $('.msg-head', el).insertBefore(openFullBtn, $('.msg-head', el).firstChild);
+      }
       if ((m.text || '').length > 2500 && m.mode !== 'decision') {
         body.classList.add('collapsed');
         const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm msg-expand'; btn.textContent = 'Show full message';
@@ -404,7 +450,7 @@
       }
       // Custom rounds aren't offered: the free-form instruction that produced this
       // response isn't stored on the message, so it can't be reproduced faithfully.
-      if (m.role !== 'user' && m.mode !== 'custom') {
+      if (m.role !== 'user' && !isSystem && m.mode !== 'custom' && m.mode !== 'autopilot') {
         const regen = document.createElement('button'); regen.type = 'button'; regen.className = 'btn btn-sm msg-regen'; regen.textContent = '↻ Regenerate';
         regen.title = 'Delete this response and have the agent answer again';
         regen.addEventListener('click', async () => {
@@ -419,7 +465,7 @@
       }
       // Responses are compact by default (see COMPACT_SUFFIX server-side); this asks
       // the same agent to expand THIS specific response as a new follow-up message.
-      if (m.role !== 'user' && m.mode !== 'decision') {
+      if (m.role !== 'user' && !isSystem && m.mode !== 'decision') {
         const dive = document.createElement('button'); dive.type = 'button'; dive.className = 'btn btn-sm msg-dive'; dive.textContent = '⇊ Dive Deeper';
         dive.title = 'Ask the agent to expand this specific response with full detail';
         dive.addEventListener('click', async () => {
@@ -551,7 +597,8 @@
   // Streams one agent turn. Resolves when the turn is done or has failed.
   // `container` (optional): where to append the live element — a Round 1
   // column instead of the flat transcript, when running in parallel.
-  function runTurn({ speaker, mode, instruction }, container) {
+  function runTurn(turn, container) {
+    const { speaker, mode, instruction } = turn;
     return new Promise(async (resolve) => {
       const t = $('#transcript');
       $('.empty', t)?.remove();
@@ -595,7 +642,7 @@
             if (messageId) { await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${messageId}`); state.session.messages = state.session.messages.filter((x) => x.id !== messageId); }
             el.remove();
             setRunning(true);
-            try { await runTurn({ speaker, mode, instruction }, container); } finally { setRunning(false); loadSessions(); }
+            try { await runTurn(turn, container); } finally { setRunning(false); loadSessions(); }
           });
           err.appendChild(retry);
           el.appendChild(err);
@@ -603,7 +650,7 @@
         resolve(ok);
       };
       try {
-        const r = await fetch(`/api/sessions/${state.session.id}/turn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ speaker, mode, instruction }) });
+        const r = await fetch(`/api/sessions/${state.session.id}/turn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(turn) });
         if (!r.ok) { const j = await r.json().catch(() => ({})); return finish(false, j.error || r.statusText); }
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -708,6 +755,208 @@
 
   const ALL = ['regulatory', 'clinical', 'commercial'];
 
+  // ---------------- autopilot ----------------
+  // A boosted, multi-cycle cross-talk that runs until a stop condition is met.
+  // Each cycle is one sequential pass of the checked agents (same ordering
+  // model as Round 2/3), speaking order rotating each cycle. Client-driven so
+  // each turn stays one HTTP request (Vercel's 800s function cap).
+  async function runAutopilot(settings) {
+    if (state.running) { toast('A turn is already running'); return; }
+    setRunning(true);
+    const sessionId = state.session.id;
+    let run;
+    try {
+      run = await api.send('POST', `/api/sessions/${sessionId}/autopilot-runs`, {
+        scope: settings.scope, disagreement_n: settings.disagreement_n, settings,
+      });
+    } catch (e) { toast(`Could not start autopilot: ${e.message}`); setRunning(false); return; }
+
+    const base = settings.agents.slice();
+    const t = $('#transcript');
+    $('.empty', t)?.remove();
+    const hardCap = state.config.autopilot.max_cycles;
+    const interactionsCap = settings.interactions === 'inf' ? Infinity : settings.interactions;
+    let cycle = 0;
+    let costSum = 0;
+    let outcome = null;
+
+    try {
+      cycleLoop:
+      while (true) {
+        if (state.stopRequested) { outcome = 'stopped_by_moderator'; break; }
+        cycle++;
+        const shift = (cycle - 1) % base.length;
+        const order = base.slice(shift).concat(base.slice(0, shift));
+        const header = document.createElement('div'); header.className = 'cycle-header';
+        header.innerHTML = `<span>Cycle ${cycle}${Number.isFinite(interactionsCap) ? ` of ${interactionsCap}` : ''}</span>`;
+        t.appendChild(header);
+        const grid = document.createElement('div'); grid.className = 'agent-grid';
+        t.appendChild(grid);
+        t.scrollTop = t.scrollHeight;
+        const positions = [];
+        for (const speaker of order) {
+          if (state.stopRequested) { outcome = 'stopped_by_moderator'; break cycleLoop; }
+          const col = document.createElement('div'); col.className = 'agent-col';
+          grid.appendChild(col);
+          const turn = {
+            speaker, mode: 'autopilot', max_chars: settings.max_chars,
+            stance_index: settings.stances[speaker], disagreement_n: settings.disagreement_n,
+            autopilot: { run_id: run.id, cycle },
+          };
+          const ok = await runTurn(turn, col);
+          if (!ok) { outcome = 'failed'; break cycleLoop; }
+          const last = state.session.messages[state.session.messages.length - 1];
+          costSum += last.cost_usd || 0;
+          positions.push(parsePosition(last.text));
+        }
+        await api.send('PATCH', `/api/sessions/${sessionId}/autopilot-runs/${run.id}`, { cycles_run: cycle, cost_usd: costSum }).catch(() => {});
+        const unanimous = positions.length === order.length && positions.every((p) => p === 'AGREE');
+        if (settings.stopOnUnanimous && unanimous) { outcome = 'unanimous'; break; }
+        if (costSum >= state.config.autopilot.max_cost_usd) { outcome = 'cost_cap'; break; }
+        if (cycle >= Math.min(interactionsCap, hardCap)) { outcome = cycle >= hardCap ? 'safety_cap' : 'cycle_cap'; break; }
+      }
+    } finally {
+      await api.send('PATCH', `/api/sessions/${sessionId}/autopilot-runs/${run.id}`, {
+        cycles_run: cycle, outcome: outcome || 'stopped_by_moderator', cost_usd: costSum, ended_at: new Date().toISOString(),
+      }).catch(() => {});
+      const reasonText = AUTOPILOT_OUTCOME_LABEL[outcome] || outcome || 'stopped';
+      try {
+        const note = await api.send('POST', `/api/sessions/${sessionId}/system-note`, { speaker: 'autopilot', text: `Autopilot stopped after ${cycle} cycle(s): ${reasonText}.` });
+        state.session.messages.push(note);
+        $('.empty', t)?.remove();
+        t.appendChild(messageElement(note));
+        t.scrollTop = t.scrollHeight;
+      } catch (e) { /* non-fatal: the run row still has the outcome */ }
+      if (outcome === 'unanimous' && settings.autoResolve && settings.scope === 'disagreement' && settings.disagreement_n) {
+        try {
+          state.session.disagreements = await api.send('PATCH', `/api/sessions/${sessionId}/disagreements/${settings.disagreement_n}`, { status: 'resolved' });
+          renderDisagreements();
+        } catch (e) { toast(`Could not auto-resolve disagreement: ${e.message}`); }
+      }
+      renderCost();
+      setRunning(false);
+      loadSessions();
+    }
+  }
+
+  function autopilotStanceRows(container, agents) {
+    container.innerHTML = agents.map((a) => `
+      <div class="stance-row" data-agent="${a}">
+        <label>${escapeHtml(AGENT_LABEL[a])} stance
+          <input type="range" class="stance-slider" min="0" max="4" step="1" value="2" data-agent="${a}">
+          <span class="range-label stance-label"></span>
+        </label>
+      </div>`).join('');
+    $$('.stance-slider', container).forEach((sl) => {
+      const label = $('.stance-label', sl.closest('.stance-row'));
+      const update = () => { label.textContent = STANCE_LABELS[Number(sl.value)]; };
+      sl.addEventListener('input', update);
+      update();
+    });
+  }
+
+  function openAutopilotDialog({ scope, disagreementN, disagreementTopic }) {
+    const dlg = $('#dlg-autopilot');
+    dlg.dataset.scope = scope;
+    dlg.dataset.disagreementN = disagreementN || '';
+    $('#autopilot-subtitle').textContent = scope === 'disagreement'
+      ? `Let the agents talk it out on Disagreement #${disagreementN} — ${disagreementTopic}. Set the limits, then watch.`
+      : 'Let the agents talk it out. Set the limits, then watch.';
+    $('#autopilot-auto-resolve-row').hidden = scope !== 'disagreement';
+    $$('#dlg-autopilot .agent-picks input').forEach((c) => { c.checked = true; });
+    $('#autopilot-length').value = 1;
+    $('#autopilot-length-label').textContent = LENGTH_LABELS[1];
+    $('#autopilot-interactions').value = 6;
+    $('#autopilot-interactions-label').textContent = '6';
+    $('#autopilot-stop-unanimous').checked = true;
+    $('#autopilot-auto-resolve').checked = true;
+    autopilotStanceRows($('#autopilot-stances'), ALL);
+    dlg.showModal();
+  }
+
+  // ---------------- reports ----------------
+  const KIND_LABEL = { interim: 'Interim report', final: 'Final report' };
+  const DEPTH_LABEL_SHORT = { brief: 'Brief', standard: 'Standard', full: 'Full' };
+
+  function renderReports() {
+    const s = state.session;
+    const reports = s.reports || [];
+    $('#count-reports').textContent = reports.length;
+    const box = $('#tab-reports');
+    if (!reports.length) { box.innerHTML = '<div class="empty">No reports yet. Generate an Interim report any time, or a Final report once Round 3 has run.</div>'; return; }
+    box.innerHTML = '';
+    for (const r of reports) {
+      const el = document.createElement('div'); el.className = 'report-card';
+      el.innerHTML = `
+        <div class="rc-head"><span class="${r.kind === 'final' ? 'report-kind-final' : ''}">${escapeHtml(KIND_LABEL[r.kind] || r.kind)}</span> · ${escapeHtml(DEPTH_LABEL_SHORT[r.depth] || r.depth)}</div>
+        <div class="rc-meta">${fmtTime(r.created_at)}${r.created_by ? ` · ${escapeHtml(r.created_by)}` : ''}${r.cost_usd ? ` · ${money(r.cost_usd)}` : ''}</div>
+        <div class="rc-actions">
+          <button type="button" class="rc-view">View</button>
+          <a href="/api/sessions/${s.id}/reports/${r.id}/export.docx" download>Word</a>
+          <a href="/api/sessions/${s.id}/reports/${r.id}/export.pdf" download>PDF</a>
+          <button type="button" class="rc-email">Email…</button>
+          <button type="button" class="rc-delete danger">Delete</button>
+        </div>`;
+      $('.rc-view', el).addEventListener('click', () => {
+        $('#msg-modal-title').textContent = `${KIND_LABEL[r.kind] || r.kind} · ${DEPTH_LABEL_SHORT[r.depth] || r.depth}`;
+        $('#msg-modal-body').replaceChildren(renderMarkdown(r.text));
+        $('#dlg-message').showModal();
+      });
+      $('.rc-email', el).addEventListener('click', () => {
+        if (!state.config.email_configured) return toast('Email not configured: set RESEND_API_KEY and MAIL_FROM.');
+        const dlg = $('#dlg-email-report');
+        dlg.dataset.reportId = r.id;
+        $('#email-to').value = ''; $('#email-note').value = ''; $('#email-format').value = 'pdf';
+        dlg.showModal();
+      });
+      $('.rc-delete', el).addEventListener('click', async () => {
+        if (!confirm('Delete this report? This cannot be undone.')) return;
+        await api.send('DELETE', `/api/sessions/${s.id}/reports/${r.id}`);
+        state.session.reports = state.session.reports.filter((x) => x.id !== r.id);
+        renderReports();
+      });
+      box.appendChild(el);
+    }
+  }
+
+  async function generateReport(kind, depth) {
+    if (state.running) { toast('A turn is already running'); return; }
+    setRunning(true);
+    try {
+      const r = await fetch(`/api/sessions/${state.session.id}/turn`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speaker: 'moderator', mode: 'report', kind, depth }),
+      });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = ''; let done = false; let failed = null; let payload = null;
+      while (!done) {
+        const { value, done: d } = await reader.read();
+        if (d) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const ev = /^event: (.*)$/m.exec(chunk); const da = /^data: (.*)$/m.exec(chunk);
+          if (!ev || !da) continue;
+          const name = ev[1]; const data = JSON.parse(da[1]);
+          if (name === 'done') { payload = data; done = true; }
+          else if (name === 'error') { failed = data.message; done = true; }
+        }
+      }
+      if (failed) throw new Error(failed);
+      state.session.reports = [payload.report, ...(state.session.reports || [])];
+      if (payload.message) {
+        state.session.messages.push(payload.message);
+        state.session.decision_text = payload.message.text;
+        $('.empty', $('#transcript'))?.remove();
+        $('#transcript').appendChild(messageElement(payload.message));
+      }
+      renderReports();
+      $$('.tab').find((tt) => tt.dataset.tab === 'reports').click();
+      toast(`${KIND_LABEL[kind]} generated.`);
+    } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); }
+  }
+
   // ---------------- events ----------------
   async function init() {
     state.config = await api.get('/api/config');
@@ -752,11 +1001,80 @@
 
     $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () =>
       b.dataset.round === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode: b.dataset.round })))));
-    $('#btn-decision').addEventListener('click', () => {
-      if (!state.session.messages.some((m) => m.role === 'agent' && !m.error)) return toast('Run at least one round first');
-      runSequence([{ speaker: 'moderator', mode: 'decision' }]);
-    });
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
+
+    // Reports ▾
+    $('#btn-reports').addEventListener('click', (e) => { e.stopPropagation(); $('#reports-menu').hidden = !$('#reports-menu').hidden; });
+    function openReportDialog(kind) {
+      $('#reports-menu').hidden = true;
+      const dlg = $('#dlg-report');
+      dlg.dataset.kind = kind;
+      $('#report-modal-title').textContent = KIND_LABEL[kind];
+      const hasRound3 = state.session.messages.some((m) => m.mode === 'round3' && !m.error);
+      $('#report-modal-warning').hidden = !(kind === 'final' && !hasRound3);
+      $('#report-depth').value = 1;
+      $('#report-depth-label').textContent = DEPTH_LABELS[1];
+      dlg.showModal();
+    }
+    $('#btn-report-interim').addEventListener('click', () => openReportDialog('interim'));
+    $('#btn-report-final').addEventListener('click', () => openReportDialog('final'));
+    $('#report-depth').addEventListener('input', (e) => { $('#report-depth-label').textContent = DEPTH_LABELS[Number(e.target.value)]; });
+    $('#dlg-report form').addEventListener('submit', (e) => {
+      if (e.submitter && e.submitter.value === 'generate') {
+        const kind = $('#dlg-report').dataset.kind;
+        const depth = DEPTH_VALUES[Number($('#report-depth').value)];
+        setTimeout(() => generateReport(kind, depth), 0);
+      }
+    });
+
+    // Autopilot
+    $('#btn-autopilot').addEventListener('click', () => openAutopilotDialog({ scope: 'discussion' }));
+    $('#autopilot-length').addEventListener('input', (e) => { $('#autopilot-length-label').textContent = LENGTH_LABELS[Number(e.target.value)]; });
+    $('#autopilot-interactions').addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      $('#autopilot-interactions-label').textContent = v > 20 ? '∞ (until unanimous)' : String(v);
+    });
+    $$('#dlg-autopilot .agent-picks input').forEach((c) => c.addEventListener('change', () => {
+      autopilotStanceRows($('#autopilot-stances'), $$('#dlg-autopilot .agent-picks input:checked').map((x) => x.value));
+    }));
+    $('#dlg-autopilot form').addEventListener('submit', (e) => {
+      if (e.submitter && e.submitter.value === 'start') {
+        const agents = $$('#dlg-autopilot .agent-picks input:checked').map((c) => c.value);
+        if (!agents.length) { e.preventDefault(); return toast('Pick at least one agent'); }
+        const dlg = $('#dlg-autopilot');
+        const interactionsRaw = Number($('#autopilot-interactions').value);
+        const stances = {};
+        $$('.stance-slider', $('#autopilot-stances')).forEach((sl) => { stances[sl.dataset.agent] = Number(sl.value) + 1; });
+        const settings = {
+          scope: dlg.dataset.scope, disagreement_n: dlg.dataset.disagreementN ? Number(dlg.dataset.disagreementN) : null,
+          agents, max_chars: LENGTH_VALUES[Number($('#autopilot-length').value)],
+          interactions: interactionsRaw > 20 ? 'inf' : interactionsRaw,
+          stopOnUnanimous: $('#autopilot-stop-unanimous').checked,
+          autoResolve: $('#autopilot-auto-resolve').checked,
+          stances,
+        };
+        setTimeout(() => runAutopilot(settings), 0);
+      }
+    });
+
+    // Email report
+    $('#dlg-email-report form').addEventListener('submit', (e) => {
+      if (e.submitter && e.submitter.value === 'send') {
+        e.preventDefault();
+        const dlg = $('#dlg-email-report');
+        const to = $('#email-to').value.split(',').map((x) => x.trim()).filter(Boolean);
+        if (!to.length) return toast('Add at least one recipient');
+        const format = $('#email-format').value;
+        const note = $('#email-note').value.trim();
+        (async () => {
+          try {
+            await api.send('POST', `/api/sessions/${state.session.id}/reports/${dlg.dataset.reportId}/email`, { to, format, note });
+            toast(`Sent to ${to.join(', ')}.`);
+            dlg.close();
+          } catch (err) { toast(`Could not send: ${err.message}`); }
+        })();
+      }
+    });
 
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
@@ -772,14 +1090,16 @@
     });
 
     $('#dlg-disagreement form').addEventListener('submit', (e) => {
+      const n = $('#dlg-disagreement').dataset.n;
+      const d = state.session.disagreements.find((x) => String(x.n) === n);
       if (e.submitter && e.submitter.value === 'discuss') {
         const picks = $$('#dlg-disagreement .agent-picks input:checked').map((c) => c.value);
         if (!picks.length) { e.preventDefault(); return toast('Pick at least one agent'); }
-        const n = $('#dlg-disagreement').dataset.n;
-        const d = state.session.disagreements.find((x) => String(x.n) === n);
         const note = $('#dis-modal-instruction').value.trim();
         const instruction = `The moderator wants to discuss ⚠ DISAGREEMENT #${d.n} — ${d.topic} (see the full transcript above for both positions).${note ? ` ${note}` : ' State your current position and whether anything changes it.'}`;
         setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
+      } else if (e.submitter && e.submitter.value === 'autopilot') {
+        setTimeout(() => openAutopilotDialog({ scope: 'disagreement', disagreementN: d.n, disagreementTopic: d.topic }), 0);
       }
     });
 
@@ -814,11 +1134,11 @@
       } catch (err) { toast(`Could not change model: ${err.message}`); renderModelSelect(); }
     });
     $('#btn-export').addEventListener('click', (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; });
-    document.addEventListener('click', () => { $('#export-menu').hidden = true; });
+    document.addEventListener('click', () => { $('#export-menu').hidden = true; $('#reports-menu').hidden = true; });
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'cost'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'reports', 'cost'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
     // Citation clicks open the Sources tab and highlight the entry.

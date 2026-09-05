@@ -43,6 +43,31 @@ module.exports = {
   MAX_TOKENS_DIVE_DEEPER: 16000, // "Dive Deeper" follow-up on one response
   MAX_TOKENS_DECISION: 32000,
 
+  // Autopilot response-length slider (5 stops). "as_required" reuses the
+  // Dive Deeper budget and appends no length sentence to the instruction.
+  // The instruction's "Hard limit: N characters" line is what actually holds
+  // the model to length — max_tokens here is only a generous safety ceiling,
+  // not sized tightly to N: reasoning tokens (REASONING_EFFORT) and tool-call
+  // rounds eat into the same budget before any visible text is written, so a
+  // tight ceiling starves the model and the turn fails with an empty response
+  // (finish_reason "length", zero text) before it gets to write anything.
+  AUTOPILOT_CHAR_STOPS: [300, 600, 1200, 2500, 'as_required'],
+  AUTOPILOT_CHAR_TO_TOKENS: { 300: 3000, 600: 3500, 1200: 4500, 2500: 6000 },
+
+  AUTOPILOT: {
+    max_cycles: 30,       // hard safety cap even when interactions = infinity
+    max_cost_usd: 2,      // hard safety cap for one run's summed message cost_usd
+    default_max_chars: 600,
+  },
+
+  // Report depth (3 stops, both Interim and Final). max_tokens scaled per stop;
+  // word bands are enforced in the prompt text (prompts/report-*.md).
+  REPORT_DEPTH: {
+    brief:    { max_tokens: 2000,  words: [0, 450] },
+    standard: { max_tokens: 6000,  words: [1000, 1800] },
+    full:     { max_tokens: 32000, words: [2500, 4000] }, // = MAX_TOKENS_DECISION
+  },
+
   SEARCH: {
     // DuckDuckGo (the no-key default) scrapes html.duckduckgo.com, which blocks
     // Vercel's datacenter IPs with HTTP 403 — every search fails in production.

@@ -152,7 +152,7 @@ async function runTool(call, counters, onEvent) {
  * Runs one turn. Returns { text, trace, usage, model, stop_reason, cost_usd }.
  * onEvent(name, payload): 'status' {text}, 'text' {delta}, 'search' {query}
  */
-async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent, model: requestedModel }) {
+async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent, model: requestedModel, max_chars, stance, disagreementTopic, report }) {
   apiKey();
   const [systemContent, abilities] = await Promise.all([systemPrompt(agentKey, inputs), agentAbilities(agentKey)]);
   const tools = search.TOOLS.filter((t) =>
@@ -160,10 +160,12 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, onEvent,
     (t.function.name === 'open_url' && abilities.can_open_url));
   const convo = [
     { role: 'system', content: systemContent },
-    { role: 'user', content: turnUserMessage({ agentKey, mode, instruction, messages }) },
+    { role: 'user', content: turnUserMessage({ agentKey, mode, instruction, messages, max_chars, stance, disagreementTopic, report, inputs }) },
   ];
   const maxTokens = mode === 'decision' ? config.MAX_TOKENS_DECISION
     : mode === 'dive_deeper' ? config.MAX_TOKENS_DIVE_DEEPER
+    : mode === 'report' ? (config.REPORT_DEPTH[report.depth] || config.REPORT_DEPTH.full).max_tokens
+    : mode === 'autopilot' ? (max_chars && max_chars !== 'as_required' ? (config.AUTOPILOT_CHAR_TO_TOKENS[max_chars] || config.MAX_TOKENS_AGENT) : config.MAX_TOKENS_DIVE_DEEPER)
       : config.MAX_TOKENS_AGENT;
   const counters = { searches: 0, opens: 0 };
   const trace = [];

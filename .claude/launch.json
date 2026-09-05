@@ -7,6 +7,13 @@
       "runtimeArgs": ["start"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "ui-variants-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Users\\clift\\AppData\\Local\\Temp\\claude\\H--My-Drive--CLAUDE-Projects-Claude-SLA-AnatopCountrySimulator\\436649bd-eb7a-4786-8dce-130e4560df07\\scratchpad\\static-server.js"],
+      "port": 4173,
+      "autoPort": true
     }
   ]
 }

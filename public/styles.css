@@ -18,7 +18,7 @@
   --verified-fg: #166534; --verified-bg: #DCFCE7;
   --estimate-fg: #92400E; --estimate-bg: #FEF3C7;
   --unknown-fg: #374151; --unknown-bg: #E5E7EB;
-  --radius: 15%; --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .08);
+  --radius: 10px; --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .08);
   --sidebar-w: 268px; --panel-w: 340px;
 }
 * { box-sizing: border-box; }
@@ -251,7 +251,7 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .panel-title { font-weight: 700; font-size: 13.5px; }
 .panel-close { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 15px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }
 .panel-close:hover { background: var(--surface-2); color: var(--text); }
-.tabs { display: flex; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
 .tab { flex: 0 0 auto; padding: 11px 10px; border: none; background: none; cursor: pointer; font-weight: 600; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; white-space: nowrap; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--primary-hover); border-bottom-color: var(--primary); }

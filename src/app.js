@@ -105,15 +105,22 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
 });
 
 // ---------- agent profiles (view: any authenticated user; edit: admin only) ----------
+// Persona/questions/CV text is file-backed (prompts/agents/<key>/) so it's
+// reviewable in git; each row here is the editable overlay (knowledge,
+// abilities, challenge level) plus a read-only preview of the file text.
 app.get('/api/agents', async (req, res, next) => {
-  try { res.json(await db.listAgents()); } catch (e) { next(e); }
+  try {
+    const rows = await db.listAgents();
+    res.json(rows.map((r) => ({ ...r, persona_preview: prompts.AGENTS[r.key] ? prompts.personaFilesRaw(r.key) : null })));
+  } catch (e) { next(e); }
 });
+app.get('/api/stance-levels', (req, res) => res.json(prompts.STANCE));
 app.patch('/api/agents/:key', requireAdmin, async (req, res, next) => {
   try {
-    const { description, role, knowledge, can_web_search, can_open_url } = req.body;
-    const updated = await db.updateAgent(req.params.key, { description, role, knowledge, can_web_search, can_open_url });
+    const { knowledge, can_web_search, can_open_url, stance_default } = req.body;
+    const updated = await db.updateAgent(req.params.key, { knowledge, can_web_search, can_open_url, stance_default });
     if (!updated) return res.status(404).json({ error: 'Unknown agent' });
-    res.json(updated);
+    res.json({ ...updated, persona_preview: prompts.AGENTS[updated.key] ? prompts.personaFilesRaw(updated.key) : null });
   } catch (e) { next(e); }
 });
 

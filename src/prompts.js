@@ -4,14 +4,18 @@ const path = require('path');
 const db = require('./db');
 
 const PROMPT_DIR = path.join(__dirname, '..', 'prompts');
+const AGENTS_DIR = path.join(PROMPT_DIR, 'agents');
 
-const AGENTS = {
-  regulatory: { label: 'Regulatory Agent', file: 'regulatory.md' },
-  clinical:   { label: 'Clinical Agent',   file: 'clinical.md' },
-  commercial: { label: 'Commercial Agent', file: 'commercial.md' },
-  moderator:  { label: 'Moderator Assistant', file: 'moderator.md' },
-};
-const AGENT_ORDER = ['regulatory', 'clinical', 'commercial'];
+// Roster manifest: prompts/agents/index.json. Adding an agent (new folder +
+// one manifest entry) needs no change here — AGENTS/AGENT_ORDER are derived
+// from it at startup. The moderator stays file-based (prompts/moderator.md)
+// and off this manifest, per the manifest's own "moderator" key.
+const MANIFEST = JSON.parse(fs.readFileSync(path.join(AGENTS_DIR, 'index.json'), 'utf8'));
+
+const AGENTS = {};
+for (const a of MANIFEST.agents) AGENTS[a.key] = { label: a.label, dir: a.key, ...a };
+AGENTS.moderator = { label: MANIFEST.moderator.label, file: 'moderator.md', ...MANIFEST.moderator };
+const AGENT_ORDER = MANIFEST.agents.filter((a) => a.enabled).sort((x, y) => x.order - y.order).map((a) => a.key);
 
 const COUNTRY_OPTIONS = [
   'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia', 'Austria',
@@ -100,8 +104,24 @@ const BASE_VALUES = {
 function readPrompt(file) {
   return fs.readFileSync(path.join(PROMPT_DIR, file), 'utf8');
 }
+function readAgentFile(agentKey, file) {
+  return fs.readFileSync(path.join(AGENTS_DIR, agentKey, file), 'utf8');
+}
 function rounds() {
   return JSON.parse(readPrompt('rounds.json'));
+}
+
+const STANCE = JSON.parse(readPrompt('stance.json'));
+function stanceText(level) {
+  const key = STANCE[String(level)] ? String(level) : String(STANCE.default);
+  return STANCE[key].text;
+}
+
+// The cv.md files carry a "Verification status" note for human maintainers
+// (when it was checked, by whom, what's still unverified) — useful in the
+// repo, not something the persona should read as part of its own biography.
+function stripVerificationNote(cv) {
+  return cv.replace(/## Verification status[\s\S]*?(?=\n## )/, '').trim();
 }
 
 function fill(template, inputs) {
@@ -119,16 +139,39 @@ function inputsBlock(inputs) {
   }).join('\n');
 }
 
-// Regulatory/Clinical/Commercial personas are DB-backed (editable on the
-// Agents page) so a live edit changes behavior on the next turn with no
-// deploy; the moderator's persona is not on that page and stays file-based.
+// Regulatory/Clinical/Commercial personas are file-backed
+// (prompts/agents/<key>/{persona,questions,cv}.md — see prompts/agents/index.json)
+// so an edit there changes behaviour on the next turn with no deploy and is
+// reviewable in git. The DB row is an overlay only: the moderator-set
+// challenge level (stance_default), free-text knowledge, and tool flags — it
+// no longer supplies the persona text itself. The moderator's persona is not
+// on the Agents page and stays entirely file-based.
 async function personaFor(agentKey) {
   if (agentKey === 'moderator') return readPrompt(AGENTS.moderator.file);
   const row = await db.getAgent(agentKey);
   if (!row) throw new Error(`Agent ${agentKey} has no DB row — run the agents migration/seed`);
-  const parts = [row.description, row.role];
+  const persona = readAgentFile(agentKey, 'persona.md').replace('{{STANCE_TEXT}}', stanceText(row.stance_default));
+  const cv = stripVerificationNote(readAgentFile(agentKey, 'cv.md'));
+  const questions = readAgentFile(agentKey, 'questions.md');
+  const parts = [
+    persona,
+    '## YOUR BACKGROUND (for your own reference — speak from it, do not paste it verbatim)',
+    cv,
+    questions,
+  ];
   if (row.knowledge && row.knowledge.trim()) parts.push(`Additional knowledge:\n${row.knowledge.trim()}`);
   return parts.filter(Boolean).join('\n\n');
+}
+
+// Raw, unfilled file text for the Agents page preview (no DB overlay, no
+// stance substitution) — lets an admin see exactly what's checked into git.
+function personaFilesRaw(agentKey) {
+  if (agentKey === 'moderator') return readPrompt(AGENTS.moderator.file);
+  return [
+    readAgentFile(agentKey, 'persona.md'),
+    readAgentFile(agentKey, 'questions.md'),
+    stripVerificationNote(readAgentFile(agentKey, 'cv.md')),
+  ].join('\n\n');
 }
 
 // Curated Drive knowledgebase (Admin > Knowledgebase page), titles + notes only.
@@ -254,5 +297,8 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements 
   return parts.join('\n');
 }
 
-module.exports = { AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, turnUserMessage, inputsBlock, speakerLabel, rounds };
+module.exports = {
+  AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities,
+  turnUserMessage, inputsBlock, speakerLabel, rounds, STANCE, personaFilesRaw,
+};
 

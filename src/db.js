@@ -1,6 +1,9 @@
 'use strict';
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const config = require('./config');
+// Grace beyond the in-turn budget before an unfinished row is declared dead.
+const STALE_TURN_MS = config.TURN_TIMEOUT_MS + 120000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -89,6 +92,15 @@ async function addMessage(sessionId, fields) {
 // reply endpoint has no such race and keeps using plain addMessage.
 async function beginAgentTurn(sessionId, { role, speaker, mode }) {
   const row = await withSessionLock(sessionId, async (client) => {
+    // A row left unfinished past the turn time budget means the lambda was
+    // killed before it could record the error — mark it failed so it stops
+    // acting as a permanent lock (and shows up as retryable in the UI).
+    await client.query(
+      `UPDATE messages SET error = $3, text = ''
+       WHERE session_id = $1 AND speaker = $2 AND text IS NULL AND error IS NULL
+         AND created_at < now() - ($4 || ' milliseconds')::interval`,
+      [sessionId, speaker, 'Turn did not finish (server timed out or was interrupted). Retry.', String(STALE_TURN_MS)],
+    );
     const existing = (await client.query(
       'SELECT id FROM messages WHERE session_id = $1 AND speaker = $2 AND text IS NULL AND error IS NULL',
       [sessionId, speaker],
@@ -249,14 +261,16 @@ async function deleteUser(id) { await q('DELETE FROM users WHERE id = $1', [id])
 // ---------- agents (editable profiles) ----------
 async function listAgents() { return q('SELECT * FROM agents ORDER BY key', []); }
 async function getAgent(key) { return one('SELECT * FROM agents WHERE key = $1', [key]); }
-async function updateAgent(key, { description, role, knowledge, can_web_search, can_open_url }) {
+async function updateAgent(key, { knowledge, can_web_search, can_open_url, stance_default }) {
+  // description/role columns still exist (legacy) but are no longer read by
+  // the prompt builder — persona text now comes from prompts/agents/<key>/,
+  // see src/prompts.js personaFor(). This overlay is knowledge/abilities/stance only.
   const sets = []; const vals = []; let i = 1;
   const set = (col, val) => { sets.push(`${col} = $${i++}`); vals.push(val); };
-  if (description !== undefined) set('description', description);
-  if (role !== undefined) set('role', role);
   if (knowledge !== undefined) set('knowledge', knowledge);
   if (can_web_search !== undefined) set('can_web_search', Boolean(can_web_search));
   if (can_open_url !== undefined) set('can_open_url', Boolean(can_open_url));
+  if (stance_default !== undefined) set('stance_default', Math.min(5, Math.max(1, Number(stance_default) || 3)));
   if (!sets.length) return getAgent(key);
   sets.push('updated_at = now()');
   vals.push(key);

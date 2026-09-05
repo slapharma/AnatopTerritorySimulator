@@ -5,5 +5,5 @@
     { "key": "commercial", "label": "Commercial Agent", "short": "Commercial","colour": "#c62828", "order": 3, "enabled": true, "grid": true, "in_round1": true }
   ],
   "moderator": { "key": "moderator", "label": "Moderator Assistant", "short": "Moderator", "colour": "#616161" },
-  "notes": "Adding an agent: copy prompts/agents/_template/ to prompts/agents/<key>/, fill persona.md, questions.md, cv.md and countries/default.md, then add one entry above (order controls display and Round 1 column position; grid=true puts the agent in the 3/4/5-column layout; in_round1=true means it speaks independently in the parallel Round 1). No code change needed beyond reading this file."
+  "notes": "Adding an agent: copy prompts/agents/_template/ to prompts/agents/<key>/, fill persona.md, questions.md and cv.md, then add one entry above (order controls display and Round 1 column position; grid=true puts the agent in the 3/4/5-column layout; in_round1=true means it speaks independently in the parallel Round 1). No code change needed beyond reading this file. Agents are country-agnostic: {{COUNTRY}} comes from the session's own inputs, and every country-specific fact is identified by the agent's own search each turn, not baked into these files."
 }

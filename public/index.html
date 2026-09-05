@@ -8,8 +8,10 @@
 </head>
 <body>
 <div class="app">
+  <button type="button" id="btn-sidebar-expand" class="sidebar-expand-btn" title="Show sidebar" hidden>▶</button>
   <aside class="sidebar">
     <div class="sidebar-head">
+      <button type="button" id="btn-sidebar-collapse" class="sidebar-collapse-btn" title="Collapse sidebar for full screen width">◀</button>
       <button type="button" id="brand-home" class="brand brand-stack brand-btn" title="Back to dashboard">
         <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
         <span>Anatop Territory Evaluation</span>
@@ -102,16 +104,6 @@
             <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
           </nav>
 
-          <details id="inputs-summary" class="inputs-summary">
-            <summary id="inputs-summary-label">Inputs</summary>
-            <form id="session-inputs-form">
-              <div class="fields"></div>
-              <div class="form-actions">
-                <button type="submit" class="btn btn-primary btn-sm">Save inputs</button>
-                <span class="muted" style="font-size:11.5px">Changes apply to turns run from now on, not messages already written.</span>
-              </div>
-            </form>
-          </details>
           <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
             <button type="button" class="chip active" data-speaker="all">All</button>
             <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>
@@ -149,12 +141,23 @@
             <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
             <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
             <button class="tab" data-tab="intelligence" role="tab" type="button">Intelligence</button>
+            <button class="tab" data-tab="inputs" role="tab" type="button">Inputs</button>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
           <div class="tab-body" id="tab-cost" hidden></div>
           <div class="tab-body" id="tab-minutes" hidden></div>
           <div class="tab-body" id="tab-intelligence" hidden></div>
+          <div class="tab-body" id="tab-inputs" hidden>
+            <p id="inputs-summary-label" class="inputs-tab-label"></p>
+            <form id="session-inputs-form">
+              <div class="fields"></div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save inputs</button>
+                <span class="muted" style="font-size:11.5px">Changes apply to turns run from now on, not messages already written.</span>
+              </div>
+            </form>
+          </div>
         </aside>
       </div>
     </section>

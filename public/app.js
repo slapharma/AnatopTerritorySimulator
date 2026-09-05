@@ -63,7 +63,9 @@
     let html = window.marked ? marked.parse(normalizeSpacing(text) || '', { breaks: true, gfm: true }) : `<p>${escapeHtml(text)}</p>`;
     // Agent/human message text is rendered as Markdown -> raw HTML; sanitize
     // before it ever touches innerHTML (marked itself does not sanitize).
-    if (window.DOMPurify) html = DOMPurify.sanitize(html);
+    // Fail closed: if the sanitizer did not load, render the text as escaped
+    // plain text rather than trusting raw HTML from an agent or another user.
+    html = window.DOMPurify ? DOMPurify.sanitize(html) : `<p>${escapeHtml(text || '')}</p>`;
     html = html.replace(/\[(VERIFIED|ESTIMATE|UNKNOWN)\b\s*(?:&#8212;|—|–|:|-)?\s*([^\]]*)\]/g, (m, tag, detail) => {
       const d = detail.trim();
       return `<span class="badge badge-${tag.toLowerCase()}" title="${escapeHtml(d.replace(/<[^>]+>/g, ''))}">${tag}${d ? ` <span class="d">${d}</span>` : ''}</span>`;
@@ -657,16 +659,31 @@
     const box = $('#tab-minutes');
     if (!list.length) { box.innerHTML = '<div class="empty">No meeting minutes yet. They\'re written automatically once a meeting (Baselines/Challenge/Converge/Cross-talk) finishes.</div>'; return; }
     box.innerHTML = list.map((mm) => `
-      <div class="minutes-card">
+      <div class="minutes-card" data-id="${mm.id}">
         <div class="minutes-head">
           <span class="label">${escapeHtml(mm.label)}</span>
           <span class="spacer"></span>
           <span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending approval'}</span>
+          ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}
         </div>
         <div class="minutes-body"></div>
         ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ view meeting</a>` : ''}
       </div>`).join('');
     $$('#tab-minutes .minutes-card').forEach((el, i) => { $('.minutes-body', el).replaceChildren(renderMarkdown(list[i].text)); });
+    $$('#tab-minutes .minutes-approve').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const card = btn.closest('.minutes-card');
+        const id = Number(card.dataset.id);
+        btn.disabled = true;
+        try {
+          const row = await api.send('PATCH', `/api/meeting-minutes/${id}/approve`);
+          const mm = state.session.meeting_minutes.find((x) => x.id === id);
+          if (mm) mm.approved = row.approved;
+          renderMinutes();
+          toast('Meeting approved.');
+        } catch (e) { btn.disabled = false; toast(`Could not approve: ${e.message}`); }
+      });
+    });
   }
 
   // Client-only "cuts" through the transcript already in state.session — no server call.
@@ -943,6 +960,13 @@
       showDashboard();
     }
 
+    const setSidebarCollapsed = (collapsed) => {
+      $('.app').classList.toggle('sidebar-collapsed', collapsed);
+      $('#btn-sidebar-expand').hidden = !collapsed;
+    };
+    $('#btn-sidebar-collapse').addEventListener('click', () => setSidebarCollapsed(true));
+    $('#btn-sidebar-expand').addEventListener('click', () => setSidebarCollapsed(false));
+
     $('#btn-new').addEventListener('click', showSetup);
     $('#btn-load-korea').addEventListener('click', async () => {
       const defaults = await api.get('/api/defaults');
@@ -1068,7 +1092,7 @@
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'cost', 'minutes', 'intelligence'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'cost', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
 

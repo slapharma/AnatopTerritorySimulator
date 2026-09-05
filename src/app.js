@@ -24,9 +24,11 @@ const markedFile = (() => {
   }
   return null;
 })();
+// dotfiles:'allow' — `send` otherwise 404s any absolute path containing a
+// dot-directory segment (e.g. a checkout under .CLAUDE-Projects).
 app.get('/vendor/marked.js', (req, res) => {
   if (!markedFile) return res.status(500).send('marked not found');
-  res.sendFile(markedFile);
+  res.sendFile(markedFile, { dotfiles: 'allow' });
 });
 
 // DOMPurify sanitizes marked's output before it hits innerHTML (marked itself
@@ -42,7 +44,7 @@ const dompurifyFile = (() => {
 })();
 app.get('/vendor/dompurify.js', (req, res) => {
   if (!dompurifyFile) return res.status(500).send('dompurify not found');
-  res.sendFile(dompurifyFile);
+  res.sendFile(dompurifyFile, { dotfiles: 'allow' });
 });
 
 app.get('/api/config', (req, res) => {
@@ -463,6 +465,15 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
     const row = await db.addMeetingMinutes(id, { round, label, text: result.text, anchor_message_id: anchorMessageId });
     const recipient = (req.user && req.user.email) || process.env.MODERATOR_EMAIL || null;
     sendMeetingMinutesEmail(session, row, recipient).catch((e) => console.error('[meeting-minutes] email failed:', e.message));
+    res.json(row);
+  } catch (e) { next(e); }
+});
+
+// In-app equivalent of the emailed approve link, for whoever is at the keyboard.
+app.patch('/api/meeting-minutes/:id/approve', async (req, res, next) => {
+  try {
+    const row = await db.setMinutesApproved(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Meeting minutes not found' });
     res.json(row);
   } catch (e) { next(e); }
 });

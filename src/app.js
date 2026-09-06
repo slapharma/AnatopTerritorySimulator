@@ -25,13 +25,11 @@ const markedFile = (() => {
   }
   return null;
 })();
+// dotfiles:'allow' — `send` otherwise 404s any absolute path containing a
+// dot-directory segment (e.g. a checkout under .CLAUDE-Projects).
 app.get('/vendor/marked.js', (req, res) => {
   if (!markedFile) return res.status(500).send('marked not found');
-  // Not res.sendFile(): Express 5's sendFile (encodeURI + the `send` module)
-  // returns a bare 404 "Not Found" for any absolute path containing a space —
-  // this project's own path does ("H:\My Drive\..."), so sendFile silently
-  // fails here in every environment that has this project on such a path.
-  res.type('application/javascript').send(fs.readFileSync(markedFile));
+  res.sendFile(markedFile, { dotfiles: 'allow' });
 });
 
 // DOMPurify sanitizes marked's output before it hits innerHTML (marked itself
@@ -47,7 +45,7 @@ const dompurifyFile = (() => {
 })();
 app.get('/vendor/dompurify.js', (req, res) => {
   if (!dompurifyFile) return res.status(500).send('dompurify not found');
-  res.type('application/javascript').send(fs.readFileSync(dompurifyFile));
+  res.sendFile(dompurifyFile, { dotfiles: 'allow' });
 });
 
 app.get('/api/config', (req, res) => {
@@ -58,7 +56,7 @@ app.get('/api/config', (req, res) => {
     has_api_key: Boolean(process.env.OPENROUTER_API_KEY),
     search_provider: config.SEARCH.provider,
     rounds: prompts.rounds(),
-    stance_bank: prompts.stanceBank(),
+    stance_bank: prompts.STANCE,
     autopilot_char_stops: config.AUTOPILOT_CHAR_STOPS,
     autopilot: config.AUTOPILOT,
     report_depth: config.REPORT_DEPTH,
@@ -113,15 +111,22 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
 });
 
 // ---------- agent profiles (view: any authenticated user; edit: admin only) ----------
+// Persona/questions/CV text is file-backed (prompts/agents/<key>/) so it's
+// reviewable in git; each row here is the editable overlay (knowledge,
+// abilities, challenge level) plus a read-only preview of the file text.
 app.get('/api/agents', async (req, res, next) => {
-  try { res.json(await db.listAgents()); } catch (e) { next(e); }
+  try {
+    const rows = await db.listAgents();
+    res.json(rows.map((r) => ({ ...r, persona_preview: prompts.AGENTS[r.key] ? prompts.personaFilesRaw(r.key) : null })));
+  } catch (e) { next(e); }
 });
+app.get('/api/stance-levels', (req, res) => res.json(prompts.STANCE));
 app.patch('/api/agents/:key', requireAdmin, async (req, res, next) => {
   try {
-    const { description, role, knowledge, can_web_search, can_open_url } = req.body;
-    const updated = await db.updateAgent(req.params.key, { description, role, knowledge, can_web_search, can_open_url });
+    const { knowledge, can_web_search, can_open_url, stance_default } = req.body;
+    const updated = await db.updateAgent(req.params.key, { knowledge, can_web_search, can_open_url, stance_default });
     if (!updated) return res.status(404).json({ error: 'Unknown agent' });
-    res.json(updated);
+    res.json({ ...updated, persona_preview: prompts.AGENTS[updated.key] ? prompts.personaFilesRaw(updated.key) : null });
   } catch (e) { next(e); }
 });
 
@@ -480,7 +485,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   let disagreementTopic = null;
   if (mode === 'autopilot') {
     if (req.body.stance_index) {
-      const entry = prompts.stanceBank()[String(req.body.stance_index)];
+      const entry = prompts.STANCE[String(req.body.stance_index)];
       stanceText = entry ? prompts.fill(entry.text, session.inputs) : null;
     }
     if (req.body.disagreement_n) {
@@ -659,6 +664,15 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
     const row = await db.addMeetingMinutes(id, { round, label, text: result.text, anchor_message_id: anchorMessageId });
     const recipient = (req.user && req.user.email) || process.env.MODERATOR_EMAIL || null;
     sendMeetingMinutesEmail(session, row, recipient).catch((e) => console.error('[meeting-minutes] email failed:', e.message));
+    res.json(row);
+  } catch (e) { next(e); }
+});
+
+// In-app equivalent of the emailed approve link, for whoever is at the keyboard.
+app.patch('/api/meeting-minutes/:id/approve', async (req, res, next) => {
+  try {
+    const row = await db.setMinutesApproved(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Meeting minutes not found' });
     res.json(row);
   } catch (e) { next(e); }
 });

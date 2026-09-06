@@ -30,7 +30,7 @@ Target:
    Two to four slides, max five bullets each, no new facts (summary only). Front end renders the block as slide cards; exports render each slide as a boxed panel; the existing `**Next step:**` / `**Conclusion:**` closing block moves *inside* the last slide so there is one ending, not two.
 5. **Fictional person, real world.** The name is invented. The employers, agencies, transactions, trials, guidelines and dates in the CV are real and public. Each CV line carries a source URL, and the build step verifies every line by web search before it is committed. **Never use a real individual's name, and check the invented name against the named post** (e.g. search "MFDS director <name>") to make sure it does not collide with a real office-holder. The CV must not claim the persona personally *led* a specific real deal in a way that implies a real identifiable person; use "on the team that", "advised", "sat on the review panel for".
 6. **No disclosure line.** Internal tool; user decided 2026-09-05. Persona fiction is understood by all users.
-7. **Country-aware.** The regulatory persona's employer is the health ministry / regulator of `{{COUNTRY}}`. Personas are written as a **template with a country block**: `persona.md` has the stable identity, and `cv.md` has a generic block used when no country pack matches. Country packs live in `prompts/agents/<key>/countries/<country>.md`; the builder includes the matching one if present. First pack is South Korea, named the **default pack** (`countries/default.md`), used both for South Korea and as the fallback when no other pack exists. Later packs are data work, not code.
+7. **Country-agnostic by design (revised 2026-09-05).** No country-pack branching. `persona.md` and `cv.md` are fixed regardless of session; a CV may reference real career history tied to a specific country (illustrative background only) but that never gates what the agent can say about a *different* country in a live session. {{COUNTRY}} is set per session from the user's own inputs, and every country-specific fact (which regulator, which HTA body, which guideline) is identified fresh by the agent's own search on its first step each turn (see questions.md and evidence-rules.md). No `countries/` folder, no fallback pack.
 
 ## 3. Challenge level (= STANCE)
 
@@ -52,7 +52,7 @@ Text lives in `prompts/stance.json` (shared with autopilot). At any level the "s
 - Post: Director-level official in the pharmaceutical evaluation side of the Ministry of Food and Drug Safety (MFDS), Cheongju. In the room in a personal capacity, off the record.
 - Background candidates to verify: PharmD Seoul National University; 20+ years across the Korea FDA (KFDA) to MFDS renaming (2013); worked on Korea's PIC/S accession (2014) and ICH membership (2016); involved in the reliance / expedited review provisions for products approved by reference regulators; reviewer on topical and dermatology dossiers; GMP inspection coordination with foreign sites.
 - What they bring: knows the review clock versus real elapsed time, what deficiency letters actually say, which abridged routes exist for an active already approved in Korea.
-- Generic block (other countries): senior reviewer at the national regulator, same seniority, country milestones filled from the country pack or left as UNKNOWN with the question to ask.
+- Any country: agent identifies the actual national regulator by name and source on its first step every turn; nothing about a specific country is hardcoded.
 
 ### 4.2 Clinical — "Dr. Margaret Okafor-Lindqvist"
 - Post: 25+ years in clinical operations; most recently Senior VP Clinical Development at a top-tier global CRO (candidates: IQVIA, Parexel, ICON, PPD) with Asia-Pacific delivery responsibility; earlier a CRA and then project director. Consults independently now.
@@ -74,7 +74,7 @@ Manifest entry:
 { "key": "market_access", "label": "Market Access Agent", "short": "Access", "colour": "#7c5cbf",
   "order": 4, "enabled": true, "grid": true, "in_round1": true }
 ```
-- `src/prompts.js`: `AGENTS`, `AGENT_ORDER` built from the manifest at startup; `personaFor` reads `persona.md` + `questions.md` + country block + DB overlay.
+- `src/prompts.js`: `AGENTS`, `AGENT_ORDER` built from the manifest at startup; `personaFor` reads `persona.md` + `questions.md` + `cv.md` + DB overlay (no country branching).
 - `src/db.js`: seed inserts a row for any manifest key missing from `agents`.
 - Front end: `ALL`, colours, filter chips, composer "To:" options, custom-round and disagreement checkboxes, and the column grid all come from `/api/config.agents`. Grid becomes `repeat(auto-fit, minmax(320px, 1fr))` so four or five columns degrade to two rows instead of breaking.
 - Exports: `COLOURS` in `src/export.js` from the manifest.
@@ -96,7 +96,7 @@ Roughly 3½ to 4 days.
 ## 7. Verification (each must be able to fail)
 
 - Manifest: add a fourth dummy agent with `enabled: true`; assert it appears in the "To:" list, filter chips, Round 1 grid, and exports; set `enabled: false` and assert it vanishes from all four.
-- Persona text: assert the system prompt for `regulatory` contains the MFDS block when country is South Korea and, with no Vietnam pack, the default pack plus a line saying the pack is a fallback.
+- Persona text: assert the system prompt is byte-identical in structure regardless of `{{COUNTRY}}` value (only the substituted placeholder differs); assert the agent's first Round 1 answer names the actual regulator/HTA body for whatever country was set, sourced.
 - CV sources: script opens every URL in the three `cv.md` files and asserts HTTP 200 and that the page text contains the organisation name on that line. Run it against one deliberately wrong URL first.
 - Name collision: log the search queries and results for each name in the cv.md header.
 - Slides: assert every agent message in a live Round 1 ends with a `## Slides` block of 2 to 4 slides and that the front end rendered the same number of `.slide` cards; export the DOCX and assert the slide titles appear.
@@ -107,6 +107,6 @@ Roughly 3½ to 4 days.
 
 1. Names: keep the three proposed.
 2. Regulatory persona is a current ministry official, off the record.
-3. First country pack = South Korea, named the default pack; used as fallback for every other country.
+3. (Superseded 2026-09-05 — see decision below.) Country-pack idea dropped entirely: the agent stack is country-agnostic, `{{COUNTRY}}` comes from the session, and every country-specific fact is found by search each turn, not pre-baked.
 4. Slides reuse: yes. Interim report per-function section is built from each agent's latest Slides block.
 5. No disclosure line. Internal tool.

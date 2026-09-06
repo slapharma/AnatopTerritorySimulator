@@ -5,9 +5,13 @@ TEMPLATE — copy this folder to prompts/agents/<key>/, then:
 3. Fill cv.md — every claim needs a source URL, verified by search before commit. Never
    use a real living person's name or claim personal credit for a specific real deal;
    use "on the team that", "advised", "sat on the review panel for".
-4. Fill countries/default.md — this is both the South Korea pack and the fallback used
-   for every country without its own pack. Add prompts/agents/<key>/countries/<name>.md
-   for a specific country when you have real material for it.
+4. Do not bake any one country's specifics into persona.md as a hardcoded branch. The
+   agent is country-agnostic by design: {{COUNTRY}} comes from the session's own inputs
+   and can be anything, so every country-specific fact (which regulator, which HTA body,
+   which guideline) is identified fresh, by search, on the agent's first step each turn —
+   see questions.md. A CV line may reference real career history in a specific country
+   (illustrative background), but that never gates what the agent can say about a
+   *different* country in a live session.
 5. Add one entry to prompts/agents/index.json.
 No code change is needed to bring the agent into the app.
 -->

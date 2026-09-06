@@ -1,6 +1,8 @@
 'use strict';
 // Web tools the agents can call: web_search (DuckDuckGo, or Brave if BRAVE_API_KEY is set)
 // and open_url (fetch a page and return its readable text).
+const dns = require('dns').promises;
+const net = require('net');
 const config = require('./config');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) LaunchWorkingGroup/1.0 (+local research tool)';
@@ -71,14 +73,59 @@ async function webSearch(query, max = config.SEARCH.max_results) {
   return { provider, query, results };
 }
 
+// IPv4/IPv6 ranges that must never be reachable from open_url: loopback,
+// private/link-local (RFC1918 and friends), and the cloud metadata address
+// (169.254.169.254) that a lot of real-world SSRF exploits target.
+function isPrivateIp(ip) {
+  if (net.isIPv6(ip)) {
+    const low = ip.toLowerCase();
+    return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80') || low.startsWith('::ffff:127.');
+  }
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true; // malformed — refuse rather than guess
+  const [a, b] = parts;
+  return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
+// Best-effort SSRF guard: a model told (by a jailbreak, or an instruction
+// injected into a page it already opened) to fetch an internal address would
+// otherwise turn this server's own network access into an attacker's proxy.
+// DNS-rebinding between this check and the actual fetch isn't fully closed —
+// that would need a custom low-level connect — but this stops the overwhelmingly
+// common case (literal IPs, localhost, cloud metadata, normal private hostnames).
+async function assertPublicHost(hostname) {
+  if (net.isIP(hostname)) {
+    if (isPrivateIp(hostname)) throw new Error('open_url may not target a private or internal address');
+    return;
+  }
+  if (/^localhost$/i.test(hostname)) throw new Error('open_url may not target a private or internal address');
+  const addrs = await dns.lookup(hostname, { all: true }).catch(() => []);
+  if (addrs.some((a) => isPrivateIp(a.address))) throw new Error('open_url may not target a private or internal address');
+}
+
+const MAX_BODY_BYTES = 3_000_000; // stop reading a huge/hostile response body well before it becomes a memory problem
+
 // Fetches a page and returns readable text (scripts, styles, nav noise removed).
 async function openUrl(url) {
   if (!/^https?:\/\//i.test(url)) throw new Error('open_url needs an absolute http(s) URL');
+  const parsed = new URL(url);
+  await assertPublicHost(parsed.hostname);
   const res = await fetchWithTimeout(url);
   const type = (res.headers.get('content-type') || '').toLowerCase();
   if (!res.ok) return { url, status: res.status, title: '', text: `HTTP ${res.status} when fetching this page.` };
   if (type.includes('application/pdf')) return { url, status: res.status, title: '', text: 'This URL is a PDF; the tool cannot read PDFs. Cite the URL only if the search snippet or another page confirms the claim.' };
-  let html = await res.text();
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let html = '';
+  let bytes = 0;
+  let truncatedBody = false;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.length;
+    if (bytes > MAX_BODY_BYTES) { truncatedBody = true; reader.cancel().catch(() => {}); break; }
+    html += dec.decode(value, { stream: true });
+  }
   const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [, ''])[1];
   html = html.replace(/<(script|style|noscript|svg|nav|footer|header|iframe)[\s\S]*?<\/\1>/gi, ' ');
   html = html.replace(/<!--[\s\S]*?-->/g, ' ');
@@ -86,6 +133,7 @@ async function openUrl(url) {
   let text = decodeEntities(html.replace(/<[^>]+>/g, ' ')).replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
   const max = config.SEARCH.page_chars;
   if (text.length > max) text = text.slice(0, max) + `\n…[truncated at ${max} characters of ${text.length}]`;
+  else if (truncatedBody) text += '\n…[page body was larger than the fetch limit; truncated]';
   return { url: res.url || url, status: res.status, title: stripTags(title), text };
 }
 

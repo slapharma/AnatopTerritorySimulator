@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin table mock</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 12px; background: var(--bg); width: 375px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .admin-pill { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--verified-bg); color: var(--verified-fg); }
+  .row-actions { display: flex; gap: 8px; }
+  /* fix=1 applies this override; "before" stays untouched real CSS */
+  .fixed .row-actions { flex-wrap: wrap; }
+</style>
+</head>
+<body id="body">
+<table>
+  <tr><th>Email</th><th>Role</th><th>Added</th><th></th></tr>
+  <tr>
+    <td>cflack@slapharmagroup.com</td>
+    <td><span class="admin-pill">ADMIN</span></td>
+    <td>Sep 5, 2026</td>
+    <td class="row-actions">
+      <button type="button" class="btn btn-sm">Remove admin</button>
+      <button type="button" class="btn btn-sm">Reset password</button>
+      <button type="button" class="btn btn-sm btn-danger-ghost">Remove</button>
+    </td>
+  </tr>
+</table>
+<script>
+  if (new URLSearchParams(location.search).get('fix') === '1') {
+    document.getElementById('body').classList.add('fixed');
+  }
+</script>
+</body>
+</html>

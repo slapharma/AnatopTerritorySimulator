@@ -1,10 +1,17 @@
 'use strict';
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase.com') ? { rejectUnauthorized: false } : undefined,
 });
+// pg emits 'error' on the Pool when an IDLE client's connection drops (e.g.
+// Supabase's pooler recycling one) — with no listener, that's an unhandled
+// EventEmitter error and it takes the whole Node process down. The pool
+// removes the broken client and opens a new one on the next query on its own;
+// this handler only stops that from being fatal.
+pool.on('error', (err) => console.error('[db] pool error (connection dropped, pool recovers automatically):', err.message));
 
 async function q(text, params) {
   const r = await pool.query(text, params);
@@ -37,12 +44,12 @@ async function updateInputs(id, inputs) {
 }
 async function deleteSession(id) { await q('DELETE FROM sessions WHERE id = $1', [id]); }
 
-async function createSession(inputs, model) {
+async function createSession(inputs, model, ownerId) {
   const productShort = (inputs.product || 'Untitled product').split(/\s[—–-]\s/)[0].trim();
   const title = `${productShort} · ${inputs.country || 'country?'}`;
   const row = await one(
-    'INSERT INTO sessions (title, product, country, inputs_json, model) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [title, inputs.product || null, inputs.country || null, JSON.stringify(inputs), model || null],
+    'INSERT INTO sessions (title, product, country, inputs_json, model, owner_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+    [title, inputs.product || null, inputs.country || null, JSON.stringify(inputs), model || null, ownerId || null],
   );
   return row;
 }
@@ -63,17 +70,47 @@ async function updateMessage(id, { text, content_json, input_tokens, output_toke
 }
 
 async function addMessage(sessionId, fields) {
-  const seqRow = await one('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages WHERE session_id = $1', [sessionId]);
-  const seq = seqRow.seq;
-  const row = await one(
-    `INSERT INTO messages (session_id, seq, role, speaker, mode, addressed_to, text, content_json,
-      input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-    [sessionId, seq, fields.role, fields.speaker, fields.mode || null, fields.addressed_to || null,
-      fields.text || null, fields.content_json || null,
-      fields.input_tokens || 0, fields.output_tokens || 0, fields.cache_read_tokens || 0, fields.cache_write_tokens || 0,
-      fields.searches || 0, fields.cost_usd || 0, fields.error || null],
-  );
+  const row = await withSessionLock(sessionId, async (client) => {
+    const seqRow = (await client.query('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages WHERE session_id = $1', [sessionId])).rows[0];
+    const seq = seqRow.seq;
+    return (await client.query(
+      `INSERT INTO messages (session_id, seq, role, speaker, mode, addressed_to, text, content_json,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, searches, cost_usd, error)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [sessionId, seq, fields.role, fields.speaker, fields.mode || null, fields.addressed_to || null,
+        fields.text || null, fields.content_json || null,
+        fields.input_tokens || 0, fields.output_tokens || 0, fields.cache_read_tokens || 0, fields.cache_write_tokens || 0,
+        fields.searches || 0, fields.cost_usd || 0, fields.error || null],
+    )).rows[0];
+  });
+  await touchSession(sessionId);
+  return row;
+}
+
+// Same insert as addMessage, but the "is this agent already running" check
+// lives in the DB (an unfinished row: text IS NULL AND error IS NULL) instead
+// of an in-process Set — a Set is per-lambda-instance and does not see turns
+// running in a sibling instance on Vercel, so it can't actually prevent a
+// double-fire in production. Only used for agent/moderator turns; the human
+// reply endpoint has no such race and keeps using plain addMessage.
+async function beginAgentTurn(sessionId, { role, speaker, mode }) {
+  const row = await withSessionLock(sessionId, async (client) => {
+    const existing = (await client.query(
+      'SELECT id FROM messages WHERE session_id = $1 AND speaker = $2 AND text IS NULL AND error IS NULL',
+      [sessionId, speaker],
+    )).rows[0];
+    if (existing) {
+      const e = new Error('This agent already has a turn running for this session');
+      e.code = 'ALREADY_RUNNING';
+      throw e;
+    }
+    const seqRow = (await client.query('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages WHERE session_id = $1', [sessionId])).rows[0];
+    const seq = seqRow.seq;
+    return (await client.query(
+      'INSERT INTO messages (session_id, seq, role, speaker, mode) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [sessionId, seq, role, speaker, mode || null],
+    )).rows[0];
+  });
   await touchSession(sessionId);
   return row;
 }
@@ -118,11 +155,44 @@ async function upsertSource(sessionId, { url, title, kind, messageId, speaker })
   });
 }
 
+// ---------- meeting minutes ----------
+async function listMeetingMinutes(sessionId) { return q('SELECT * FROM meeting_minutes WHERE session_id = $1 ORDER BY id', [sessionId]); }
+async function addMeetingMinutes(sessionId, { round, label, text, anchor_message_id }) {
+  const approve_token = crypto.randomBytes(16).toString('hex');
+  return one(
+    `INSERT INTO meeting_minutes (session_id, round, label, text, anchor_message_id, approve_token)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [sessionId, round, label, text, anchor_message_id || null, approve_token],
+  );
+}
+async function setMinutesApproved(id) { return one('UPDATE meeting_minutes SET approved = true WHERE id = $1 RETURNING *', [id]); }
+async function getMinutesByToken(token) { return one('SELECT * FROM meeting_minutes WHERE approve_token = $1', [token]); }
+
 async function listDisagreements(sessionId) { return q('SELECT * FROM disagreements WHERE session_id = $1 ORDER BY n', [sessionId]); }
 async function setDisStatus(sessionId, n, status) { await q('UPDATE disagreements SET status = $1 WHERE session_id = $2 AND n = $3', [status, sessionId, n]); }
 
-async function addDisagreement(sessionId, messageId, topic, body, status) {
+function normTopic(topic) {
+  return String(topic || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// A restated disagreement (later round revisits the same topic, or one side
+// marks it RESOLVED) updates the existing row instead of appending a second
+// one — otherwise the log fills with duplicates and a resolution never
+// retires the original UNRESOLVED entry. Topic-less ("untitled") blocks skip
+// dedup since they'd otherwise all collapse onto one row.
+async function upsertDisagreement(sessionId, messageId, topic, body, status) {
   return withSessionLock(sessionId, async (client) => {
+    const norm = normTopic(topic);
+    let existing = null;
+    if (norm && norm !== 'untitled') {
+      const rows = (await client.query('SELECT id, n, topic FROM disagreements WHERE session_id = $1', [sessionId])).rows;
+      existing = rows.find((r) => normTopic(r.topic) === norm);
+    }
+    if (existing) {
+      await client.query('UPDATE disagreements SET message_id = $1, topic = $2, body = $3, status = $4 WHERE id = $5',
+        [messageId, topic, body, status, existing.id]);
+      return existing.n;
+    }
     const n = (await client.query('SELECT COALESCE(MAX(n),0)+1 AS n FROM disagreements WHERE session_id = $1', [sessionId])).rows[0].n;
     await client.query('INSERT INTO disagreements (session_id, message_id, n, topic, body, status) VALUES ($1,$2,$3,$4,$5,$6)',
       [sessionId, messageId, n, topic, body, status]);
@@ -133,8 +203,8 @@ async function addDisagreement(sessionId, messageId, topic, body, status) {
 async function fullSession(id) {
   const session = await getSession(id);
   if (!session) return null;
-  const [messages, sources, disagreements, autopilot_runs, reports] = await Promise.all([
-    listMessages(id), listSources(id), listDisagreements(id), listAutopilotRuns(id), listReports(id),
+  const [messages, sources, disagreements, autopilot_runs, reports, meeting_minutes] = await Promise.all([
+    listMessages(id), listSources(id), listDisagreements(id), listAutopilotRuns(id), listReports(id), listMeetingMinutes(id),
   ]);
   return {
     ...session,
@@ -144,6 +214,7 @@ async function fullSession(id) {
     disagreements,
     autopilot_runs,
     reports,
+    meeting_minutes,
   };
 }
 
@@ -241,17 +312,42 @@ async function updateAgent(key, { description, role, knowledge, can_web_search, 
   return one(`UPDATE agents SET ${sets.join(', ')} WHERE key = $${i} RETURNING *`, vals);
 }
 
+// ---------- knowledgebase (curated reference documents) ----------
+async function listKnowledgeItems() { return q('SELECT * FROM knowledge_items ORDER BY category, id', []); }
+async function createKnowledgeItem({ category, title, url, note, sensitive }) {
+  return one(
+    'INSERT INTO knowledge_items (category, title, url, note, sensitive) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+    [category, title, url, note || '', Boolean(sensitive)],
+  );
+}
+async function updateKnowledgeItem(id, { category, title, url, note, sensitive }) {
+  const sets = []; const vals = []; let i = 1;
+  const set = (col, val) => { sets.push(`${col} = $${i++}`); vals.push(val); };
+  if (category !== undefined) set('category', category);
+  if (title !== undefined) set('title', title);
+  if (url !== undefined) set('url', url);
+  if (note !== undefined) set('note', note);
+  if (sensitive !== undefined) set('sensitive', Boolean(sensitive));
+  if (!sets.length) return one('SELECT * FROM knowledge_items WHERE id = $1', [id]);
+  sets.push('updated_at = now()');
+  vals.push(id);
+  return one(`UPDATE knowledge_items SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
+}
+async function deleteKnowledgeItem(id) { await q('DELETE FROM knowledge_items WHERE id = $1', [id]); }
+
 module.exports = {
   pool,
   getDefaults, setDefaultField,
   listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, updateInputs, deleteSession, createSession,
-  listMessages, getMessage, deleteMessage, updateMessage, addMessage, setFavourite,
+  listMessages, getMessage, deleteMessage, updateMessage, addMessage, beginAgentTurn, setFavourite,
   listSources, upsertSource,
-  listDisagreements, setDisStatus, addDisagreement,
+  listDisagreements, setDisStatus, upsertDisagreement,
+  listMeetingMinutes, addMeetingMinutes, setMinutesApproved, getMinutesByToken,
   createAutopilotRun, updateAutopilotRun, getAutopilotRun, listAutopilotRuns,
   addReport, listReports, getReport, deleteReport,
   addReportEmail, listReportEmails,
   fullSession,
   countUsers, getUserByEmail, listUsers, createUser, countAdmins, updateUser, getUserById, deleteUser,
   listAgents, getAgent, updateAgent,
+  listKnowledgeItems, createKnowledgeItem, updateKnowledgeItem, deleteKnowledgeItem,
 };

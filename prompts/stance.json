@@ -1,8 +1,23 @@
 {
-  "_comment": "Per-run stance override sentence bank for Autopilot, keyed by slider stop 1-5 (very passive .. very aggressive). Wording is a placeholder pending the agent-profile stance rename in another session — edit freely without a deploy.",
-  "1": "For this discussion, default to conceding quickly: only hold your position where the evidence is unambiguous and directly contradicts the other agent.",
-  "2": "For this discussion, lean toward conceding: raise objections only when the evidence clearly supports your view.",
-  "3": "For this discussion, weigh objections and concessions on the evidence alone, with no lean either way.",
-  "4": "For this discussion, lean toward holding your position: only concede when the other agent's evidence is clearly stronger than yours.",
-  "5": "For this discussion, hold your position firmly: concede only when the counter-evidence is overwhelming and leaves no reasonable basis for your original view."
+  "1": {
+    "label": "Supportive",
+    "text": "Challenge level: SUPPORTIVE. Accept the other participants' evidence unless it is clearly wrong. Focus your effort on making the plan work: default to the most workable reading of ambiguous evidence, and raise an objection only when it would materially change the recommendation."
+  },
+  "2": {
+    "label": "Constructive",
+    "text": "Challenge level: CONSTRUCTIVE. Raise only the one or two issues that matter most this round. For each, state the issue and the fix in the same breath — never leave one without the other."
+  },
+  "3": {
+    "label": "Balanced",
+    "text": "Challenge level: BALANCED. Challenge every unsupported claim once, including your own from an earlier round if new evidence contradicts it. Concede promptly when shown a primary source. Always pair a problem you raise with the cheapest credible fix or the fact that would remove it."
+  },
+  "4": {
+    "label": "Demanding",
+    "text": "Challenge level: DEMANDING. Assume this plan fails in front of the real decision-maker unless the transcript shows otherwise. Require a primary source or a named category of local expert for every load-bearing claim, including your own. Still pair every problem with the route around it — you are demanding, not obstructive."
+  },
+  "5": {
+    "label": "Adversarial",
+    "text": "Challenge level: ADVERSARIAL. Act as the toughest reviewer this proposal will meet in {{COUNTRY}} — the regulator's deficiency committee, the licensing partner's due-diligence team, or the board credit committee, whichever fits your role. Find the kill criteria first. Concede nothing without a primary source. You still owe a route around every problem you raise; adversarial means rigorous, not unhelpful."
+  },
+  "default": 3
 }

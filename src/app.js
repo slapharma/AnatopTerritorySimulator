@@ -8,6 +8,7 @@ const prompts = require('./prompts');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
 const email = require('./email');
+const { sendMeetingMinutesEmail } = email;
 const { basicAuth, requireAdmin, hashPassword } = require('./auth');
 
 const app = express();
@@ -26,7 +27,27 @@ const markedFile = (() => {
 })();
 app.get('/vendor/marked.js', (req, res) => {
   if (!markedFile) return res.status(500).send('marked not found');
-  res.sendFile(markedFile);
+  // Not res.sendFile(): Express 5's sendFile (encodeURI + the `send` module)
+  // returns a bare 404 "Not Found" for any absolute path containing a space —
+  // this project's own path does ("H:\My Drive\..."), so sendFile silently
+  // fails here in every environment that has this project on such a path.
+  res.type('application/javascript').send(fs.readFileSync(markedFile));
+});
+
+// DOMPurify sanitizes marked's output before it hits innerHTML (marked itself
+// does not sanitize — agent/human message text is otherwise a stored-XSS vector).
+const dompurifyFile = (() => {
+  try {
+    const root = path.dirname(require.resolve('dompurify'));
+    for (const c of [path.join(root, 'purify.min.js'), path.join(root, 'dist', 'purify.min.js')]) {
+      if (fs.existsSync(c)) return c;
+    }
+  } catch { /* not installed yet */ }
+  return null;
+})();
+app.get('/vendor/dompurify.js', (req, res) => {
+  if (!dompurifyFile) return res.status(500).send('dompurify not found');
+  res.type('application/javascript').send(fs.readFileSync(dompurifyFile));
 });
 
 app.get('/api/config', (req, res) => {
@@ -104,13 +125,39 @@ app.patch('/api/agents/:key', requireAdmin, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ---------- knowledgebase (view: any authenticated user; edit: admin only) ----------
+app.get('/api/knowledge', async (req, res, next) => {
+  try { res.json(await db.listKnowledgeItems()); } catch (e) { next(e); }
+});
+app.post('/api/knowledge', requireAdmin, async (req, res, next) => {
+  try {
+    const category = String(req.body.category || '').trim();
+    const title = String(req.body.title || '').trim();
+    const url = String(req.body.url || '').trim();
+    if (!category || !title || !url) return res.status(400).json({ error: 'category, title and url are required' });
+    const item = await db.createKnowledgeItem({ category, title, url, note: req.body.note, sensitive: req.body.sensitive });
+    res.json(item);
+  } catch (e) { next(e); }
+});
+app.patch('/api/knowledge/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const { category, title, url, note, sensitive } = req.body;
+    const updated = await db.updateKnowledgeItem(Number(req.params.id), { category, title, url, note, sensitive });
+    if (!updated) return res.status(404).json({ error: 'Item not found' });
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+app.delete('/api/knowledge/:id', requireAdmin, async (req, res, next) => {
+  try { await db.deleteKnowledgeItem(Number(req.params.id)); res.json({ ok: true }); } catch (e) { next(e); }
+});
+
 // ---------- form defaults ----------
 // A stored value overrides prompts.BASE_VALUES field-by-field; an unconfigured
 // field still falls back to the hardcoded example rather than coming back blank.
 app.get('/api/defaults', async (req, res, next) => {
   try { res.json({ ...prompts.BASE_VALUES, ...(await db.getDefaults()) }); } catch (e) { next(e); }
 });
-app.patch('/api/defaults', async (req, res, next) => {
+app.patch('/api/defaults', requireAdmin, async (req, res, next) => {
   try {
     const { key, value } = req.body;
     if (!prompts.INPUT_FIELDS.some((f) => f.key === key)) return res.status(400).json({ error: `Unknown field ${key}` });
@@ -133,7 +180,14 @@ app.post('/api/sessions', async (req, res, next) => {
   try {
     const inputs = {};
     for (const f of prompts.INPUT_FIELDS) inputs[f.key] = (req.body.inputs && req.body.inputs[f.key]) || '';
-    const session = await db.createSession(inputs);
+    // An empty PRODUCT/COUNTRY still runs all three agents (each turn just
+    // reports "INPUT MISSING" for both) — real API spend for a session nobody
+    // can act on. Required fields the client also enforces, checked again here
+    // since this is the actual point of no return.
+    if (!inputs.product.trim() || !inputs.country.trim()) {
+      return res.status(400).json({ error: 'PRODUCT and COUNTRY are required to start a session.' });
+    }
+    const session = await db.createSession(inputs, undefined, req.user && req.user.id);
     if (req.body.title) await db.renameSession(session.id, req.body.title);
     res.json(await db.fullSession(session.id));
   } catch (e) { next(e); }
@@ -153,7 +207,11 @@ app.patch('/api/sessions/:id', async (req, res, next) => {
     if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
     if (typeof req.body.title === 'string' && req.body.title.trim()) await db.renameSession(id, req.body.title.trim());
     if (typeof req.body.model === 'string') {
-      if (!config.MODEL_OPTIONS.some((m) => m.id === req.body.model)) return res.status(400).json({ error: `Unknown model ${req.body.model}` });
+      const opt = config.MODEL_OPTIONS.find((m) => m.id === req.body.model);
+      if (!opt) return res.status(400).json({ error: `Unknown model ${req.body.model}` });
+      // Paid models cost real OpenRouter spend with no per-user budget check
+      // anywhere else in the app — restrict picking one to admins.
+      if (!opt.free && !(req.user && req.user.is_admin)) return res.status(403).json({ error: 'Only an admin can select a paid model' });
       await db.setModel(id, req.body.model);
     }
     if (req.body.inputs && typeof req.body.inputs === 'object') {
@@ -166,7 +224,19 @@ app.patch('/api/sessions/:id', async (req, res, next) => {
 });
 
 app.delete('/api/sessions/:id', async (req, res, next) => {
-  try { await db.deleteSession(Number(req.params.id)); res.json({ ok: true }); } catch (e) { next(e); }
+  try {
+    const id = Number(req.params.id);
+    const session = await db.getSession(id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    // Sessions are shared/collaborative by design (regulatory/clinical/commercial
+    // + a human moderator working the same evaluation) — only deletion is
+    // gated, so no one can wipe someone else's session. A legacy session with
+    // no recorded owner stays deletable by anyone, matching prior behavior.
+    const canDelete = !req.user || !session.owner_id || req.user.is_admin || session.owner_id === req.user.id;
+    if (!canDelete) return res.status(403).json({ error: 'Only this session\'s creator or an admin can delete it' });
+    await db.deleteSession(id);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 app.patch('/api/sessions/:id/disagreements/:n', async (req, res, next) => {
@@ -242,9 +312,12 @@ app.patch('/api/sessions/:id/messages/:mid/favourite', async (req, res, next) =>
 });
 
 // ---------- agent turns (SSE over a POST) ----------
-const running = new Set();
 
-const DIS_RE = /⚠\s*\**\s*DISAGREEMENT[^\n]*\n(?:[^\n]+\n?)*/g;
+// ⚠️? tolerates the emoji-presentation variation selector (⚠️) the model
+// sometimes emits instead of bare ⚠. [\s\S]*? (not [^\n]*) so a blank line
+// between Position A/B/Status — required by the FORMATTING RULES above —
+// doesn't truncate the block before Status is reached.
+const DIS_RE = /⚠️?\s*\**\s*DISAGREEMENT[\s\S]*?Status\s*:?\s*\**\s*(?:RESOLVED|UNRESOLVED)[^\n]*/g;
 
 async function extractDisagreements(sessionId, messageId, text) {
   const found = [];
@@ -254,7 +327,7 @@ async function extractDisagreements(sessionId, messageId, text) {
     const topicMatch = head.match(/DISAGREEMENT\s*\**\s*(?:#\s*\d+)?\s*[—–:-]?\s*\[?([^\]\n]*?)\]?\**\s*$/i);
     const topic = topicMatch && topicMatch[1].trim() ? topicMatch[1].trim() : 'untitled';
     const status = /Status\s*:?\s*\**\s*RESOLVED/i.test(block) && !/Status\s*:?\s*\**\s*UNRESOLVED/i.test(block) ? 'resolved' : 'unresolved';
-    found.push(await db.addDisagreement(sessionId, messageId, topic, block, status));
+    found.push(await db.upsertDisagreement(sessionId, messageId, topic, block, status));
   }
   return found;
 }
@@ -267,9 +340,10 @@ const TAG_RE = /\[(?:VERIFIED|ESTIMATE|UNKNOWN)\b[^\]]*\]/g;
 
 async function assembleText(sessionId, messageId, speaker, text, trace) {
   const titles = new Map();
+  const openedUrls = new Set();
   for (const t of trace) {
     if (t.type === 'search') for (const r of t.results || []) { if (r.url) { titles.set(r.url, r.title); await db.upsertSource(sessionId, { url: r.url, title: r.title, kind: 'searched', messageId, speaker }); } }
-    if (t.type === 'open' && t.url) { if (t.title) titles.set(t.url, t.title); await db.upsertSource(sessionId, { url: t.url, title: t.title, kind: 'cited', messageId, speaker }); }
+    if (t.type === 'open' && t.url) { openedUrls.add(t.url); if (t.title) titles.set(t.url, t.title); await db.upsertSource(sessionId, { url: t.url, title: t.title, kind: 'cited', messageId, speaker }); }
   }
   const citeCache = new Map();
   async function cite(url) {
@@ -279,13 +353,19 @@ async function assembleText(sessionId, messageId, speaker, text, trace) {
     return n;
   }
   // Pass 1: tags. Append [n] after the closing bracket for each URL inside.
+  // A VERIFIED tag whose URL was never actually opened (only searched, or no
+  // URL at all) is downgraded to ESTIMATE — a snippet alone doesn't verify a claim.
   const tagMatches = [...text.matchAll(TAG_RE)];
   const tagReplacements = new Map();
   for (const m of tagMatches) {
-    const tag = m[0];
+    let tag = m[0];
+    const tagUrls = [...tag.matchAll(URL_RE)].map((um) => um[0]);
+    if (/^\[VERIFIED\b/i.test(tag) && !tagUrls.some((u) => openedUrls.has(u))) {
+      tag = tag.replace(/^\[VERIFIED\b/i, '[ESTIMATE (unverified, downgraded from VERIFIED)');
+    }
     const nums = [];
-    for (const um of tag.matchAll(URL_RE)) { const n = await cite(um[0]); if (!nums.includes(n)) nums.push(n); }
-    tagReplacements.set(tag, nums.length ? `${tag} ${nums.map((n) => `[${n}]`).join('')}` : tag);
+    for (const url of tagUrls) { const n = await cite(url); if (!nums.includes(n)) nums.push(n); }
+    tagReplacements.set(m[0], nums.length ? `${tag} ${nums.map((n) => `[${n}]`).join('')}` : tag);
   }
   let out = text.replace(TAG_RE, (tag) => tagReplacements.get(tag));
   // Pass 2: bare URLs outside tags.
@@ -333,21 +413,59 @@ function enforceCharLimit(text, maxChars) {
   return positionLine ? `${cut.trimEnd()} ${note}\n\n${positionLine}` : `${cut.trimEnd()} ${note}`;
 }
 
+const VALID_TURN_MODES = new Set(['opening', 'round2', 'round3', 'crosstalk', 'reply', 'custom', 'dive_deeper', 'meeting_minutes', 'decision', 'autopilot', 'report']);
+
+// The standard meetings build on each other (Round 2 challenges Round 1's
+// baselines, Round 3 converges on what Round 2 raised) — running one before
+// its prerequisite has an answer from every agent produces nonsense (e.g.
+// "attack two assumptions from the others" with nothing yet said).
+const ROUND_SEQUENCE = ['opening', 'round2', 'round3', 'crosstalk'];
+function agentsWithCompletedRound(messages, mode) {
+  return new Set(messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error).map((m) => m.speaker));
+}
+
 app.post('/api/sessions/:id/turn', async (req, res) => {
   const id = Number(req.params.id);
   const session = await db.fullSession(id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   const speaker = req.body.speaker;
   const mode = req.body.mode || 'crosstalk';
-  const instruction = req.body.instruction || '';
+  // Unbounded free text goes straight into the prompt sent to a paid-capable
+  // model — cap it well above any legitimate custom instruction's length.
+  const instruction = String(req.body.instruction || '').slice(0, 4000);
   if (!prompts.AGENTS[speaker]) return res.status(400).json({ error: `Unknown speaker ${speaker}` });
+  // `mode` is stored on the message row and rendered back into the DOM
+  // (public/app.js) — an unwhitelisted value would be a stored-XSS vector.
+  if (!VALID_TURN_MODES.has(mode)) return res.status(400).json({ error: `Unknown mode ${mode}` });
   if (speaker === 'moderator' && !['decision', 'report'].includes(mode)) return res.status(400).json({ error: 'The moderator assistant only writes the decision output or a report' });
   if (mode === 'report' && speaker !== 'moderator') return res.status(400).json({ error: 'Only the moderator assistant writes reports' });
-  // Keyed on session+speaker (not just session) so Round 1 can run all three
-  // agents concurrently; still blocks the same agent double-firing.
-  const runKey = `${id}:${speaker}`;
-  if (running.has(runKey)) return res.status(409).json({ error: 'This agent already has a turn running for this session' });
-  running.add(runKey);
+  const seqIdx = ROUND_SEQUENCE.indexOf(mode);
+  if (seqIdx > 0) {
+    for (let i = 0; i < seqIdx; i++) {
+      const done = agentsWithCompletedRound(session.messages, ROUND_SEQUENCE[i]);
+      if (prompts.AGENT_ORDER.some((a) => !done.has(a))) {
+        return res.status(400).json({ error: `Run ${ROUND_SEQUENCE[i]} for all three agents before starting ${mode}.` });
+      }
+    }
+  }
+
+  // Reports don't join the transcript: no message row / turn-lock up front.
+  // Final reports still get a message at the end (see below) for backward
+  // compatibility. Every other mode uses beginAgentTurn's DB-backed lock — the
+  // row itself is the durable, cross-instance lock; an in-process Set doesn't
+  // see a sibling turn running in another Vercel lambda instance, so it can't
+  // actually stop a double-fire in production.
+  const isReport = mode === 'report';
+  let msg = null;
+  if (!isReport) {
+    try {
+      msg = await db.beginAgentTurn(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode });
+    } catch (err) {
+      if (err.code === 'ALREADY_RUNNING') return res.status(409).json({ error: err.message });
+      console.error('[turn] beginAgentTurn failed:', err.message);
+      return res.status(500).json({ error: err.message || String(err) });
+    }
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -355,22 +473,22 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   res.flushHeaders();
   const send = (event, data) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 
-  // Autopilot: resolve the stance sentence server-side from its slider index,
+  // Autopilot: resolve the stance sentence server-side from its slider index
+  // (fill() substitutes {{COUNTRY}} etc — the level-5 bank entry names it),
   // and the disagreement topic (if scoped) so the model gets a plain sentence.
   let stanceText = null;
   let disagreementTopic = null;
   if (mode === 'autopilot') {
-    if (req.body.stance_index) stanceText = (prompts.stanceBank()[String(req.body.stance_index)]) || null;
+    if (req.body.stance_index) {
+      const entry = prompts.stanceBank()[String(req.body.stance_index)];
+      stanceText = entry ? prompts.fill(entry.text, session.inputs) : null;
+    }
     if (req.body.disagreement_n) {
       const d = session.disagreements.find((x) => x.n === Number(req.body.disagreement_n));
       disagreementTopic = d ? d.topic : null;
     }
   }
 
-  // Reports don't join the transcript: no message row up front. Final reports
-  // still get one at the end (see below) for backward compatibility.
-  const isReport = mode === 'report';
-  const msg = isReport ? null : await db.addMessage(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode, text: '' });
   if (!isReport) send('start', { message_id: msg.id, seq: msg.seq, speaker, mode, created_at: msg.created_at });
   else send('start', { report: true, kind: req.body.kind, depth: req.body.depth });
   const searches = [];
@@ -378,6 +496,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   try {
     const result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
+      disagreements: session.disagreements,
       model: session.model || config.MODEL,
       max_chars: req.body.max_chars, stance: stanceText, disagreementTopic,
       report: isReport ? {
@@ -417,7 +536,6 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       }
       await db.touchSession(id);
       send('done', { report, message: finalMessage });
-      running.delete(runKey);
       return res.end();
     }
 
@@ -426,7 +544,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     const u = result.usage;
     await db.updateMessage(msg.id, {
       text, content_json: JSON.stringify({
-        model: result.model, trace: result.trace, usage: u,
+        model: result.model, trace: result.trace, usage: u, stop_reason: result.stop_reason,
         ...(mode === 'autopilot' ? { max_chars: req.body.max_chars, stance_index: req.body.stance_index, autopilot: req.body.autopilot } : {}),
       }),
       input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
@@ -452,11 +570,10 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       await db.updateMessage(msg.id, {
         text: '', content_json: null, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
         searches: 0, cost_usd: 0, error: message, duration_ms: Date.now() - turnStarted,
-      });
+      }).catch((e) => console.error(`[turn ${msg.id}] failed to record error:`, e.message));
     }
     send('error', { message_id: msg ? msg.id : null, message, code: err.code || (err.status ? `HTTP ${err.status}` : 'ERROR') });
   } finally {
-    running.delete(runKey);
     res.end();
   }
 });
@@ -520,6 +637,38 @@ app.post('/api/sessions/:id/reports/:rid/email', async (req, res, next) => {
     const result = await email.sendReportEmail({ session: s, report, to, attachments, note: req.body.note || '', sentBy });
     const row = await db.addReportEmail(report.id, { to, format, sent_by: sentBy, provider_id: result.id });
     res.json({ ok: true, provider_id: result.id, row });
+  } catch (e) { next(e); }
+});
+
+// ---------- meeting minutes ----------
+// Runs the moderator agent (non-streaming — minutes are short) and stores the
+// result separately from `messages`, so it never touches the transcript/filter
+// chips; email is fire-and-forget and never blocks the response.
+app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const session = await db.fullSession(id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const round = String(req.body.round || '').slice(0, 200);
+    const label = String(req.body.label || round).slice(0, 200);
+    const anchorMessageId = Number.isInteger(req.body.anchor_message_id) ? req.body.anchor_message_id : null;
+    const result = await runTurn({
+      inputs: session.inputs, agentKey: 'moderator', mode: 'meeting_minutes', instruction: label,
+      messages: session.messages, model: session.model || config.MODEL, onEvent: () => {},
+    });
+    const row = await db.addMeetingMinutes(id, { round, label, text: result.text, anchor_message_id: anchorMessageId });
+    const recipient = (req.user && req.user.email) || process.env.MODERATOR_EMAIL || null;
+    sendMeetingMinutesEmail(session, row, recipient).catch((e) => console.error('[meeting-minutes] email failed:', e.message));
+    res.json(row);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/meeting-minutes/:token/approve', async (req, res, next) => {
+  try {
+    const row = await db.getMinutesByToken(req.params.token);
+    if (!row) return res.status(404).send('Meeting minutes not found');
+    await db.setMinutesApproved(row.id);
+    res.redirect(`/?session=${row.session_id}&approved=${encodeURIComponent(row.round)}`);
   } catch (e) { next(e); }
 });
 

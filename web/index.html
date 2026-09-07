@@ -16,8 +16,8 @@
         <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
         <span>Anatop Territory Evaluation</span>
       </button>
-      <button id="btn-new" class="btn btn-primary btn-block" type="button">New session</button>
-      <button id="btn-warroom" class="btn btn-accent btn-block" type="button" title="Sources, disagreements, cost, meeting minutes, agent notes">Intelligence</button>
+      <button id="btn-new" class="btn btn-accent btn-block" type="button">New evaluation</button>
+      <button id="btn-warroom" class="btn btn-primary btn-block" type="button" title="Sources, disagreements, cost, meeting minutes, agent notes">Intelligence</button>
     </div>
 
     <!-- Every control that advances or reports on the simulation, in one panel.
@@ -57,7 +57,12 @@
       <button class="btn btn-sm btn-block btn-start btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
     </nav>
 
-    <div id="session-list" class="session-list" aria-label="Saved sessions"></div>
+    <div class="session-list-wrap">
+      <button type="button" id="btn-toggle-sessions" class="session-toggle" aria-expanded="false" aria-controls="session-list">
+        <span id="session-toggle-label">View all simulations</span><span class="session-toggle-caret">▾</span>
+      </button>
+      <div id="session-list" class="session-list" aria-label="Saved sessions" hidden></div>
+    </div>
     <div class="sidebar-foot" id="sidebar-foot"></div>
   </aside>
 
@@ -67,7 +72,7 @@
       <header class="topbar">
         <h1>Dashboard</h1>
         <div class="topbar-actions">
-          <button id="btn-dashboard-new" class="btn btn-primary" type="button">New session</button>
+          <button id="btn-logout" class="btn" type="button" title="Sign out of this browser">Log out</button>
         </div>
       </header>
       <div class="scroll">
@@ -133,22 +138,8 @@
         </div>
       </header>
 
-      <div id="decision-banner" class="decision-banner" hidden>
-        <div class="decision-banner-head">
-          <span class="decision-banner-label">Recommendation</span>
-          <button type="button" class="decision-banner-jump" id="btn-decision-jump">View in transcript ↓</button>
-        </div>
-        <div class="decision-banner-body" id="decision-banner-body"></div>
-      </div>
-
       <div class="session-body">
         <div class="transcript-col">
-          <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
-            <button type="button" class="chip active" data-speaker="all">All</button>
-            <!-- One chip per enabled agent is inserted here from the roster
-                 manifest by renderFilterChips(); these two are not agents. -->
-            <button type="button" class="chip chip-user" data-speaker="user">You</button>
-          </div>
           <div class="agent-columns" id="agent-columns" hidden>
             <div class="agent-columns-tools">
               <div class="seg" role="group" aria-label="How the transcript is ordered">
@@ -188,7 +179,6 @@
             <button class="tab" data-tab="decision" role="tab" type="button">Decision</button>
             <button class="tab" data-tab="favourites" role="tab" type="button">★ Favourites <span class="count" id="count-favourites">0</span></button>
             <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
-            <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
             <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
             <button class="tab" data-tab="intelligence" role="tab" type="button">Agent notes</button>
             <button class="tab" data-tab="inputs" role="tab" type="button">Inputs</button>
@@ -198,7 +188,6 @@
           <div class="tab-body" id="tab-decision" hidden></div>
           <div class="tab-body" id="tab-favourites" hidden></div>
           <div class="tab-body" id="tab-reports" hidden></div>
-          <div class="tab-body" id="tab-cost" hidden></div>
           <div class="tab-body" id="tab-minutes" hidden></div>
           <div class="tab-body" id="tab-intelligence" hidden></div>
           <div class="tab-body" id="tab-inputs" hidden>

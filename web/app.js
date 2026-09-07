@@ -266,6 +266,29 @@
   }
 
   // ---------------- sidebar ----------------
+  // Collapsed/expanded state for the saved-session list. The button carries
+  // the count so it is still worth reading while collapsed.
+  function setSessionListOpen(open) {
+    const list = $('#session-list');
+    const btn = $('#btn-toggle-sessions');
+    list.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.classList.toggle('open', open);
+    const n = state.sessions.length;
+    $('#session-toggle-label').textContent = open ? 'Hide simulations' : `View all simulations${n ? ` (${n})` : ''}`;
+  }
+
+  // HTTP Basic auth has no true sign-out: the browser holds the credential for
+  // the origin until it is closed. Sending a deliberately wrong one by fetch is
+  // the one lever that replaces what it cached, after which /logout renders the
+  // signed-out page. Best effort — say so rather than promise a clean logout.
+  async function logout() {
+    try {
+      await fetch('/api/me', { headers: { Authorization: `Basic ${btoa('logout:logout')}` }, cache: 'no-store' });
+    } catch { /* the 401 is the point; a network error changes nothing */ }
+    location.href = '/logout';
+  }
+
   async function loadSessions() {
     state.sessions = await api.get('/api/sessions');
     const list = $('#session-list');
@@ -278,6 +301,8 @@
       b.addEventListener('click', () => openSession(s.id));
       list.appendChild(b);
     }
+    // Keeps the collapsed button's count honest after a run or a delete.
+    setSessionListOpen(!$('#session-list').hidden);
     // The dashboard reads the same list, so a refetch after a run/delete keeps
     // its KPI strip and cards current instead of showing pre-run numbers.
     if (!$('#view-dashboard').hidden) renderDashboard();
@@ -477,7 +502,7 @@
       ? state.sessions.reduce((a, b) => (new Date(a.updated_at) > new Date(b.updated_at) ? a : b))
       : null;
     const tiles = [`
-      <button type="button" class="action-tile action-tile-primary" id="tile-new">
+      <button type="button" class="action-tile action-tile-start" id="tile-new">
         <span class="action-icon">${icon('plus')}</span>
         <span class="action-text">
           <span class="action-title">Start a new evaluation</span>
@@ -596,25 +621,12 @@
     $('#inputs-summary-label').textContent = `Inputs · ${state.config.input_fields.length - missing.length} filled, ${missing.length} INPUT MISSING`;
     fillForm($('#session-inputs-form'), s.inputs, { clear: true });
     // transcript
-    renderDecisionBanner();
     renderTranscript();
     renderSources(); renderDisagreements(); renderDecisionTab(); renderFavourites(); renderReports(); renderCost(); renderMinutes(); renderIntelligence();
     renderMeetingNav();
     setRunning(state.running);
     const t = $('#transcript');
     t.scrollTop = t.scrollHeight;
-  }
-
-  // Pinned above the transcript once a decision exists — the recommendation is
-  // the single most important thing in the session and should not require
-  // scrolling past the full multi-round debate to find.
-  function renderDecisionBanner() {
-    const el = $('#decision-banner');
-    const text = state.session.decision_text;
-    if (!text) { el.hidden = true; return; }
-    el.hidden = false;
-    const body = $('#decision-banner-body');
-    body.replaceChildren(renderMarkdown(text));
   }
 
   // extraMs: the running turn's not-yet-committed elapsed time, added on top of
@@ -1003,23 +1015,11 @@
     $('#dlg-message').showModal();
   }
 
+  // The token/cost breakdown lives on the Admin page now, across all
+  // sessions. What stays here is the header meter for the open session.
   function renderCost() {
-    const s = state.session;
-    const sum = (k) => s.messages.reduce((a, m) => a + (m[k] || 0), 0);
-    const total = sum('cost_usd');
+    const total = state.session.messages.reduce((a, m) => a + (m.cost_usd || 0), 0);
     $('#cost-meter').textContent = money(total);
-    const p = state.config.prices;
-    $('#tab-cost').innerHTML = `<table class="cost-table">
-      <tr><td>Model</td><td>${escapeHtml(state.config.model)}</td></tr>
-      <tr><td>Input tokens</td><td>${sum('input_tokens').toLocaleString()}</td></tr>
-      <tr><td>Cache reads</td><td>${sum('cache_read_tokens').toLocaleString()}</td></tr>
-      <tr><td>Cache writes</td><td>${sum('cache_write_tokens').toLocaleString()}</td></tr>
-      <tr><td>Output tokens</td><td>${sum('output_tokens').toLocaleString()}</td></tr>
-      <tr><td>Web searches</td><td>${sum('searches').toLocaleString()}</td></tr>
-      <tr><td>Agent turns</td><td>${s.messages.filter((m) => m.role !== 'user').length}</td></tr>
-      <tr class="total"><td>Estimated cost</td><td>${money(total)}</td></tr>
-    </table>
-    <p class="muted" style="margin-top:10px">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check your <a href="https://openrouter.ai/activity" target="_blank" rel="noopener">OpenRouter activity page</a> for actual billing.</p>`;
   }
 
   // Marks each Simulation Process step as "ran" once at least one message exists for its mode.
@@ -1214,7 +1214,7 @@
             else if (name === 'text') { raw += data.delta; paint(false); }
             else if (name === 'done') {
               state.session.messages.push(data.message); state.session.sources = data.sources; state.session.disagreements = data.disagreements;
-              if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionBanner(); renderDecisionTab(); }
+              if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionTab(); }
               renderSources(); renderDisagreements(); renderCost();
               if (data.new_disagreements.length) toast(`${data.new_disagreements.length} disagreement(s) logged`);
               done = true;
@@ -1593,7 +1593,6 @@
         state.session.decision_text = payload.message.text;
         $('.empty', $('#transcript'))?.remove();
         $('#transcript').appendChild(messageElement(payload.message));
-        renderDecisionBanner();
         renderDecisionTab();
       }
       renderReports();
@@ -1622,7 +1621,6 @@
     // These three open in the left slide-over, not a new tab: reading the guide
     // or editing an agent mid-meeting shouldn't take you out of the session.
     const links = [
-      '<button type="button" class="navlink" data-nav="guide" data-nav-title="User Guide">User guide</button>',
       '<button type="button" class="navlink" data-nav="agents" data-nav-title="Agent Profiles">Agents</button>',
       me.is_admin ? '<button type="button" class="navlink" data-nav="admin" data-nav-title="Admin">Admin</button>' : '',
     ].filter(Boolean).join(' · ');
@@ -1648,6 +1646,10 @@
     $('#btn-sidebar-expand').addEventListener('click', () => setSidebarCollapsed(false));
 
     $('#btn-new').addEventListener('click', showSetup);
+    // The saved-session list is long and is not what the sidebar is mainly for,
+    // so it stays collapsed until asked for. Not persisted: collapsed is the
+    // intended default on every load.
+    $('#btn-toggle-sessions').addEventListener('click', () => setSessionListOpen($('#session-list').hidden));
     $('#btn-load-korea').addEventListener('click', async () => {
       const defaults = await api.get('/api/defaults');
       fillForm($('#setup-form'), defaults, { clear: true });
@@ -1701,7 +1703,6 @@
       return runSequence(pending.map((a) => ({ speaker: a, mode })));
     }));
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
-    $('#btn-decision-jump').addEventListener('click', jumpToDecision);
 
     // Reports ▾
     $('#btn-reports').addEventListener('click', (e) => { e.stopPropagation(); $('#reports-menu').hidden = !$('#reports-menu').hidden; });
@@ -1850,7 +1851,7 @@
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'decision', 'favourites', 'reports', 'cost', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
 
@@ -1905,7 +1906,7 @@
     });
 
     $('#brand-home').addEventListener('click', showDashboard);
-    $('#btn-dashboard-new').addEventListener('click', showSetup);
+    $('#btn-logout').addEventListener('click', logout);
     // Only the session cards are rebuilt while typing; the KPI strip stays put
     // so the numbers don't flicker as you narrow the list.
     $('#dash-search').addEventListener('input', renderSessionCards);

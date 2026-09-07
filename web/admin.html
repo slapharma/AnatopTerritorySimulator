@@ -41,6 +41,10 @@
   .add-form select { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
   td.kb-title { max-width: 240px; }
   td.kb-note { max-width: 320px; color: var(--text-2); font-size: 12.5px; }
+  .cost-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 12px; color: var(--text-2); margin-bottom: 12px; }
+  .cost-pick select { padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; max-width: 340px; }
+  tr.total td { border-top: 2px solid var(--border-strong); border-bottom: none; }
+  #cost-content .muted { font-size: 12px; color: var(--muted); }
   .embedded body { max-width: none; margin: 0; padding: 18px 20px 60px; }
   .embedded .back { display: none !important; }
 </style>
@@ -51,6 +55,12 @@
   <h1>Admin — Users</h1>
   <p class="lede">Anyone listed here can log in with their email and password. Admins can also manage users and edit agent profiles.</p>
   <div id="content">Loading…</div>
+
+  <div class="section-gap">
+    <h1>Cost</h1>
+    <p class="lede">Estimated API spend. Moved here from the Intelligence panel so it sits with the other admin-only figures. Pick a session for its token breakdown, or leave it on all sessions for the totals.</p>
+    <div id="cost-content">Loading…</div>
+  </div>
 
   <div class="section-gap">
     <h1>Knowledgebase</h1>
@@ -222,15 +232,64 @@
     });
   }
 
+  // The per-session token table this renders is the one that used to be the
+  // Intelligence panel's Cost tab, verbatim; the all-sessions view is what
+  // that tab could not show, since it only ever saw one session.
+  let costSessions = [];
+  function money(usd, rate) {
+    const n = Number(usd) || 0;
+    const gbp = n * rate;
+    return `$${n.toFixed(n < 1 ? 3 : 2)} · £${gbp.toFixed(gbp < 1 ? 3 : 2)}`;
+  }
+  async function renderCost() {
+    const box = $('#cost-content');
+    const [config, sessions] = await Promise.all([api('GET', '/api/config'), api('GET', '/api/sessions')]);
+    costSessions = sessions;
+    const rate = config.usd_to_gbp;
+    const p = config.prices;
+    const picked = $('#cost-session') ? $('#cost-session').value : 'all';
+    const options = ['<option value="all">All sessions</option>']
+      .concat(sessions.map((x) => `<option value="${x.id}"${String(x.id) === picked ? ' selected' : ''}>${escapeHtml(x.title)}</option>`))
+      .join('');
+    let table;
+    if (picked === 'all') {
+      const total = sessions.reduce((a, x) => a + Number(x.cost_usd || 0), 0);
+      table = `<table>
+        <tr><th>Session</th><th>Responses</th><th>Cost</th></tr>
+        ${sessions.map((x) => `<tr><td>${escapeHtml(x.title)}</td><td>${x.message_count}</td><td>${money(x.cost_usd, rate)}</td></tr>`).join('')}
+        <tr class="total"><td><strong>All sessions</strong></td><td><strong>${sessions.reduce((a, x) => a + Number(x.message_count || 0), 0)}</strong></td><td><strong>${money(total, rate)}</strong></td></tr>
+      </table>`;
+    } else {
+      const full = await api('GET', `/api/sessions/${picked}`);
+      const sum = (k) => full.messages.reduce((a, m) => a + (m[k] || 0), 0);
+      const total = sum('cost_usd');
+      table = `<table>
+        <tr><td>Model</td><td>${escapeHtml(full.model || config.model)}</td></tr>
+        <tr><td>Input tokens</td><td>${sum('input_tokens').toLocaleString()}</td></tr>
+        <tr><td>Cache reads</td><td>${sum('cache_read_tokens').toLocaleString()}</td></tr>
+        <tr><td>Cache writes</td><td>${sum('cache_write_tokens').toLocaleString()}</td></tr>
+        <tr><td>Output tokens</td><td>${sum('output_tokens').toLocaleString()}</td></tr>
+        <tr><td>Web searches</td><td>${sum('searches').toLocaleString()}</td></tr>
+        <tr><td>Agent turns</td><td>${full.messages.filter((m) => m.role !== 'user').length}</td></tr>
+        <tr class="total"><td><strong>Estimated cost</strong></td><td><strong>${money(total, rate)}</strong></td></tr>
+      </table>`;
+    }
+    box.innerHTML = `<label class="cost-pick">Session <select id="cost-session">${options}</select></label>${table}
+      <p class="muted">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check your <a href="https://openrouter.ai/activity" target="_blank" rel="noopener">OpenRouter activity page</a> for actual billing.</p>`;
+    $('#cost-session').addEventListener('change', () => renderCost().catch((e) => toast(e.message)));
+  }
+
   async function init() {
     const me = await api('GET', '/api/me').catch(() => ({ authenticated: false }));
     if (!me.is_admin) {
       $('#content').innerHTML = '<div class="denied">Admin access required.</div>';
       renderKnowledge(false).catch((e) => { $('#kb-content').innerHTML = `<div class="denied">${escapeHtml(e.message)}</div>`; });
+      $('#cost-content').innerHTML = '<div class="denied">Admin access required.</div>';
       return;
     }
     render();
     renderKnowledge(true);
+    renderCost().catch((err) => { $('#cost-content').innerHTML = `<div class="denied">${escapeHtml(err.message)}</div>`; });
   }
   init();
 })();

@@ -2,7 +2,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 800,
-      "includeFiles": "{web/**,fonts/**,node_modules/marked/lib/marked.umd.js,node_modules/dompurify/dist/purify.min.js}"
+      "includeFiles": "{certs/**,web/**,fonts/**,node_modules/marked/lib/marked.umd.js,node_modules/dompurify/dist/purify.min.js}"
     }
   },
   "rewrites": [

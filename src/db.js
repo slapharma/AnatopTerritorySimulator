@@ -1,13 +1,43 @@
 'use strict';
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 const config = require('./config');
 // Grace beyond the in-turn budget before an unfinished row is declared dead.
 const STALE_TURN_MS = config.TURN_TIMEOUT_MS + 120000;
 
+// Supabase's pooler presents a chain rooted in their own CA, so verifying
+// against the system store fails with SELF_SIGNED_CERT_IN_CHAIN. The previous
+// fix for that was `rejectUnauthorized: false`, which turns off verification
+// altogether and accepts any certificate — including an interceptor's. Pin
+// Supabase's published root instead (certs/supabase-prod-ca-2021.pem, fetched
+// from their download bucket over verified TLS) and keep verification on.
+//
+// DATABASE_CA overrides the bundle for a non-Supabase Postgres. The root
+// expires in April 2031; if Supabase rotates earlier, replace the file rather
+// than reaching for the escape hatch below.
+function sslConfig() {
+  const url = process.env.DATABASE_URL || '';
+  if (!url) return undefined;
+  if (process.env.DATABASE_SSL_INSECURE === '1') {
+    // Deliberate, logged, and never the default: an unverified connection is
+    // the thing this code exists to avoid, so make the choice visible in logs.
+    console.warn('[db] WARNING: DATABASE_SSL_INSECURE=1 — the Postgres certificate is NOT being verified.');
+    return { rejectUnauthorized: false };
+  }
+  const caPath = process.env.DATABASE_CA || path.join(__dirname, '..', 'certs', 'supabase-prod-ca-2021.pem');
+  try {
+    return { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized: true };
+  } catch (e) {
+    if (!url.includes('supabase.co')) return { rejectUnauthorized: true };
+    throw new Error(`Cannot read the Postgres CA at ${caPath}: ${e.message}. Set DATABASE_CA, or DATABASE_SSL_INSECURE=1 to connect without verifying (not for production).`);
+  }
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase.com') ? { rejectUnauthorized: false } : undefined,
+  ssl: sslConfig(),
 });
 // pg emits 'error' on the Pool when an IDLE client's connection drops (e.g.
 // Supabase's pooler recycling one) — with no listener, that's an unhandled

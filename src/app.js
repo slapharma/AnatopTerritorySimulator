@@ -465,7 +465,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     for (let i = 0; i < seqIdx; i++) {
       const done = agentsWithCompletedRound(session.messages, ROUND_SEQUENCE[i]);
       if (prompts.AGENT_ORDER.some((a) => !done.has(a))) {
-        return res.status(400).json({ error: `Run ${ROUND_SEQUENCE[i]} for all three agents before starting ${mode}.` });
+        return res.status(400).json({ error: `Run ${ROUND_SEQUENCE[i]} for all ${prompts.AGENT_ORDER.length} agents before starting ${mode}.` });
       }
     }
   }
@@ -482,9 +482,12 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     try {
       msg = await db.beginAgentTurn(id, { role: speaker === 'moderator' ? 'moderator' : 'agent', speaker, mode });
     } catch (err) {
+      // ALREADY_RUNNING is this app's own message and safe to show; anything
+      // else here is a database error whose text belongs only in the log.
       if (err.code === 'ALREADY_RUNNING') return res.status(409).json({ error: err.message });
-      console.error('[turn] beginAgentTurn failed:', err.message);
-      return res.status(500).json({ error: err.message || String(err) });
+      const ref = errorRef();
+      console.error(`[turn ${ref}] beginAgentTurn failed for session ${id}:`, err);
+      return res.status(500).json({ error: `Could not start this turn (reference ${ref}).`, ref });
     }
   }
 
@@ -724,9 +727,20 @@ app.get('/api/sessions/:id/export.pdf', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Every deliberate failure in this file answers with its own res.status(4xx),
+// so anything reaching here is unexpected — a driver error, a bad query, a
+// null dereference. Those messages are written for the log, not for a user:
+// pg in particular reports table names, column names and constraint names, and
+// a connection failure can carry the host out of DATABASE_URL. Log the whole
+// error, hand back a reference the log can be searched by.
+function errorRef() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
-  console.error(err);
-  res.status(500).json({ error: err.message || String(err) });
+  const ref = errorRef();
+  console.error(`[error ${ref}] ${req.method} ${req.originalUrl}`, err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: `Something went wrong on the server (reference ${ref}). The detail is in the server log.`, ref });
 });
 
 if (!process.env.VERCEL) {

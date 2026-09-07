@@ -404,13 +404,11 @@
     const decided = list.filter((s) => s.has_decision).length;
     const messages = list.reduce((n, s) => n + Number(s.message_count || 0), 0);
     const cost = list.reduce((n, s) => n + Number(s.cost_usd || 0), 0);
-    const latest = list.length ? list.reduce((a, b) => (new Date(a.updated_at) > new Date(b.updated_at) ? a : b)) : null;
     const stats = [
       { icon: 'folder', label: 'Evaluations', value: list.length, sub: `${list.length - decided} still open` },
       { icon: 'globe', label: 'Countries', value: list.length ? countries.size : 0, sub: 'markets assessed' },
       { icon: 'check', label: 'Decisions ready', value: decided, sub: list.length ? `${Math.round((decided / list.length) * 100)}% of evaluations` : 'none yet', tone: decided ? 'accent' : '' },
       { icon: 'chat', label: 'Agent responses', value: messages.toLocaleString(), sub: 'across all sessions' },
-      { icon: 'clock', label: 'Last activity', value: latest ? fmtRelative(latest.updated_at) : '—', sub: latest ? escapeHtml(latest.title) : 'no sessions yet', small: true },
     ];
     if (isAdminUser()) stats.push({ icon: 'sliders', label: 'API spend', value: `$${cost.toFixed(2)}`, sub: 'all sessions, estimated' });
     $('#dash-stats').innerHTML = stats.map((s) => `
@@ -418,7 +416,7 @@
         <span class="stat-icon">${icon(s.icon)}</span>
         <span class="stat-text">
           <span class="stat-label">${s.label}</span>
-          <span class="stat-value ${s.small ? 'stat-value-sm' : ''}">${s.value}</span>
+          <span class="stat-value">${s.value}</span>
           <span class="stat-sub">${s.sub}</span>
         </span>
       </div>`).join('');

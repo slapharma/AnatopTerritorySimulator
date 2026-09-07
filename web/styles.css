@@ -466,7 +466,6 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .stat-text { display: flex; flex-direction: column; min-width: 0; }
 .stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .stat-value { font-size: 25px; font-weight: 700; line-height: 1.15; margin: 3px 0 1px; }
-.stat-value-sm { font-size: 14.5px; line-height: 1.35; margin-top: 5px; }
 .stat-sub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The two big things you come here to do. */
@@ -534,7 +533,6 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .stat-icon { width: 26px; height: 26px; }
   .stat-icon .icon { width: 15px; height: 15px; }
   .stat-value { font-size: 19px; }
-  .stat-value-sm { font-size: 12.5px; }
   .stat-label { font-size: 9.5px; letter-spacing: .05em; }
 }
 @media (prefers-reduced-motion: reduce) {

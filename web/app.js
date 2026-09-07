@@ -1856,20 +1856,6 @@
       setNavPanel(btn.dataset.nav === state.navPanel ? null : btn.dataset.nav, btn.dataset.navTitle);
     });
     $('#btn-nav-close').addEventListener('click', () => setNavPanel(null));
-    // Escape pressed with focus inside the frame: the keydown never reaches
-    // this document, so the framed page forwards it.
-    addEventListener('message', (e) => {
-      if (e.origin === location.origin && e.data && e.data.type === 'nav-panel-close') setNavPanel(null);
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      if (state.navPanel) setNavPanel(null);
-      else if (state.warRoomOpen) setWarRoom(false);
-    });
-
-    $('#brand-home').addEventListener('click', showDashboard);
-    $('#btn-logout').addEventListener('click', logout);
     // The onboarding callout is only useful until you know the flow, so a
     // dismissal sticks. localStorage rather than the server: it is a per-person,
     // per-browser preference, not session state worth a column.
@@ -1880,6 +1866,24 @@
     };
     try { if (localStorage.getItem(PROCESS_HIDDEN) === '1') $('#process-callout').hidden = true; } catch { /* ignore */ }
     $('#btn-close-process').addEventListener('click', () => setProcessHidden(true));
+    // Escape pressed with focus inside the frame: the keydown never reaches
+    // this document, so the framed page forwards it.
+    addEventListener('message', (e) => {
+      if (e.origin !== location.origin || !e.data) return;
+      if (e.data.type === 'nav-panel-close') setNavPanel(null);
+      // The guide's restore link has already cleared the flag; bring the
+      // callout back now rather than leaving it until the next load.
+      if (e.data.type === 'restore-process') setProcessHidden(false);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (state.navPanel) setNavPanel(null);
+      else if (state.warRoomOpen) setWarRoom(false);
+    });
+
+    $('#brand-home').addEventListener('click', showDashboard);
+    $('#btn-logout').addEventListener('click', logout);
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');

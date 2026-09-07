@@ -33,6 +33,7 @@
   .guide table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12.5px; }
   .guide th, .guide td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
   .guide th { background: var(--surface-2); }
+  .restore-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; }
   .embedded body { max-width: none; margin: 0; padding: 18px 20px 60px; }
   .embedded .back { display: none !important; }
 </style>
@@ -48,9 +49,17 @@
   <p>A simulated cross-functional launch working group for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents (<strong>Regulatory</strong>, <strong>Clinical</strong>, <strong>Commercial</strong>) each play a specialist role, research the country live on the web, argue their case with evidence, and challenge each other's assumptions over several rounds. A fourth AI role (<strong>Moderator Assistant</strong>) synthesises the whole discussion into a structured decision document at the end.</p>
   <p>It is not a source of truth on its own — it is a fast, structured first pass that surfaces what's known, what's estimated, what's genuinely unresolved, and where the agents disagree, each claim tagged and sourced so you can verify it yourself.</p>
 
+  <h2>The dashboard</h2>
+  <p>The dashboard is what you land on. It carries a summary of every evaluation run so far, the two things you are most likely to want to do next (start a new one, or pick up the most recent), and links to this guide, the agent profiles and — for admins — the admin page. The saved evaluations themselves live in <strong>All simulations</strong> in the sidebar, collapsed until you open it.</p>
+  <p>Above those sits a short <strong>How an evaluation runs</strong> panel explaining the four steps. Once you know them it is just taking up room, so it has an ✕ to dismiss it. That choice is remembered in this browser only — it does not follow you to another machine, and clearing site data brings it back.</p>
+  <p class="restore-row">
+    <button type="button" class="btn btn-sm" id="btn-restore-process">Show the four-step panel again</button>
+    <span class="muted" id="restore-note"></span>
+  </p>
+
   <h2>Starting a session</h2>
   <ol>
-    <li>Click <strong>New session</strong> in the sidebar.</li>
+    <li>Click <strong>New evaluation</strong> in the sidebar.</li>
     <li>Fill in what you know. Every field is optional — anything left blank is passed to the agents as <code>INPUT MISSING</code>, and they are required to say what they assumed instead rather than silently guessing.</li>
     <li><strong>Restore Default Values</strong> pre-fills the form with the saved default example (a real product, useful for a demo or a quick test). Any field you've saved as a default (see below) is included.</li>
     <li><strong>Copy from last session</strong> pre-fills the form with whatever you entered last time.</li>
@@ -103,31 +112,47 @@
   <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the Intelligence panel's <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
 
   <h2>Intelligence</h2>
-  <p>Click <strong>Intelligence</strong> in the sidebar to pop out the right-hand panel: <strong>Sources</strong>, <strong>Disagreements</strong>, <strong>Cost</strong>, <strong>Minutes</strong> (auto-written meeting minutes) and <strong>Agent notes</strong> (the transcript sliced by agent, by meeting, by disagreement, or by resolution status). Close it with the ✕ or Esc.</p>
+  <p>Click <strong>Intelligence</strong> in the sidebar to pop out the right-hand panel: <strong>Sources</strong>, <strong>Disagreements</strong>, <strong>Decision</strong> (the recommendation, once one has been written), <strong>★ Favourites</strong>, <strong>Reports</strong>, <strong>Minutes</strong> (auto-written meeting minutes), <strong>Agent notes</strong> (the transcript sliced by agent, by meeting, by disagreement, or by resolution status) and <strong>Inputs</strong>. Close it with the ✕ or Esc.</p>
 
   <h2>Favourites, Regenerate, Dive Deeper</h2>
   <ul>
-    <li><strong>☆ Favourite</strong> — star any response to flag it; filter the transcript to just your favourites with the ★ Favourites chip above the transcript.</li>
+    <li><strong>☆ Favourite</strong> — star any response to flag it. Starred responses are collected in the <strong>★ Favourites</strong> tab of the Intelligence panel, where each one can be opened, jumped to in the transcript, or unstarred.</li>
     <li><strong>↻ Regenerate</strong> — deletes a response and has the same agent answer again from scratch. Not offered on custom-round responses, since the original instruction isn't stored.</li>
     <li><strong>⇊ Dive Deeper</strong> — responses are compact by default. This asks the same agent to expand one specific response in full depth, as a new follow-up message, without discarding the original.</li>
   </ul>
 
-  <h2>Filtering the transcript</h2>
-  <p>The chip row above the transcript filters by who's speaking: an agent, <strong>You</strong> (messages you typed), <strong>Decision Output</strong> (the Moderator Assistant's synthesis — a separate thing from your own messages), or your favourites.</p>
+  <h2>Reading the transcript</h2>
+  <p>Agent responses are laid out in three columns — Regulatory, Clinical, Commercial — always in that order, so a column position means the same agent everywhere on the page. An agent that did not speak in a round leaves its column empty rather than shifting the others along. <strong>By meeting</strong> and <strong>By time</strong> above the columns switch between grouping responses by round and running them as one continuous feed per agent.</p>
 
   <h2>The model selector</h2>
-  <p>Each session can use a different underlying AI model — the dropdown in the top-right of a session picks it. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (shown in the Cost tab) but tend to be faster and more reliable for testing. A change applies to turns run from that point on, not retroactively.</p>
+  <p>Each session can use a different underlying AI model — the dropdown in the top-right of a session picks it. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) but tend to be faster and more reliable for testing. A change applies to turns run from that point on, not retroactively.</p>
 
   <h2>Cost and timing</h2>
-  <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The <strong>Cost</strong> tab and the $ figure in the topbar are the actual API cost reported for the session, token by token.</p>
+  <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The $ figure in the topbar is the API cost reported for the open session. The full breakdown — tokens, cache reads and writes, web searches, and a per-session table across every evaluation — is the <strong>Cost</strong> section of the <strong>Admin</strong> page. Cost is shown to admins only.</p>
 
   <h2>Writing the decision output</h2>
-  <p>Once you've run at least one round, <strong>Write the decision output</strong> triggers the Moderator Assistant to read the entire transcript and produce a fixed ten-section decision document — recommendation, regulatory pathway, clinical verdict, entry model, investment and breakeven, top risks, kill criteria, unresolved items, a verification appendix of every sourced claim, and next actions. It doesn't re-run the analysis or vote — it only synthesises what the three agents already established, keeping their tags and disagreements intact.</p>
+  <p>Once you've run at least one round, <strong>Reports → Final report</strong> in the sidebar triggers the Moderator Assistant to read the entire transcript and produce a fixed ten-section decision document — recommendation, regulatory pathway, clinical verdict, entry model, investment and breakeven, top risks, kill criteria, unresolved items, a verification appendix of every sourced claim, and next actions. It doesn't re-run the analysis or vote — it only synthesises what the three agents already established, keeping their tags and disagreements intact.</p>
+  <p>The result lands in three places: as a Moderator Assistant message in the transcript, in the <strong>Decision</strong> tab of the Intelligence panel, and in <strong>Reports</strong>, from where it can be exported or emailed. An <strong>Interim report</strong> works the same way at any earlier point, but does not write a decision.</p>
 
   <h2>Exporting</h2>
-  <p><strong>Export ▾</strong> in the top-right of a session produces a Word (.docx) or PDF document of the full session — inputs, every message, sources, and the decision output if one has been written.</p>
+  <p><strong>Export</strong> in the sidebar produces a Word (.docx) or PDF document of the full session — inputs, every message, sources, and the decision output if one has been written.</p>
 
   <a class="back" href="/">← Back to the app</a>
 </div>
+<script>
+  // The dashboard callout is hidden by a localStorage flag. This page shares
+  // the app's origin — framed in the slide-over or opened standalone — so
+  // clearing the key here is enough for the next dashboard load. When we are
+  // framed, also tell the parent so the panel comes back straight away
+  // instead of waiting for a reload the user has no reason to expect.
+  document.querySelector('#btn-restore-process').addEventListener('click', () => {
+    let stored = true;
+    try { localStorage.removeItem('lwg.hideProcess'); } catch { stored = false; }
+    if (window.self !== window.top) parent.postMessage({ type: 'restore-process' }, location.origin);
+    document.querySelector('#restore-note').textContent = stored
+      ? 'Restored — it is back on the dashboard.'
+      : 'This browser is blocking site storage, so the panel was never hidden.';
+  });
+</script>
 </body>
 </html>

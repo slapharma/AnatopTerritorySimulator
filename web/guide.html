@@ -46,7 +46,7 @@
   <p class="lede">A working reference for colleagues new to the tool. It covers what the app does, how to run a session, and what everything on screen means.</p>
 
   <h2>What this is</h2>
-  <p>A simulated cross-functional launch working group for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents (<strong>Regulatory</strong>, <strong>Clinical</strong>, <strong>Commercial</strong>) each play a specialist role, research the country live on the web, argue their case with evidence, and challenge each other's assumptions over several rounds. A fourth AI role (<strong>Moderator Assistant</strong>) synthesises the whole discussion into a structured decision document at the end.</p>
+  <p>A simulated cross-functional launch working group for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents — <strong>Ruth</strong> (Regulatory), <strong>Luca</strong> (Clinical) and <strong>Charlie</strong> (Commercial) — each play a specialist role, research the country live on the web, argue their case with evidence, and challenge each other's assumptions over several rounds. A fourth AI role (<strong>Moderator Assistant</strong>) synthesises the whole discussion into a structured decision document at the end.</p>
   <p>It is not a source of truth on its own — it is a fast, structured first pass that surfaces what's known, what's estimated, what's genuinely unresolved, and where the agents disagree, each claim tagged and sourced so you can verify it yourself.</p>
 
   <h2>The dashboard</h2>
@@ -79,7 +79,7 @@
     <tr><td>Cross-talk</td><td>One free-form meeting: every agent reacts to the discussion so far, only where something genuinely changed their view.</td></tr>
     <tr><td>Custom meeting…</td><td>Write your own instruction and pick which agents respond to it.</td></tr>
   </table>
-  <p>You can also type directly into the message box at the bottom as the moderator — address it to one agent or all of them — and they'll reply.</p>
+  <p>You can also type directly into the message box at the bottom as the moderator — address it to one agent or all of them, by name (“Ruth, what would the deficiency letter say?”) — and they'll reply.</p>
   <p>After each of the four standard meetings finishes, the Moderator Assistant automatically writes up meeting minutes — a summary per agent plus collated action points — into the <strong>Intelligence</strong> panel's <strong>Minutes</strong> tab, and emails them to you with links to view the session, jump to that meeting's transcript, or approve moving to the next one.</p>
 
   <h2>Reading a response</h2>
@@ -106,7 +106,7 @@
   </div>
 
   <h3>Cross-references</h3>
-  <p>In Challenge/Converge and cross-talk responses, a mention of another agent's name (e.g. "Clinical Agent") is a link — click it to jump straight to what that agent actually said.</p>
+  <p>In Challenge/Converge and cross-talk responses, a mention of another agent's name (e.g. "Luca") is a link — click it to jump straight to what that agent actually said.</p>
 
   <h2>Disagreements</h2>
   <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the Intelligence panel's <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
@@ -122,7 +122,7 @@
   </ul>
 
   <h2>Reading the transcript</h2>
-  <p>Agent responses are laid out in three columns — Regulatory, Clinical, Commercial — always in that order, so a column position means the same agent everywhere on the page. An agent that did not speak in a round leaves its column empty rather than shifting the others along. <strong>By meeting</strong> and <strong>By time</strong> above the columns switch between grouping responses by round and running them as one continuous feed per agent.</p>
+  <p>Agent responses are laid out in three columns — Ruth (Regulatory), Luca (Clinical), Charlie (Commercial) — always in that order, so a column position means the same agent everywhere on the page. An agent that did not speak in a round leaves its column empty rather than shifting the others along. <strong>By meeting</strong> and <strong>By time</strong> above the columns switch between grouping responses by round and running them as one continuous feed per agent.</p>
 
   <h2>Choosing the model</h2>
   <p>Each evaluation can run on a different underlying AI model. You pick it once, under <strong>Run settings</strong> at the bottom of the New evaluation form, and it holds for every turn of that session — the session header shows which model is in use. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) and only an administrator can start a session on one. Claude Sonnet 5 is the strongest of them and by far the most expensive, so reach for it when a run has to stand up rather than for routine testing.</p>

@@ -1,9 +1,9 @@
 ## Verification status
-Rewritten country-agnostic 2026-09-07. No national reimbursement body, health-technology-
+Rewritten country-agnostic 2026-09-07; renamed to Charlie 2026-09-07. No national reimbursement body, health-technology-
 assessment process, pricing rule or in-licensing deal is asserted here, because {{COUNTRY}}
 is set per session and each of those is established by the agent's own search each turn.
-Henrik Waldenström is fictional; no claim below names a real individual or attributes a
-real transaction to him.
+Charlie is fictional; no claim below names a real individual or attributes a
+real transaction to them.
 
 ## Education
 - MBA, international business (illustrative).

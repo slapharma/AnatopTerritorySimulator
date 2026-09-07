@@ -240,27 +240,45 @@
 
   // During challenge/converge/crosstalk/dive-deeper turns, hyperlink the first
   // plain-text mention of each OTHER agent to that agent's most recent prior
-  // response, so "Clinical Agent" in a Round 2 rebuttal jumps to what they said.
+  // response, so "Luca" in a Round 2 rebuttal jumps to what they said.
+  // The agents are on first-name terms, so the name is what actually appears in
+  // their prose — matching only the full label ("Luca (Clinical)") would find
+  // nothing. Longest form first, so "Luca (Clinical)" wins over the bare "Luca"
+  // inside it and the link covers the whole reference.
+  function mentionForms(key) {
+    const a = (state.config.agents || {})[key] || {};
+    // Bare "Regulatory" is deliberately not a form: it appears constantly as an
+    // ordinary adjective ("the regulatory pathway") and would link the wrong word.
+    return [AGENT_LABEL[key], a.function ? `${a.function} Agent` : '', a.name, a.short]
+      .filter((v) => v && String(v).trim())
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .sort((x, y) => y.length - x.length);
+  }
+
   function linkAgentMentions(bodyEl, m) {
     if (!['round2', 'round3', 'crosstalk', 'dive_deeper'].includes(m.mode)) return;
     const others = ALL.filter((a) => a !== m.speaker);
     for (const other of others) {
       const target = state.session.messages.filter((x) => x.speaker === other && x.seq < m.seq && !x.error).pop();
       if (!target) continue;
-      const label = AGENT_LABEL[other];
+      const forms = mentionForms(other);
       const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
       let node;
-      while ((node = walker.nextNode())) {
+      let linked = false;
+      while (!linked && (node = walker.nextNode())) {
         if (node.parentElement.closest('a')) continue;
-        const idx = node.nodeValue.indexOf(label);
-        if (idx === -1) continue;
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + label.length);
-        const a = document.createElement('a');
-        a.className = 'agent-ref'; a.href = `#msg-${target.id}`; a.title = `Jump to ${label}'s response (#${target.seq})`;
-        range.surroundContents(a);
-        break;
+        for (const label of forms) {
+          const idx = node.nodeValue.indexOf(label);
+          if (idx === -1) continue;
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + label.length);
+          const a = document.createElement('a');
+          a.className = 'agent-ref'; a.href = `#msg-${target.id}`; a.title = `Jump to ${AGENT_LABEL[other]}'s response (#${target.seq})`;
+          range.surroundContents(a);
+          linked = true;
+          break;
+        }
       }
     }
   }

@@ -213,9 +213,13 @@ app.get('/api/agents', async (req, res, next) => {
     const byKey = new Map(rows.map((r) => [r.key, r]));
     res.json(prompts.AGENT_ORDER.map((key) => ({
       key,
-      label: prompts.AGENTS[key].label,
       knowledge: '', can_web_search: true, can_open_url: true, stance_default: 3,
       ...(byKey.get(key) || {}),
+      // After the row, not before it: agents.label is a legacy column seeded at
+      // install and never updated, so a row written before an agent was renamed
+      // would otherwise put the old name back on this page. The manifest is the
+      // only source of the label.
+      label: prompts.AGENTS[key].label,
       persona_preview: prompts.personaFilesRaw(key),
       // The checked-in prompts/agents/<key>/knowledge.md. `knowledge` above
       // overrides it; empty means this default is what the agent actually gets,

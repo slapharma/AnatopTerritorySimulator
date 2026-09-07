@@ -103,6 +103,15 @@ const BASE_VALUES = {
   exclusions: 'Any company marketing a competing diltiazem or nifedipine fissure product',
 };
 
+// "Ruth (the regulatory agent)" — the person first, the function in brackets, for
+// the roster line in every system prompt. Falls back to the label for an entry
+// with no `name`, so an agent added without one still reads correctly.
+function describeAgent(key) {
+  const a = AGENTS[key];
+  if (!a) return key;
+  return a.name && a.function ? `${a.name} (the ${a.function.toLowerCase()} agent)` : a.label;
+}
+
 function readPrompt(file) {
   return fs.readFileSync(path.join(PROMPT_DIR, file), 'utf8');
 }
@@ -245,7 +254,12 @@ async function systemPrompt(agentKey, inputs) {
   const persona = fill(await personaFor(agentKey), inputs);
   const rules = fill(readPrompt('evidence-rules.md'), inputs);
   const today = new Date().toISOString().slice(0, 10);
-  const others = AGENT_ORDER.filter((k) => k !== agentKey).map((k) => AGENTS[k].label).join(', ');
+  // The roster is on first-name terms (prompts/agents/index.json `name`). An agent
+  // that does not know it is called Ruth cannot answer to "Ruth, what's the
+  // pathway?" — so the room line names the agent to itself as well as naming the
+  // others, and both come from the manifest rather than being repeated in prose.
+  const others = AGENT_ORDER.filter((k) => k !== agentKey).map((k) => describeAgent(k)).join(', ');
+  const self = AGENTS[agentKey].name;
   const knowledge = agentKey === 'moderator' ? '' : await knowledgeBlock();
   return [
     persona,
@@ -258,7 +272,7 @@ async function systemPrompt(agentKey, inputs) {
     rules,
     knowledge ? `\n${knowledge}` : '',
     '',
-    `Today's date is ${today}. The other agents in the room are: ${others}. The human moderator is addressed as "Moderator".`,
+    `Today's date is ${today}. ${self ? `In this room you are ${self}: that is what the moderator and the other agents call you, and you answer to it whenever it is used — treat a message that opens with your name as addressed to you. ` : ''}The others in the room are: ${others}. Address them by first name. The human moderator is addressed as "Moderator".`,
   ].join('\n');
 }
 

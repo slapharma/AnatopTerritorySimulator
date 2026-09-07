@@ -267,10 +267,13 @@ END $$;
 -- The app needs one agents row per agent in prompts/agents/index.json only if
 -- you want a non-default challenge level or knowledge overlay; personaFor()
 -- treats a missing row as "no overlay". These rows match the shipped roster.
+-- agents.label here is legacy and is not what the app displays: every label the
+-- UI and the exports show comes from prompts/agents/index.json, so renaming an
+-- agent needs no migration of these rows.
 INSERT INTO agents (key, label, role) VALUES
-  ('regulatory', 'Regulatory Agent', 'regulatory'),
-  ('clinical',   'Clinical Agent',   'clinical'),
-  ('commercial', 'Commercial Agent', 'commercial')
+  ('regulatory', 'Ruth (Regulatory)',   'regulatory'),
+  ('clinical',   'Luca (Clinical)',     'clinical'),
+  ('commercial', 'Charlie (Commercial)','commercial')
 ON CONFLICT (key) DO NOTHING;
 
 INSERT INTO app_defaults (id, values_json) VALUES (true, '{}')

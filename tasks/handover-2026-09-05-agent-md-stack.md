@@ -98,6 +98,18 @@ correct and the expectation was stale. Clinical (Dr. Margaret Okafor-Lindqvist)
 and commercial (Henrik Waldenstrom) do still carry their fixed names, and both
 introduce themselves by name.
 
+**Superseded again, later on 2026-09-07: the three agents now have first names.**
+Regulatory is **Ruth**, clinical is **Luca**, commercial is **Charlie**, and the
+names live in `prompts/agents/index.json` (`name`, `function`, `label`) rather
+than only in prose, so the UI, the exports, the room roster in every system
+prompt and the mention-linking in `web/app.js` all read from one place. Ruth is
+still un-identifiable - first name only, no surname, no agency attached to her
+personally - which is what the anonymity above was protecting; being addressable
+and being anonymous turned out not to be in conflict. Clinical and commercial
+dropped their surnames at the same time, so the whole room is on first-name
+terms. Each persona now carries an explicit "you answer to <name>" rule and the
+Round 1 prompt opens with a spoken greeting rather than a self-label.
+
 **Section 4's RLS wording overstated the exposure.** Corrected in place above.
 
 **Commit trail for the items closed since this handover was written:**

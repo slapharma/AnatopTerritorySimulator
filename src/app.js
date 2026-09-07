@@ -5,6 +5,7 @@ const express = require('express');
 const config = require('./config');
 const db = require('./db');
 const prompts = require('./prompts');
+const { assembleText } = require('./transcript');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
 const email = require('./email');
@@ -12,6 +13,38 @@ const { sendMeetingMinutesEmail } = email;
 const { basicAuth, requireAdmin, hashPassword } = require('./auth');
 
 const app = express();
+
+// Above basicAuth on purpose: this is the page a signed-out user lands on, so
+// it has to render without credentials. It carries no data — a static notice
+// and a link back — so serving it unauthenticated leaks nothing.
+//
+// Basic auth has no real sign-out. The browser caches the credential for the
+// origin and replays it until the browser is closed; the client sends a
+// deliberately wrong credential first to displace what is cached, then comes
+// here. That works in current Chrome, Edge and Firefox but is not guaranteed,
+// which is why the page says to close the browser to be certain.
+app.get('/logout', (req, res) => {
+  res.type('html').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signed out</title>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #0F172A;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { background: #fff; border: 1px solid #E2E8F0; border-radius: 10px; padding: 32px; max-width: 420px;
+          box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  p { font-size: 14px; line-height: 1.55; color: #475569; margin: 0 0 16px; }
+  a { display: inline-block; background: #0891B2; color: #fff; text-decoration: none; font-weight: 600;
+      font-size: 13px; padding: 9px 16px; border-radius: 10px; }
+</style></head><body>
+  <div class="card">
+    <h1>Signed out</h1>
+    <p>Your browser has been asked to forget the credentials for this site. Close the browser to be certain they are gone.</p>
+    <a href="/">Sign in again</a>
+  </div>
+</body></html>`);
+});
+
 app.use(basicAuth);
 app.use(express.json({ limit: '4mb' }));
 // The front end lives in web/, NOT public/. Vercel serves a root-level public/
@@ -133,6 +166,10 @@ app.get('/api/agents', async (req, res, next) => {
       knowledge: '', can_web_search: true, can_open_url: true, stance_default: 3,
       ...(byKey.get(key) || {}),
       persona_preview: prompts.personaFilesRaw(key),
+      // The checked-in prompts/agents/<key>/knowledge.md. `knowledge` above
+      // overrides it; empty means this default is what the agent actually gets,
+      // which the page shows as placeholder text rather than an empty box.
+      knowledge_default: prompts.knowledgeDefault(key),
     })));
   } catch (e) { next(e); }
 });
@@ -142,7 +179,11 @@ app.patch('/api/agents/:key', requireAdmin, async (req, res, next) => {
     const { knowledge, can_web_search, can_open_url, stance_default } = req.body;
     const updated = await db.updateAgent(req.params.key, { knowledge, can_web_search, can_open_url, stance_default });
     if (!updated) return res.status(404).json({ error: 'Unknown agent' });
-    res.json({ ...updated, persona_preview: prompts.AGENTS[updated.key] ? prompts.personaFilesRaw(updated.key) : null });
+    res.json({
+      ...updated,
+      persona_preview: prompts.AGENTS[updated.key] ? prompts.personaFilesRaw(updated.key) : null,
+      knowledge_default: prompts.AGENTS[updated.key] ? prompts.knowledgeDefault(updated.key) : '',
+    });
   } catch (e) { next(e); }
 });
 
@@ -353,67 +394,7 @@ async function extractDisagreements(sessionId, messageId, text) {
   return found;
 }
 
-// Registers every searched / opened / cited URL as a session source and adds [n]
-// markers to the text after each URL the agent cited (outside the tag brackets so
-// the badge still renders).
-const URL_RE = /https?:\/\/[^\s<>()\[\]"']+[^\s<>()\[\]"'.,;:!?]/g;
-const TAG_RE = /\[(?:VERIFIED|ESTIMATE|UNKNOWN)\b[^\]]*\]/g;
-
-async function assembleText(sessionId, messageId, speaker, text, trace) {
-  const titles = new Map();
-  const openedUrls = new Set();
-  for (const t of trace) {
-    if (t.type === 'search') for (const r of t.results || []) { if (r.url) { titles.set(r.url, r.title); await db.upsertSource(sessionId, { url: r.url, title: r.title, kind: 'searched', messageId, speaker }); } }
-    if (t.type === 'open' && t.url) { openedUrls.add(t.url); if (t.title) titles.set(t.url, t.title); await db.upsertSource(sessionId, { url: t.url, title: t.title, kind: 'cited', messageId, speaker }); }
-  }
-  const citeCache = new Map();
-  async function cite(url) {
-    if (citeCache.has(url)) return citeCache.get(url);
-    const n = await db.upsertSource(sessionId, { url, title: titles.get(url), kind: 'cited', messageId, speaker });
-    citeCache.set(url, n);
-    return n;
-  }
-  // Pass 1: tags. Append [n] after the closing bracket for each URL inside.
-  // A VERIFIED tag whose URL was never actually opened (only searched, or no
-  // URL at all) is downgraded to ESTIMATE — a snippet alone doesn't verify a claim.
-  const tagMatches = [...text.matchAll(TAG_RE)];
-  const tagReplacements = new Map();
-  for (const m of tagMatches) {
-    let tag = m[0];
-    const tagUrls = [...tag.matchAll(URL_RE)].map((um) => um[0]);
-    if (/^\[VERIFIED\b/i.test(tag) && !tagUrls.some((u) => openedUrls.has(u))) {
-      tag = tag.replace(/^\[VERIFIED\b/i, '[ESTIMATE (unverified, downgraded from VERIFIED)');
-    }
-    const nums = [];
-    for (const url of tagUrls) { const n = await cite(url); if (!nums.includes(n)) nums.push(n); }
-    tagReplacements.set(m[0], nums.length ? `${tag} ${nums.map((n) => `[${n}]`).join('')}` : tag);
-  }
-  let out = text.replace(TAG_RE, (tag) => tagReplacements.get(tag));
-  // Pass 2: bare URLs outside tags.
-  const parts = out.split(TAG_RE);
-  const tags = out.match(TAG_RE) || [];
-  const newParts = [];
-  for (let i = 0; i < parts.length; i++) {
-    const seg = parts[i];
-    const urlMatches = [...seg.matchAll(URL_RE)];
-    let s = seg;
-    for (const um of urlMatches) {
-      const url = um[0];
-      const offset = um.index;
-      const whole = seg;
-      const after = whole.slice(offset + url.length, offset + url.length + 6);
-      if (/^\)?\s*\[\d+\]/.test(after)) continue; // already marked
-      const isMdLink = whole.slice(Math.max(0, offset - 2), offset).endsWith('](');
-      if (isMdLink) continue;
-      const n = await cite(url);
-      s = s.replace(url, `${url} [${n}]`);
-    }
-    newParts.push(s + (tags[i] || ''));
-  }
-  out = newParts.join('');
-  return out.trim();
-}
-
+// assembleText lives in src/transcript.js — see the note there on why.
 // Autopilot's "Hard limit: N characters" is only a prompt instruction — small/
 // free models routinely ignore it (observed: a 300-char cap produced a 2,000+
 // char reply). Back it with a real truncation so the limit holds regardless of

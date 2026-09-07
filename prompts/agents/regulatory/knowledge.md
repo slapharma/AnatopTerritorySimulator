@@ -1,0 +1,2 @@
+- **Pharmacovigilance (PV).** Is a local QPPV or equivalent PV contact mandatory? Expedited and periodic safety reporting obligations, and the licence consequence of non-compliance. Verify.
+- **Supply chain and import licensing.** Import/wholesale licence requirements to bring product into {{COUNTRY}}, customs/registration lead time, and any local packaging, labelling or batch-release mandate (e.g. local-language labelling, local QP release). Verify.

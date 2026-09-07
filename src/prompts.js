@@ -109,6 +109,19 @@ function readPrompt(file) {
 function readAgentFile(agentKey, file) {
   return fs.readFileSync(path.join(AGENTS_DIR, agentKey, file), 'utf8');
 }
+// knowledge.md is optional: an agent folder without one simply has no extra
+// standing questions. Missing file means empty, not an error.
+function readAgentFileOptional(agentKey, file) {
+  try { return readAgentFile(agentKey, file); } catch (e) {
+    if (e.code === 'ENOENT') return '';
+    throw e;
+  }
+}
+// The checked-in default for an agent's extra standing questions. The Agents
+// page can override it per deployment; this is what applies when it has not.
+function knowledgeDefault(agentKey) {
+  return agentKey === 'moderator' ? '' : readAgentFileOptional(agentKey, 'knowledge.md').trim();
+}
 function rounds() {
   return JSON.parse(readPrompt('rounds.json'));
 }
@@ -177,7 +190,13 @@ async function personaFor(agentKey) {
     cv,
     questions,
   ];
-  if (row.knowledge && row.knowledge.trim()) parts.push(`Additional knowledge:\n${row.knowledge.trim()}`);
+  // File first, database second. prompts/agents/<key>/knowledge.md is the
+  // reviewable default that ships with the repo, so a fresh deployment behaves
+  // like this one with no seeding step; a non-empty row on the Agents page
+  // overrides it for that deployment only. Empty row means "use the file",
+  // which is also how an admin reverts.
+  const knowledge = (row.knowledge && row.knowledge.trim()) || knowledgeDefault(agentKey);
+  if (knowledge) parts.push(`Additional knowledge:\n${knowledge}`);
   return parts.filter(Boolean).join('\n\n');
 }
 
@@ -356,6 +375,6 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
 }
 
 module.exports = {
-  AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities,
+  AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, knowledgeDefault,
   turnUserMessage, inputsBlock, speakerLabel, rounds, STANCE, personaFilesRaw, fill,
 };

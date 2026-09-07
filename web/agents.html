@@ -28,7 +28,10 @@
   .agent-card label { display: block; font-weight: 600; font-size: 12px; color: var(--text-2); margin: 12px 0 4px; }
   .agent-card textarea, .agent-card input[type=text] { width: 100%; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-family: inherit; font-size: 13px; }
   .agent-card textarea.persona-preview { min-height: 220px; background: var(--surface-2); color: var(--text-2); font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
-  .agent-card textarea.knowledge { min-height: 90px; }
+  .agent-card textarea.knowledge { min-height: 120px; }
+  .agent-card textarea.knowledge::placeholder { color: var(--muted); opacity: 1; }
+  .knowledge-note { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+  .knowledge-note code { font-size: 11px; }
   .stance-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 0; }
   .stance-row input[type=range] { flex: 1; }
   .stance-row .stance-label { font-weight: 600; font-size: 12.5px; min-width: 90px; text-align: right; }
@@ -44,7 +47,7 @@
 <div class="page">
   <a class="back" href="/">← Back to the app</a>
   <h1>Agent Profiles</h1>
-  <p class="lede">Each agent's persona, background and standing questions live in <code>prompts/agents/&lt;key&gt;/</code> — edit those files and commit to change who the agent is. Everything below is a per-session overlay: knowledge notes, challenge level and tool abilities, editable here with no deploy needed.</p>
+  <p class="lede">Each agent's persona, background and standing questions live in <code>prompts/agents/&lt;key&gt;/</code> — edit those files and commit to change who the agent is. That includes <code>knowledge.md</code>, the extra questions each agent answers, so a fresh deployment behaves like this one with nothing to set up. Challenge level and tool abilities are per-deployment settings, editable here with no deploy needed, and the Knowledge box overrides the file for this deployment only.</p>
   <div id="admin-note" class="readonly-note" hidden>You're viewing these read-only. Only an admin can save changes here.</div>
   <div id="cards">Loading…</div>
 </div>
@@ -62,6 +65,15 @@
   function toast(text) {
     const el = document.createElement('div'); el.className = 'toast'; el.textContent = text; document.body.appendChild(el);
     setTimeout(() => el.remove(), 3000);
+  }
+
+  // Which of the two sources is actually reaching the agent: the row on this
+  // page if it is set, otherwise the file checked into the repo.
+  function knowledgeNote(a) {
+    const file = `<code>prompts/agents/${escapeHtml(a.key)}/knowledge.md</code>`;
+    if (a.knowledge && a.knowledge.trim()) return `Overriding the checked-in ${file} for this deployment. Clear the box and save to go back to it.`;
+    if (a.knowledge_default) return `Using the checked-in ${file}, shown greyed out below. Type here to override it for this deployment only.`;
+    return `No ${file} and nothing set here, so this agent has no extra questions.`;
   }
 
   async function init() {
@@ -83,8 +95,9 @@
           <input type="range" class="f-stance" min="1" max="5" step="1" value="${level}" ${isAdmin ? '' : 'disabled'}>
           <span class="stance-label">${escapeHtml(stance[String(level)].label)}</span>
         </div>
-        <label>Knowledge <span style="font-weight:400;color:var(--muted)">(optional extra notes appended to the prompt)</span></label>
-        <textarea class="knowledge f-knowledge" ${isAdmin ? '' : 'disabled'}>${escapeHtml(a.knowledge)}</textarea>
+        <label>Knowledge <span style="font-weight:400;color:var(--muted)">(extra standing questions appended to the prompt)</span></label>
+        <p class="knowledge-note">${knowledgeNote(a)}</p>
+        <textarea class="knowledge f-knowledge" placeholder="${escapeHtml(a.knowledge_default || '')}" ${isAdmin ? '' : 'disabled'}>${escapeHtml(a.knowledge)}</textarea>
         <div class="abilities">
           <label><input type="checkbox" class="f-web-search" ${a.can_web_search ? 'checked' : ''} ${isAdmin ? '' : 'disabled'}> Can search the web</label>
           <label><input type="checkbox" class="f-open-url" ${a.can_open_url ? 'checked' : ''} ${isAdmin ? '' : 'disabled'}> Can open/read pages</label>
@@ -100,12 +113,17 @@
       if (isAdmin) {
         $('.save', card).addEventListener('click', async () => {
           try {
-            await api('PATCH', `/api/agents/${a.key}`, {
+            const row = await api('PATCH', `/api/agents/${a.key}`, {
               knowledge: $('.f-knowledge', card).value,
               can_web_search: $('.f-web-search', card).checked,
               can_open_url: $('.f-open-url', card).checked,
               stance_default: Number($('.f-stance', card).value),
             });
+            // Clearing the box hands the agent back to the file, so the note
+            // above has to flip with the save rather than on the next reload.
+            a.knowledge = row.knowledge || '';
+            a.knowledge_default = row.knowledge_default || '';
+            $('.knowledge-note', card).innerHTML = knowledgeNote(a);
             toast(`${a.label} saved.`);
           } catch (e) { toast(`Could not save: ${e.message}`); }
         });

@@ -71,7 +71,27 @@
         </div>
       </header>
       <div class="scroll">
-        <div id="dashboard-body" class="dashboard"></div>
+        <div class="dashboard">
+          <!-- Filled by renderDashboard(): KPI strip, the two big start/resume
+               tiles, the grouped session cards, then the reference tiles. Each
+               block is its own container so re-rendering one (the search box
+               only rebuilds the session list) leaves the others alone. -->
+          <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
+          <div id="dash-actions" class="action-grid"></div>
+
+          <section class="dash-section">
+            <div class="dash-section-head">
+              <h2>Evaluations</h2>
+              <input type="search" id="dash-search" class="dash-search" placeholder="Filter by product, country or title…" aria-label="Filter sessions">
+            </div>
+            <div id="dashboard-body" class="dashboard-body"></div>
+          </section>
+
+          <section class="dash-section">
+            <div class="dash-section-head"><h2>Reference</h2></div>
+            <div id="dash-resources" class="resource-grid"></div>
+          </section>
+        </div>
       </div>
     </section>
 
@@ -126,9 +146,7 @@
             <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>
             <button type="button" class="chip chip-clinical" data-speaker="clinical">Clinical</button>
             <button type="button" class="chip chip-commercial" data-speaker="commercial">Commercial</button>
-            <button type="button" class="chip chip-moderator" data-speaker="moderator">Decision Output</button>
             <button type="button" class="chip chip-user" data-speaker="user">You</button>
-            <button type="button" class="chip chip-fav" data-speaker="favourites">★ Favourites</button>
           </div>
           <div class="agent-columns" id="agent-columns" hidden>
             <div class="agent-columns-tools">
@@ -166,6 +184,8 @@
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
             <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
+            <button class="tab" data-tab="decision" role="tab" type="button">Decision</button>
+            <button class="tab" data-tab="favourites" role="tab" type="button">★ Favourites <span class="count" id="count-favourites">0</span></button>
             <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
             <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
             <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
@@ -174,6 +194,8 @@
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
+          <div class="tab-body" id="tab-decision" hidden></div>
+          <div class="tab-body" id="tab-favourites" hidden></div>
           <div class="tab-body" id="tab-reports" hidden></div>
           <div class="tab-body" id="tab-cost" hidden></div>
           <div class="tab-body" id="tab-minutes" hidden></div>

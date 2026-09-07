@@ -230,6 +230,9 @@
       b.addEventListener('click', () => openSession(s.id));
       list.appendChild(b);
     }
+    // The dashboard reads the same list, so a refetch after a run/delete keeps
+    // its KPI strip and cards current instead of showing pre-run numbers.
+    if (!$('#view-dashboard').hidden) renderDashboard();
   }
 
   // ---------------- setup view ----------------
@@ -339,6 +342,42 @@
     $$('.session-item').forEach((el) => el.classList.remove('active'));
   }
 
+  // ---------------- dashboard ----------------
+  // Inline 24x24 stroke icons (Lucide geometry). Markup rather than an icon
+  // font or emoji so they inherit currentColor and stay crisp at any size.
+  const ICON = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    play: '<path d="M6 4.5v15l13-7.5z"/>',
+    book: '<path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M4 17.5A1.5 1.5 0 0 1 5.5 16H20"/>',
+    users: '<path d="M16 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20"/><circle cx="9" cy="7" r="3.5"/><path d="M17 4.2a3.5 3.5 0 0 1 0 6.6M22 20v-1.5a4 4 0 0 0-3-3.85"/>',
+    sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.7 5.7 3.7 9s-1.2 6.3-3.7 9c-2.5-2.7-3.7-5.7-3.7-9S9.5 5.7 12 3z"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
+    chat: '<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 2"/>',
+    folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.5h8.8A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>',
+  };
+  const icon = (name, cls = '') =>
+    `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name] || ''}</svg>`;
+
+  // "3 days ago" reads faster than a timestamp when scanning a wall of cards;
+  // the exact time stays in the card's title attribute.
+  function fmtRelative(utc) {
+    if (!utc) return '';
+    const hasZone = /Z$|[+-]\d{2}:?\d{2}$/.test(utc);
+    const d = new Date(hasZone ? utc.replace(' ', 'T') : `${utc.replace(' ', 'T')}Z`);
+    if (isNaN(d)) return fmtTime(utc);
+    const mins = Math.round((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+    return fmtTime(utc);
+  }
+  const isAdminUser = () => !document.body.classList.contains('non-admin');
+
   function showDashboard() {
     state.session = null;
     $('#view-setup').hidden = true;
@@ -349,13 +388,107 @@
     renderDashboard();
   }
 
-  // Groups the flat session list by country into cards, newest-updated first
-  // within each group; countries themselves are ordered by most-recent activity.
   function renderDashboard() {
+    renderDashStats();
+    renderDashActions();
+    renderDashResources();
+    renderSessionCards();
+  }
+
+  // KPI strip. Cost is admin-only for the same reason the session header's cost
+  // meter is (body.non-admin): operational detail, not part of reading a
+  // launch recommendation.
+  function renderDashStats() {
+    const list = state.sessions;
+    const countries = new Set(list.map((s) => s.country || 'Unspecified'));
+    const decided = list.filter((s) => s.has_decision).length;
+    const messages = list.reduce((n, s) => n + Number(s.message_count || 0), 0);
+    const cost = list.reduce((n, s) => n + Number(s.cost_usd || 0), 0);
+    const latest = list.length ? list.reduce((a, b) => (new Date(a.updated_at) > new Date(b.updated_at) ? a : b)) : null;
+    const stats = [
+      { icon: 'folder', label: 'Evaluations', value: list.length, sub: `${list.length - decided} still open` },
+      { icon: 'globe', label: 'Countries', value: list.length ? countries.size : 0, sub: 'markets assessed' },
+      { icon: 'check', label: 'Decisions ready', value: decided, sub: list.length ? `${Math.round((decided / list.length) * 100)}% of evaluations` : 'none yet', tone: decided ? 'accent' : '' },
+      { icon: 'chat', label: 'Agent responses', value: messages.toLocaleString(), sub: 'across all sessions' },
+      { icon: 'clock', label: 'Last activity', value: latest ? fmtRelative(latest.updated_at) : '—', sub: latest ? escapeHtml(latest.title) : 'no sessions yet', small: true },
+    ];
+    if (isAdminUser()) stats.push({ icon: 'sliders', label: 'API spend', value: `$${cost.toFixed(2)}`, sub: 'all sessions, estimated' });
+    $('#dash-stats').innerHTML = stats.map((s) => `
+      <div class="stat ${s.tone ? `stat-${s.tone}` : ''}">
+        <span class="stat-icon">${icon(s.icon)}</span>
+        <span class="stat-text">
+          <span class="stat-label">${s.label}</span>
+          <span class="stat-value ${s.small ? 'stat-value-sm' : ''}">${s.value}</span>
+          <span class="stat-sub">${s.sub}</span>
+        </span>
+      </div>`).join('');
+  }
+
+  // The two things you actually come here to do. Resume only appears when there
+  // is something to resume, so the tile is never a dead button.
+  function renderDashActions() {
+    const latest = state.sessions.length
+      ? state.sessions.reduce((a, b) => (new Date(a.updated_at) > new Date(b.updated_at) ? a : b))
+      : null;
+    const tiles = [`
+      <button type="button" class="action-tile action-tile-primary" id="tile-new">
+        <span class="action-icon">${icon('plus')}</span>
+        <span class="action-text">
+          <span class="action-title">Start a new evaluation</span>
+          <span class="action-sub">Fill in the launch inputs, then run the Baselines meeting with all three agents.</span>
+        </span>
+      </button>`];
+    if (latest) {
+      tiles.push(`
+      <button type="button" class="action-tile" data-open="${latest.id}">
+        <span class="action-icon">${icon('play')}</span>
+        <span class="action-text">
+          <span class="action-title">Resume ${escapeHtml(latest.title)}</span>
+          <span class="action-sub">${escapeHtml(latest.country || 'Country: INPUT MISSING')} · ${latest.message_count} responses · ${fmtRelative(latest.updated_at)}</span>
+        </span>
+      </button>`);
+    }
+    const box = $('#dash-actions');
+    box.innerHTML = tiles.join('');
+    $('#tile-new').addEventListener('click', showSetup);
+    const resume = box.querySelector('[data-open]');
+    if (resume) resume.addEventListener('click', () => openSession(Number(resume.dataset.open)));
+  }
+
+  // Big tiles for the same three pages the sidebar links to. They open in the
+  // left slide-over through the shared .navlink delegation, so nothing here
+  // needs its own handler.
+  function renderDashResources() {
+    const cards = [
+      { nav: 'guide', title: 'User Guide', sub: 'How a session runs, what each meeting does, and how to read the output.', icon: 'book' },
+      { nav: 'agents', title: 'Agent Profiles', sub: 'The Regulatory, Clinical and Commercial briefs, and how to edit them.', icon: 'users' },
+    ];
+    if (state.me && state.me.is_admin) cards.push({ nav: 'admin', title: 'Admin', sub: 'Models, prompts, knowledgebase, users and cost settings.', icon: 'sliders' });
+    $('#dash-resources').innerHTML = cards.map((c) => `
+      <button type="button" class="resource-card navlink" data-nav="${c.nav}" data-nav-title="${escapeHtml(c.title)}">
+        <span class="resource-icon">${icon(c.icon)}</span>
+        <span class="resource-title">${escapeHtml(c.title)}</span>
+        <span class="resource-sub">${escapeHtml(c.sub)}</span>
+      </button>`).join('');
+  }
+
+  // Groups the (filtered) session list by country, newest-updated first within
+  // each group; countries themselves are ordered by most-recent activity.
+  function renderSessionCards() {
     const box = $('#dashboard-body');
-    if (!state.sessions.length) { box.innerHTML = '<div class="dashboard-empty">No sessions yet. Click "New session" to start one.</div>'; return; }
+    const term = ($('#dash-search').value || '').trim().toLowerCase();
+    if (!state.sessions.length) {
+      box.innerHTML = '<div class="dashboard-empty">No evaluations yet. Start one with the tile above.</div>';
+      return;
+    }
+    const matches = state.sessions.filter((s) => !term
+      || `${s.title} ${s.product || ''} ${s.country || ''}`.toLowerCase().includes(term));
+    if (!matches.length) {
+      box.innerHTML = `<div class="dashboard-empty">Nothing matches &ldquo;${escapeHtml(term)}&rdquo;.</div>`;
+      return;
+    }
     const byCountry = new Map();
-    for (const s of state.sessions) {
+    for (const s of matches) {
       const country = s.country || 'Unspecified';
       if (!byCountry.has(country)) byCountry.set(country, []);
       byCountry.get(country).push(s);
@@ -367,12 +500,26 @@
     });
     box.innerHTML = countries.map((country) => {
       const sessions = byCountry.get(country);
-      const cards = sessions.map((s) => `
-        <button type="button" class="dashboard-card" data-id="${s.id}">
-          <div class="t">${escapeHtml(s.title)}</div>
-          <div class="m"><span>${escapeHtml(s.product || 'Product: INPUT MISSING')}</span><span>${fmtTime(s.updated_at)}</span><span>${s.message_count} msgs</span>${s.has_decision ? '<span>✓ decision</span>' : ''}</div>
-        </button>`).join('');
-      return `<div class="dashboard-country"><div class="dashboard-country-head"><h2>${escapeHtml(country)}</h2><span class="count">${sessions.length}</span></div><div class="dashboard-grid">${cards}</div></div>`;
+      const cards = sessions.map((s) => {
+        const cost = Number(s.cost_usd || 0);
+        return `
+        <button type="button" class="dashboard-card" data-id="${s.id}" title="Last updated ${escapeHtml(fmtTime(s.updated_at))}">
+          <span class="dc-head">
+            <span class="dc-title">${escapeHtml(s.title)}</span>
+            <span class="status-pill ${s.has_decision ? 'status-done' : 'status-open'}">${s.has_decision ? 'Decision ready' : 'In progress'}</span>
+          </span>
+          <span class="dc-product">${escapeHtml(s.product || 'Product: INPUT MISSING')}</span>
+          <span class="dc-stats">
+            <span class="dc-stat">${icon('chat')}${s.message_count} responses</span>
+            <span class="dc-stat">${icon('clock')}${escapeHtml(fmtRelative(s.updated_at))}</span>
+            ${isAdminUser() && cost ? `<span class="dc-stat">${icon('sliders')}$${cost.toFixed(2)}</span>` : ''}
+          </span>
+        </button>`;
+      }).join('');
+      return `<div class="dashboard-country">
+        <div class="dashboard-country-head">${icon('globe', 'icon-sm')}<h3>${escapeHtml(country)}</h3><span class="count">${sessions.length}</span></div>
+        <div class="dashboard-grid">${cards}</div>
+      </div>`;
     }).join('');
     box.querySelectorAll('.dashboard-card').forEach((c) => c.addEventListener('click', () => openSession(Number(c.dataset.id))));
   }
@@ -405,7 +552,7 @@
     // transcript
     renderDecisionBanner();
     renderTranscript();
-    renderSources(); renderDisagreements(); renderReports(); renderCost(); renderMinutes(); renderIntelligence();
+    renderSources(); renderDisagreements(); renderDecisionTab(); renderFavourites(); renderReports(); renderCost(); renderMinutes(); renderIntelligence();
     renderMeetingNav();
     setRunning(state.running);
     const t = $('#transcript');
@@ -576,8 +723,7 @@
     $$('#transcript .agent-col').forEach((c) => { c.hidden = Boolean(single) && c.dataset.speaker !== single; });
     $$('#agent-columns-heads .agent-head').forEach((h) => { h.hidden = Boolean(single) && h.dataset.speaker !== single; });
     $$('#transcript .msg').forEach((el) => {
-      el.hidden = active === 'favourites' ? !el.classList.contains('favourited')
-        : active !== 'all' && el.dataset.speaker !== active;
+      el.hidden = active !== 'all' && el.dataset.speaker !== active;
     });
     $$('#transcript .round-divider').forEach((el) => {
       // Hide a divider only if every message in its group is filtered out.
@@ -622,7 +768,7 @@
           favBtn.title = m.favourite ? 'Remove from favourites' : 'Favourite this response';
           favBtn.setAttribute('aria-pressed', m.favourite ? 'true' : 'false');
           el.classList.toggle('favourited', m.favourite);
-          if (state.filterSpeaker === 'favourites') applyFilter();
+          renderFavourites();
         } catch (e) { toast(`Could not update favourite: ${e.message}`); } finally { favBtn.disabled = false; }
       });
     }
@@ -1021,7 +1167,7 @@
             else if (name === 'text') { raw += data.delta; paint(false); }
             else if (name === 'done') {
               state.session.messages.push(data.message); state.session.sources = data.sources; state.session.disagreements = data.disagreements;
-              if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionBanner(); }
+              if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionBanner(); renderDecisionTab(); }
               renderSources(); renderDisagreements(); renderCost();
               if (data.new_disagreements.length) toast(`${data.new_disagreements.length} disagreement(s) logged`);
               done = true;
@@ -1246,6 +1392,90 @@
   const KIND_LABEL = { interim: 'Interim report', final: 'Final report' };
   const DEPTH_LABEL_SHORT = { brief: 'Brief', standard: 'Standard', full: 'Full' };
 
+  // Decision output tab. The recommendation is not a Report (those are
+  // separately generated documents in the reports table) and not Minutes (one
+  // per meeting) — it's the moderator's single decision message. It lives here
+  // rather than as a transcript filter chip because the pinned banner above the
+  // transcript already shows it in full on the main screen.
+  function renderDecisionTab() {
+    const box = $('#tab-decision');
+    const text = state.session.decision_text;
+    if (!text) {
+      box.innerHTML = '<div class="empty">No decision output yet. It is written after Converge, or whenever you ask the moderator for one.</div>';
+      return;
+    }
+    box.innerHTML = '<div class="decision-tab-actions"><button type="button" class="btn btn-sm" id="btn-decision-tab-jump">View in transcript ↓</button></div>';
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+    body.replaceChildren(renderMarkdown(text));
+    box.appendChild(body);
+    $('#btn-decision-tab-jump').addEventListener('click', jumpToDecision);
+  }
+
+  function jumpToDecision() {
+    const m = [...state.session.messages].reverse().find((x) => x.mode === 'decision');
+    if (m) $(`#msg-${m.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Favourites tab. Was a transcript filter chip; as a tab you can read the
+  // starred responses while the transcript stays where you left it.
+  function renderFavourites() {
+    const list = (state.session.messages || []).filter((m) => m.favourite && m.role !== 'system');
+    $('#count-favourites').textContent = list.length;
+    const box = $('#tab-favourites');
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">No favourites yet. Star a response with the ☆ in its header and it will be collected here.</div>';
+      return;
+    }
+    box.innerHTML = list.map((m) => {
+      const speaker = m.role === 'user' ? 'user' : m.speaker;
+      const snippet = (m.text || '').replace(/\s+/g, ' ').slice(0, 220);
+      return `
+        <div class="fav-card" data-id="${m.id}">
+          <div class="fav-card-head">
+            <span class="fav-card-who fav-card-who-${escapeHtml(speaker)}">${escapeHtml(AGENT_LABEL[speaker] || speaker)}</span>
+            <span class="fav-card-mode">${escapeHtml(MODE_LABEL[m.mode] || m.mode || '')}</span>
+            <span class="spacer"></span>
+            <span class="fav-card-meta">#${m.seq}</span>
+          </div>
+          <div class="fav-card-snippet">${escapeHtml(snippet)}${(m.text || '').length > 220 ? '…' : ''}</div>
+          <div class="fav-card-actions">
+            <button type="button" class="fav-open">Open</button>
+            <button type="button" class="fav-jump">View in transcript</button>
+            <button type="button" class="fav-remove danger">Unfavourite</button>
+          </div>
+        </div>`;
+    }).join('');
+    for (const el of $$('.fav-card', box)) {
+      const m = list.find((x) => String(x.id) === el.dataset.id);
+      $('.fav-open', el).addEventListener('click', () => {
+        $('#msg-modal-title').textContent = `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker] || m.speaker} · ${MODE_LABEL[m.mode] || m.mode || ''}`;
+        $('#msg-modal-body').replaceChildren(renderMarkdown(m.text || ''));
+        $('#dlg-message').showModal();
+      });
+      $('.fav-jump', el).addEventListener('click', () => {
+        const target = $(`#msg-${m.id}`);
+        if (!target) return toast('That response is not in the current transcript view.');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.style.outline = '2px solid var(--primary)';
+        setTimeout(() => { target.style.outline = ''; }, 1500);
+      });
+      $('.fav-remove', el).addEventListener('click', async () => {
+        try {
+          const updated = await api.send('PATCH', `/api/sessions/${state.session.id}/messages/${m.id}/favourite`, { favourite: false });
+          m.favourite = updated.favourite;
+          const card = $(`#msg-${m.id}`);
+          if (card) {
+            card.classList.remove('favourited');
+            const btn = $('.fav-btn', card);
+            if (btn) { btn.classList.remove('on'); btn.textContent = '☆'; btn.setAttribute('aria-pressed', 'false'); btn.title = 'Favourite this response'; }
+          }
+          renderFavourites();
+        } catch (e) { toast(`Could not update favourite: ${e.message}`); }
+      });
+    }
+  }
+
   function renderReports() {
     const s = state.session;
     const reports = s.reports || [];
@@ -1319,6 +1549,7 @@
         $('.empty', $('#transcript'))?.remove();
         $('#transcript').appendChild(messageElement(payload.message));
         renderDecisionBanner();
+        renderDecisionTab();
       }
       renderReports();
       state.warRoomOpen = true;
@@ -1423,10 +1654,7 @@
       return runSequence(pending.map((a) => ({ speaker: a, mode })));
     }));
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
-    $('#btn-decision-jump').addEventListener('click', () => {
-      const m = [...state.session.messages].reverse().find((x) => x.mode === 'decision');
-      if (m) $(`#msg-${m.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    $('#btn-decision-jump').addEventListener('click', jumpToDecision);
 
     // Reports ▾
     $('#btn-reports').addEventListener('click', (e) => { e.stopPropagation(); $('#reports-menu').hidden = !$('#reports-menu').hidden; });
@@ -1575,7 +1803,7 @@
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'reports', 'cost', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'decision', 'favourites', 'reports', 'cost', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
 
@@ -1609,7 +1837,9 @@
       panel.classList.add('open');
       panel.setAttribute('aria-hidden', 'false');
     }
-    $('#sidebar-foot').addEventListener('click', (e) => {
+    // Delegated from the document: .navlink is used by both the sidebar foot
+    // and the dashboard's Reference tiles, and the latter are re-rendered.
+    document.addEventListener('click', (e) => {
       const btn = e.target.closest('.navlink');
       if (!btn) return;
       setNavPanel(btn.dataset.nav === state.navPanel ? null : btn.dataset.nav, btn.dataset.navTitle);
@@ -1629,6 +1859,9 @@
 
     $('#brand-home').addEventListener('click', showDashboard);
     $('#btn-dashboard-new').addEventListener('click', showSetup);
+    // Only the session cards are rebuilt while typing; the KPI strip stays put
+    // so the numbers don't flicker as you narrow the list.
+    $('#dash-search').addEventListener('input', renderSessionCards);
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');

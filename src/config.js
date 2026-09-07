@@ -19,16 +19,24 @@ module.exports = {
   FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
-  // Offered in the session header's model selector. Each session stores its own
-  // choice (sessions.model); a new session defaults to MODEL above. Paid options
-  // are here for testing without free-tier rate limits — they cost real money per
-  // OpenRouter's reported usage.cost, shown in the Cost tab as normal.
-  // `free: false` gates a model to admins only (src/app.js PATCH /sessions/:id)
-  // — otherwise any authenticated user could switch a session onto a paid
-  // model and run up real OpenRouter spend with no budget check anywhere.
+  // Offered in the New Evaluation form's model picker. The model is chosen once,
+  // when the session is created, and stored on the session (sessions.model);
+  // leaving the picker alone uses MODEL above. Paid options are here for running
+  // without free-tier rate limits — they cost real money per OpenRouter's
+  // reported usage.cost, shown in the Cost tab as normal.
+  // `free: false` gates a model to admins only (src/app.js modelRefusal)
+  // — otherwise any authenticated user could start a session on a paid model
+  // and run up real OpenRouter spend with no budget check anywhere.
   MODEL_OPTIONS: [
     { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free)', free: true },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)', free: true },
+    // Far and away the most expensive option here — one full evaluation is
+    // dozens of turns, each carrying the whole transcript plus fetched page
+    // text, so this is pounds per session, not pence. It is also the only
+    // model in the list that reliably reads pages when asked and keeps its
+    // evidence tags honest, so it is the one to reach for when a run has to
+    // stand up. AUTOPILOT.max_cost_usd still caps a single autopilot run.
+    { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (paid, ~$2/$10 per M tok — best quality, most expensive)', free: false },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)', free: false },
     { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)', free: false },
     { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (paid, cheapest — ~$0.02/$0.03 per M tok)', free: false },

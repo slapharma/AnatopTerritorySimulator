@@ -124,8 +124,8 @@
   <h2>Reading the transcript</h2>
   <p>Agent responses are laid out in three columns — Regulatory, Clinical, Commercial — always in that order, so a column position means the same agent everywhere on the page. An agent that did not speak in a round leaves its column empty rather than shifting the others along. <strong>By meeting</strong> and <strong>By time</strong> above the columns switch between grouping responses by round and running them as one continuous feed per agent.</p>
 
-  <h2>The model selector</h2>
-  <p>Each session can use a different underlying AI model — the dropdown in the top-right of a session picks it. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) but tend to be faster and more reliable for testing. A change applies to turns run from that point on, not retroactively.</p>
+  <h2>Choosing the model</h2>
+  <p>Each evaluation can run on a different underlying AI model. You pick it once, under <strong>Run settings</strong> at the bottom of the New evaluation form, and it holds for every turn of that session — the session header shows which model is in use. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) and only an administrator can start a session on one. Claude Sonnet 5 is the strongest of them and by far the most expensive, so reach for it when a run has to stand up rather than for routine testing.</p>
 
   <h2>Cost and timing</h2>
   <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The $ figure in the topbar is the API cost reported for the open session. The full breakdown — tokens, cache reads and writes, web searches, and a per-session table across every evaluation — is the <strong>Cost</strong> section of the <strong>Admin</strong> page. Cost is shown to admins only.</p>

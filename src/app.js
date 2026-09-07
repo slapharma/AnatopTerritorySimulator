@@ -289,6 +289,18 @@ app.get('/api/sessions/last-inputs', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The model is picked by whoever fills in the New Evaluation form, so it arrives
+// from the browser on both the create and the update path and has to be checked
+// on both. Returns null when the choice is allowed, or {status, error} to send.
+// Paid models cost real OpenRouter spend with no per-user budget check anywhere
+// else in the app — restrict picking one to admins.
+function modelRefusal(model, user) {
+  const opt = config.MODEL_OPTIONS.find((m) => m.id === model);
+  if (!opt) return { status: 400, error: `Unknown model ${model}` };
+  if (!opt.free && !(user && user.is_admin)) return { status: 403, error: 'Only an admin can select a paid model' };
+  return null;
+}
+
 app.post('/api/sessions', async (req, res, next) => {
   try {
     const inputs = {};
@@ -300,7 +312,16 @@ app.post('/api/sessions', async (req, res, next) => {
     if (!inputs.product.trim() || !inputs.country.trim()) {
       return res.status(400).json({ error: 'PRODUCT and COUNTRY are required to start a session.' });
     }
-    const session = await db.createSession(inputs, undefined, req.user && req.user.id);
+    // No model sent means "use the default" — stored as null, which agents.js
+    // reads as config.MODEL, so the default keeps tracking config rather than
+    // being frozen into the row at creation time.
+    let model;
+    if (typeof req.body.model === 'string' && req.body.model.trim()) {
+      const refusal = modelRefusal(req.body.model, req.user);
+      if (refusal) return res.status(refusal.status).json({ error: refusal.error });
+      model = req.body.model;
+    }
+    const session = await db.createSession(inputs, model, req.user && req.user.id);
     if (req.body.title) await db.renameSession(session.id, req.body.title);
     res.json(await db.fullSession(session.id));
   } catch (e) { next(e); }
@@ -320,11 +341,8 @@ app.patch('/api/sessions/:id', async (req, res, next) => {
     if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
     if (typeof req.body.title === 'string' && req.body.title.trim()) await db.renameSession(id, req.body.title.trim());
     if (typeof req.body.model === 'string') {
-      const opt = config.MODEL_OPTIONS.find((m) => m.id === req.body.model);
-      if (!opt) return res.status(400).json({ error: `Unknown model ${req.body.model}` });
-      // Paid models cost real OpenRouter spend with no per-user budget check
-      // anywhere else in the app — restrict picking one to admins.
-      if (!opt.free && !(req.user && req.user.is_admin)) return res.status(403).json({ error: 'Only an admin can select a paid model' });
+      const refusal = modelRefusal(req.body.model, req.user);
+      if (refusal) return res.status(refusal.status).json({ error: refusal.error });
       await db.setModel(id, req.body.model);
     }
     if (req.body.inputs && typeof req.body.inputs === 'object') {

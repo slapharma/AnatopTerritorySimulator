@@ -103,9 +103,10 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .topbar h1 { font-size: 17px; margin: 0; font-weight: 700; }
 #session-title { cursor: text; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
-/* Model picker / run-time / $·£ cost meter are admin-operational detail —
-   noise for anyone here to read a decision, not to manage spend or models. */
-body.non-admin #model-select, body.non-admin #active-clock, body.non-admin #cost-meter,
+/* Run-time and $·£ cost meter are admin-operational detail — noise for
+   anyone here to read a decision, not to manage spend. The model picker is
+   no longer here: it moved to the New Evaluation form. */
+body.non-admin #active-clock, body.non-admin #cost-meter,
 body.non-admin .msg-cost { display: none; }
 .scroll { overflow-y: auto; flex: 1; }
 
@@ -158,6 +159,10 @@ body.non-admin .msg-cost { display: none; }
 .field input:focus, .field textarea:focus, .field select:focus, .composer textarea:focus, dialog textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(8, 145, 178, .15); }
 .field textarea { min-height: 76px; resize: vertical; }
 .form-actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; }
+/* Run settings are not Section 0 of the spec — the lede above promises that
+   every field in .fields is — so they sit in their own titled block below it. */
+.run-settings { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--border); }
+.run-settings h2 { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
 
 /* ---------- session view ---------- */
 .session-body { display: grid; grid-template-columns: 1fr; flex: 1; min-height: 0; }
@@ -406,7 +411,7 @@ body.non-admin .msg-cost { display: none; }
 .cost-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .cost-table tr.total td { font-weight: 700; border-bottom: none; }
 .cost { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 10px; background: var(--surface-2); border-radius: var(--radius); font-variant-numeric: tabular-nums; }
-.model-select { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); max-width: 220px; }
+.model-select { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 .active-clock { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 6px 10px; background: var(--surface-2); border-radius: var(--radius); font-variant-numeric: tabular-nums; }
 .empty { color: var(--muted); font-size: 12.5px; padding: 12px 0; }
 

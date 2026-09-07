@@ -413,6 +413,7 @@
   }
   function showSetup() {
     state.session = null;
+    renderSetupModelSelect();
     $('#view-dashboard').hidden = true;
     $('#view-session').hidden = true;
     $('#view-setup').hidden = false;
@@ -565,10 +566,12 @@
   function renderSession() {
     const s = state.session;
     $('#session-title').textContent = s.title;
-    $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)}`;
+    // The model is no longer changeable here, so the header states which one the
+    // session is running on rather than offering a control that would rewrite
+    // history halfway through an evaluation.
+    $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)} · ${modelLabelShort(s.model || state.config.model)}`;
     $('#link-docx').href = `/api/sessions/${s.id}/export.docx`;
     $('#link-pdf').href = `/api/sessions/${s.id}/export.pdf`;
-    renderModelSelect();
     updateActiveClock(0);
     // inputs summary — editable in place; changes only affect turns run after saving.
     const missing = state.config.input_fields.filter((f) => !(s.inputs[f.key] || '').trim());
@@ -590,19 +593,27 @@
     if (el) el.textContent = `⏱ ${fmtElapsed(state.sessionActiveMs + extraMs)}`;
   }
 
-  function renderModelSelect() {
-    const sel = $('#model-select');
-    const current = state.session.model || state.config.model;
+  // The model is chosen once, on the New Evaluation form, and then holds for
+  // every turn of that session. Filling the picker is part of showing the form.
+  function renderSetupModelSelect() {
+    const sel = $('#setup-model');
+    const current = state.config.model;
     const isAdmin = Boolean(state.me && state.me.is_admin);
     // Paid models cost real spend with no per-user budget anywhere — offering
-    // them to a non-admin would just earn a 403 from the server on save, so
-    // don't show them as choices in the first place. The currently selected
-    // model always stays visible/selected even if it's paid and the viewer
-    // isn't an admin, so the dropdown never silently misrepresents state.
+    // them to a non-admin would just earn a 403 from the server when the
+    // session is created, so don't show them as choices in the first place.
+    // The configured default always stays selectable even if it is paid, so
+    // the picker never misrepresents what an unchanged form would run on.
     const opts = state.config.model_options.filter((o) => o.free !== false || o.id === current || isAdmin);
-    const known = opts.some((o) => o.id === current) ? opts : [{ id: current, label: current }, ...opts]; // keep a legacy/unlisted model selectable
+    const known = opts.some((o) => o.id === current) ? opts : [{ id: current, label: `${current} (configured default)` }, ...opts];
     sel.innerHTML = known.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+    sel.value = current;
   }
+
+  const modelLabel = (id) => (state.config.model_options.find((o) => o.id === id) || { label: id }).label;
+  // The picker's labels carry the price and the trade-off, which is what makes
+  // them useful at the point of choosing and far too long for a header line.
+  const modelLabelShort = (id) => modelLabel(id).replace(/\s*\(.*$/, '');
 
   // Speaker filter (chips above the transcript) + round/mode dividers, so a long
   // session stays navigable: jump to one agent's thread, or see where a round starts.
@@ -1578,7 +1589,9 @@
       '<button type="button" class="navlink" data-nav="agents" data-nav-title="Agent Profiles">Agents</button>',
       me.is_admin ? '<button type="button" class="navlink" data-nav="admin" data-nav-title="Admin">Admin</button>' : '',
     ].filter(Boolean).join(' · ');
-    const modelLine = document.body.classList.contains('non-admin') ? '' : `<br>Model <code>${escapeHtml(state.config.model)}</code>`;
+    // "Default" since the New Evaluation form can start a session on any of the
+    // offered models — this is only what an untouched picker will run on.
+    const modelLine = document.body.classList.contains('non-admin') ? '' : `<br>Default model <code>${escapeHtml(state.config.model)}</code>`;
     $('#sidebar-foot').innerHTML = `${links}${modelLine}${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
     await loadSessions();
     // Deep link from a meeting-minutes email (?session=<id>); otherwise land on
@@ -1627,7 +1640,11 @@
       if (!form.reportValidity()) return; // native tooltip on the first missing required field
       const inputs = readForm(form);
       if (!(inputs.product || '').trim() || !(inputs.country || '').trim()) return toast('PRODUCT and COUNTRY are required to start a session.');
-      const created = await api.send('POST', '/api/sessions', { inputs });
+      const model = $('#setup-model').value;
+      let created;
+      try {
+        created = await api.send('POST', '/api/sessions', { inputs, model });
+      } catch (err) { return toast(`Could not start the session: ${err.message}`, 5000); }
       await openSession(created.id);
       await runRound1Parallel();
     });
@@ -1801,13 +1818,6 @@
         await api.send('DELETE', `/api/sessions/${state.session.id}`);
         showSetup(); await loadSessions();
       } catch (err) { toast(`Could not delete session: ${err.message}`); }
-    });
-    $('#model-select').addEventListener('change', async (e) => {
-      const model = e.target.value;
-      try {
-        state.session = await api.send('PATCH', `/api/sessions/${state.session.id}`, { model });
-        toast(`Model set to ${(state.config.model_options.find((o) => o.id === model) || { label: model }).label}. Applies to turns from now on.`);
-      } catch (err) { toast(`Could not change model: ${err.message}`); renderModelSelect(); }
     });
     $('#btn-export').addEventListener('click', (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; });
     document.addEventListener('click', () => { $('#export-menu').hidden = true; $('#reports-menu').hidden = true; });

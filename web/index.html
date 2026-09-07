@@ -149,6 +149,18 @@
         <form id="setup-form" class="setup-form" autocomplete="off">
           <p class="lede">Every field below is Section 0 of the spec. Blank fields are allowed: they are passed to the agents as <code>INPUT MISSING</code>, and the agents must say what they assumed instead.</p>
           <div id="setup-fields" class="fields"></div>
+
+          <section class="run-settings" id="run-settings">
+            <h2>Run settings</h2>
+            <div class="fields">
+              <div class="field">
+                <div class="field-label-row"><label for="setup-model">Model</label></div>
+                <select id="setup-model" class="model-select"></select>
+                <span class="hint" id="setup-model-hint">Every agent turn in this session runs on this model. Fixed once the session starts.</span>
+              </div>
+            </div>
+          </section>
+
           <div class="form-actions">
             <button type="submit" class="btn btn-primary btn-lg">Start session and run Baselines</button>
             <span class="muted">Runs the Regulatory, Clinical and Commercial agents in turn, each with live web search.</span>
@@ -165,7 +177,6 @@
           <div id="session-sub" class="muted"></div>
         </div>
         <div class="topbar-actions">
-          <select id="model-select" class="model-select" title="Model used for this session's turns from now on"></select>
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this session">Delete</button>

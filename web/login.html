@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Anatop Territory Evaluation</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+  /* Follows design-system/MASTER.md: flat, light, low-chrome, 1px borders,
+     Montserrat, no emoji, buttons at least 32px tall, 150ms colour transitions
+     only. Tokens come from styles.css so this page cannot drift from the app. */
+  body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--bg); }
+  .signin { width: 100%; max-width: 380px; }
+  .signin-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 22px; }
+  .signin-brand img { width: 168px; height: auto; }
+  .signin-brand span { font-size: 13px; font-weight: 700; color: var(--primary-hover); }
+  .signin-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; }
+  .signin-card h1 { font-size: 17px; margin: 0 0 4px; }
+  .signin-card .lede { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+  .field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+  .field-row label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+  .field-row input { padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); font-size: 14px; min-height: 38px; }
+  .field-row input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
+  .signin-submit { width: 100%; justify-content: center; margin-top: 4px; }
+  .signin-error { display: none; margin: 0 0 14px; padding: 9px 12px; border-radius: var(--radius); background: var(--danger-soft); border: 1px solid #FECACA; color: var(--danger); font-size: 13px; }
+  .signin-error.shown { display: block; }
+  .signin-foot { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  @media (max-width: 420px) { .signin-card { padding: 20px 16px; } }
+</style>
+</head>
+<body>
+  <main class="signin">
+    <div class="signin-brand">
+      <img src="/sla-logo.png" alt="SLA Pharma">
+      <span>Anatop Territory Evaluation</span>
+    </div>
+
+    <div class="signin-card">
+      <h1>Sign in</h1>
+      <p class="lede">This workspace is private to the launch working group.</p>
+
+      <div class="signin-error" id="error" role="alert" aria-live="polite"></div>
+
+      <form id="signin-form" autocomplete="on" novalidate>
+        <div class="field-row">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" autocomplete="username" required autofocus spellcheck="false">
+        </div>
+        <div class="field-row">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary signin-submit" id="submit">Sign in</button>
+      </form>
+
+      <p class="signin-foot" id="foot"></p>
+    </div>
+  </main>
+
+<script>
+  (function () {
+    var form = document.getElementById('signin-form');
+    var errorBox = document.getElementById('error');
+    var submit = document.getElementById('submit');
+    var foot = document.getElementById('foot');
+
+    // Where to go after signing in. Only a same-origin path is honoured: an
+    // absolute URL here would turn the sign-in page into an open redirect.
+    function safeNext() {
+      var raw = new URLSearchParams(location.search).get('next') || '/';
+      if (raw.charAt(0) !== '/' || raw.charAt(1) === '/') return '/';
+      return raw;
+    }
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.add('shown');
+    }
+
+    // If the server cannot sign cookies, say so rather than letting someone
+    // type their password into a form that cannot work.
+    fetch('/api/login-status', { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s && s.form_login === false) {
+          showError('Sign-in by form is unavailable: the server has no AUTH_SECRET set. An administrator needs to set it.');
+          submit.disabled = true;
+        }
+      })
+      .catch(function () { /* the form still works; this is only a nicety */ });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      errorBox.classList.remove('shown');
+      var email = document.getElementById('email').value.trim();
+      var password = document.getElementById('password').value;
+      if (!email || !password) { showError('Enter your email and password.'); return; }
+
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+      fetch('/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ email: email, password: password }),
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (body) { return { ok: r.ok, status: r.status, body: body }; });
+      }).then(function (res) {
+        if (res.ok) { location.href = safeNext(); return; }
+        showError(res.body.error || 'Sign-in failed.');
+        submit.disabled = false;
+        submit.textContent = 'Sign in';
+      }).catch(function () {
+        showError('Could not reach the server. Check your connection and try again.');
+        submit.disabled = false;
+        submit.textContent = 'Sign in';
+      });
+    });
+
+    foot.textContent = 'Forgotten your password? An administrator can reset it from the Admin page.';
+  })();
+</script>
+</body>
+</html>

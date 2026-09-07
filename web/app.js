@@ -280,14 +280,17 @@
     count.hidden = !n;
   }
 
-  // HTTP Basic auth has no true sign-out: the browser holds the credential for
-  // the origin until it is closed. Sending a deliberately wrong one by fetch is
-  // the one lever that replaces what it cached, after which /logout renders the
-  // signed-out page. Best effort — say so rather than promise a clean logout.
+  // Sign-out is real now: POST /logout clears the session cookie server-side.
+  //
+  // This used to fetch with a deliberately wrong Basic credential, because that
+  // was the only way to displace what the browser had cached for the origin.
+  // That trick has to go, not just because it is unnecessary — every use of it
+  // counted as a failed sign-in against the per-IP throttle, so ten sign-outs
+  // would have locked the user out for five minutes.
   async function logout() {
     try {
-      await fetch('/api/me', { headers: { Authorization: `Basic ${btoa('logout:logout')}` }, cache: 'no-store' });
-    } catch { /* the 401 is the point; a network error changes nothing */ }
+      await fetch('/logout', { method: 'POST', cache: 'no-store' });
+    } catch { /* navigating to /logout clears the cookie too */ }
     location.href = '/logout';
   }
 

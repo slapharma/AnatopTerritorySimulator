@@ -10,42 +10,93 @@ const { runTurn } = require('./agents');
 const exporter = require('./export');
 const email = require('./email');
 const { sendMeetingMinutesEmail } = email;
-const { basicAuth, requireAdmin, hashPassword } = require('./auth');
+const auth = require('./auth');
+const { authenticate, requireAdmin, hashPassword } = auth;
 
 const app = express();
 
-// Above basicAuth on purpose: this is the page a signed-out user lands on, so
-// it has to render without credentials. It carries no data — a static notice
-// and a link back — so serving it unauthenticated leaks nothing.
+// Above authenticate on purpose: a signed-out visitor has to be able to load
+// this. It carries no data, so serving it unauthenticated leaks nothing.
 //
-// Basic auth has no real sign-out. The browser caches the credential for the
-// origin and replays it until the browser is closed; the client sends a
-// deliberately wrong credential first to displace what is cached, then comes
-// here. That works in current Chrome, Edge and Firefox but is not guaranteed,
-// which is why the page says to close the browser to be certain.
+// Clearing the session cookie is a real sign-out, which Basic auth never had —
+// the browser cached that credential and replayed it until it was closed. Any
+// Basic credential a script still sends keeps working, by design.
 app.get('/logout', (req, res) => {
+  auth.clearSessionCookie(req, res);
   res.type('html').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Signed out</title>
+<title>Signed out</title><link rel="stylesheet" href="/styles.css">
 <style>
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F8FAFC; color: #0F172A;
-         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-  .card { background: #fff; border: 1px solid #E2E8F0; border-radius: 10px; padding: 32px; max-width: 420px;
-          box-shadow: 0 1px 3px rgba(15,23,42,.08); }
-  h1 { font-size: 18px; margin: 0 0 8px; }
-  p { font-size: 14px; line-height: 1.55; color: #475569; margin: 0 0 16px; }
-  a { display: inline-block; background: #0891B2; color: #fff; text-decoration: none; font-weight: 600;
-      font-size: 13px; padding: 9px 16px; border-radius: 10px; }
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; background: var(--bg); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; max-width: 380px; box-shadow: var(--shadow); }
+  h1 { font-size: 17px; margin: 0 0 6px; }
+  p { font-size: 13.5px; line-height: 1.55; color: var(--text-2); margin: 0 0 16px; }
 </style></head><body>
   <div class="card">
     <h1>Signed out</h1>
-    <p>Your browser has been asked to forget the credentials for this site. Close the browser to be certain they are gone.</p>
-    <a href="/">Sign in again</a>
+    <p>Your session has ended. Sign in again to carry on.</p>
+    <a class="btn btn-primary" href="/login">Sign in</a>
   </div>
 </body></html>`);
 });
 
-app.use(basicAuth);
+// ---------------------------------------------------------------- sign-in
+// These four sit above authenticate because a signed-out visitor has to be able
+// to reach them. express.json is mounted app-wide below, so the POST gets its
+// own parser here, with a small limit: nothing legitimate posted to /login is
+// larger than a couple of hundred bytes.
+const loginBody = express.json({ limit: '4kb' });
+
+// The sign-in page needs its stylesheet, the wordmark and the fonts, and every
+// one of those is served by the static mount BELOW authenticate — so without
+// this the page renders as unstyled Times on white for exactly the people who
+// have not signed in yet. Only these three are exposed, and none carries data.
+// dotfiles:'allow' for the same reason as the vendor routes below: `send`
+// 404s any absolute path containing a dot-segment, and this repo lives under
+// .CLAUDE-Projects, so without it these are 404 on this machine.
+const publicAsset = (rel) => (req, res) => res.sendFile(path.join(__dirname, '..', rel), { dotfiles: 'allow' });
+app.get('/styles.css', publicAsset('web/styles.css'));
+app.get('/sla-logo.png', publicAsset('web/sla-logo.png'));
+app.use('/fonts', express.static(path.join(__dirname, '..', 'fonts')));
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'web', 'login.html'), { dotfiles: 'allow' });
+});
+
+// Lets the page say "sign-in is unconfigured" rather than failing silently.
+app.get('/api/login-status', (req, res) => {
+  res.json({ form_login: auth.formLoginAvailable() });
+});
+
+app.post('/login', loginBody, async (req, res) => {
+  try {
+    // The same per-IP throttle the middleware uses; the form must not be a way
+    // around it, since it is the easier of the two endpoints to script against.
+    if (auth.isLockedOut(req.ip)) {
+      return res.status(429).json({ error: 'Too many failed sign-in attempts. Try again in a few minutes.' });
+    }
+    if (!auth.formLoginAvailable()) {
+      return res.status(503).json({ error: 'Sign-in by form is not configured on this server (AUTH_SECRET is unset).' });
+    }
+    const { email, password } = req.body || {};
+    const user = await auth.checkCredentials(req.ip, email, password);
+    // One message for "no such user" and for "wrong password": saying which
+    // would let anyone enumerate who has an account here.
+    if (!user) return res.status(401).json({ error: 'Email or password is incorrect.' });
+    auth.setSessionCookie(req, res, auth.mintSession(user));
+    res.json({ ok: true, email: user.email, is_admin: user.is_admin });
+  } catch (e) {
+    console.error('[login] failed:', e);
+    res.status(500).json({ error: 'Could not sign you in. Try again.' });
+  }
+});
+
+app.post('/logout', (req, res) => {
+  auth.clearSessionCookie(req, res);
+  res.json({ ok: true });
+});
+
+app.use(authenticate);
 app.use(express.json({ limit: '4mb' }));
 // The front end lives in web/, NOT public/. Vercel serves a root-level public/
 // straight off its CDN, matching it before any rewrite reaches this function —

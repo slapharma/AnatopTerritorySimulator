@@ -4,6 +4,9 @@ const { promisify } = require('util');
 const scryptAsync = promisify(crypto.scrypt);
 const db = require('./db');
 
+const COOKIE_NAME = 'anatop_session';
+const SESSION_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 async function hashPassword(plain) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = (await scryptAsync(plain, salt, 64)).toString('hex');
@@ -17,6 +20,93 @@ async function verifyPassword(plain, stored) {
   const storedBuf = Buffer.from(hashHex, 'hex');
   if (storedBuf.length !== hash.length) return false;
   return crypto.timingSafeEqual(hash, storedBuf);
+}
+
+// ---------------------------------------------------------------- sessions
+//
+// The signing key for session cookies. AUTH_SECRET is the supported way to set
+// it. Without it:
+//
+//  * off Vercel, a random key is generated per process. Sessions then die with
+//    the process, which is fine for local development and is announced.
+//  * on Vercel, form login is switched OFF rather than run on a per-instance
+//    key. Each lambda would sign with a different key, so a cookie minted by
+//    one instance would be rejected by the next and users would appear to be
+//    randomly signed out. Basic auth still works, so the app is reachable —
+//    this fails safe, never open.
+let devSecret = null;
+function sessionSecret() {
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
+  if (process.env.VERCEL) return null;
+  if (!devSecret) {
+    devSecret = crypto.randomBytes(32).toString('hex');
+    console.warn('[auth] AUTH_SECRET is not set: signing sessions with a per-process key, so everyone is signed out when the server restarts. Set AUTH_SECRET to make sessions durable.');
+  }
+  return devSecret;
+}
+function formLoginAvailable() { return Boolean(sessionSecret()); }
+
+function sign(payloadB64, secret) {
+  return crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url');
+}
+
+function mintSession(user) {
+  const secret = sessionSecret();
+  if (!secret) return null;
+  const payload = Buffer.from(JSON.stringify({ uid: user.id, exp: Date.now() + SESSION_MS })).toString('base64url');
+  return `${payload}.${sign(payload, secret)}`;
+}
+
+// Returns the user id carried by a valid, unexpired token, or null. The HMAC is
+// compared with timingSafeEqual: a plain === leaks how much of the signature
+// matched, which is enough to forge one a byte at a time.
+function readSession(token) {
+  const secret = sessionSecret();
+  if (!secret || !token || typeof token !== 'string') return null;
+  const [payloadB64, mac] = token.split('.');
+  if (!payloadB64 || !mac) return null;
+  const expected = sign(payloadB64, secret);
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const { uid, exp } = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (!uid || !exp || Date.now() > exp) return null;
+    return uid;
+  } catch { return null; }
+}
+
+// Secure is set whenever the request arrived over https, which covers Vercel
+// (x-forwarded-proto) without breaking plain-http local development, where a
+// Secure cookie would simply never be stored.
+function cookieOptions(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0] || req.protocol;
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: proto === 'https',
+    path: '/',
+    maxAge: Math.floor(SESSION_MS / 1000),
+  };
+}
+// express ships res.cookie(); reading is a four-line parse, so the cookie
+// package stays an express implementation detail rather than a dependency of
+// ours that package.json does not declare.
+function setSessionCookie(req, res, token) {
+  res.cookie(COOKIE_NAME, token, cookieOptions(req));
+}
+function clearSessionCookie(req, res) {
+  res.cookie(COOKIE_NAME, '', { ...cookieOptions(req), maxAge: 0 });
+}
+function readCookies(header) {
+  const out = {};
+  for (const part of String(header || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    if (k) out[k] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
 }
 
 // One-time migration from the old env-var allowlist (AUTH_USERS/AUTH_PASSWORD)
@@ -76,38 +166,87 @@ function recordFailure(key) {
 }
 function recordSuccess(key) { failedAttempts.delete(key); }
 
-async function basicAuth(req, res, next) {
+// Shared by the login route and the middleware. Returns the user row or null,
+// and counts a failure against the caller's IP so both paths are throttled.
+async function checkCredentials(ip, emailRaw, password) {
+  const email = String(emailRaw || '').trim().toLowerCase();
+  const user = await db.getUserByEmail(email);
+  if (user && password && (await verifyPassword(password, user.password_hash))) {
+    recordSuccess(ip);
+    return user;
+  }
+  recordFailure(ip);
+  return null;
+}
+
+// Cookie first, then Basic. Basic is kept because scripts, curl and the export
+// endpoints rely on it, but no WWW-Authenticate header is sent any more: that
+// header is what makes the browser throw up its own grey credential dialog
+// instead of the sign-in page.
+async function authenticate(req, res, next) {
   try {
     await ensureSeeded();
     if (isLockedOut(req.ip)) return res.status(429).json({ error: 'Too many failed login attempts. Try again in a few minutes.' });
+
+    const cookies = readCookies(req.headers.cookie);
+    const uid = readSession(cookies[COOKIE_NAME]);
+    if (uid) {
+      const user = await db.getUserById(uid);
+      if (user) {
+        req.user = { id: user.id, email: user.email, is_admin: user.is_admin };
+        return next();
+      }
+    }
+
     const header = req.headers.authorization || '';
     const [scheme, encoded] = header.split(' ');
     if (scheme === 'Basic' && encoded) {
       const [emailRaw, pass] = Buffer.from(encoded, 'base64').toString('utf8').split(':');
-      const email = String(emailRaw || '').trim().toLowerCase();
-      const user = await db.getUserByEmail(email);
-      if (user && pass && (await verifyPassword(pass, user.password_hash))) {
-        recordSuccess(req.ip);
+      const user = await checkCredentials(req.ip, emailRaw, pass);
+      if (user) {
         req.user = { id: user.id, email: user.email, is_admin: user.is_admin };
         return next();
       }
-      if (scheme === 'Basic') recordFailure(req.ip);
     }
+
     if (await noAuthConfigured()) return next();
   } catch (e) {
     console.error('auth error:', e.message); // fail closed on any DB/hash error
   }
-  res.setHeader('WWW-Authenticate', 'Basic realm="Anatop Territory Evaluation", charset="UTF-8"');
-  res.status(401).send('Authentication required.');
+
+  // A browser navigating to a page gets the sign-in page; anything else gets
+  // JSON it can act on. Deciding on Accept rather than on the path keeps
+  // fetch() calls from the app itself out of the redirect branch.
+  const wantsHtml = String(req.headers.accept || '').includes('text/html');
+  if (wantsHtml && req.method === 'GET') {
+    const next_ = encodeURIComponent(req.originalUrl || '/');
+    return res.redirect(302, `/login?next=${next_}`);
+  }
+  res.status(401).json({ error: 'Not signed in.' });
 }
 
 async function requireAdmin(req, res, next) {
   if (req.user && req.user.is_admin) return next();
-  // Consistent with basicAuth's own bypass: no users configured at all means
+  // Consistent with authenticate's own bypass: no users configured at all means
   // no auth is enforced anywhere (local dev), so an admin-only route should
   // not be the one place that still 403s.
   if (await noAuthConfigured()) return next();
   res.status(403).json({ error: 'Admin access required' });
 }
 
-module.exports = { basicAuth, requireAdmin, hashPassword, verifyPassword };
+module.exports = {
+  authenticate,
+  basicAuth: authenticate, // old name, kept so nothing importing it breaks
+  requireAdmin,
+  hashPassword,
+  verifyPassword,
+  checkCredentials,
+  mintSession,
+  readSession,
+  setSessionCookie,
+  clearSessionCookie,
+  formLoginAvailable,
+  isLockedOut,
+  noAuthConfigured,
+  COOKIE_NAME,
+};

@@ -15,7 +15,9 @@
 
 ## TOOLS
 
-You have two tools. `web_search` returns titles, URLs and snippets. `open_url` returns the text of a page. A snippet alone justifies at most ESTIMATE; to tag a claim VERIFIED you must have opened the page (or a page that quotes it) and the tag must carry that page's full address, scheme included, copied from the URL you passed to `open_url` rather than shortened or retyped from memory. Prefer regulator, government, journal and company pages over blogs and aggregators. Stop searching once your questions are answered; you have a limited number of searches per turn.
+You have two tools. `web_search` returns titles, URLs and snippets. `open_url` returns the text of a page. A snippet alone justifies at most ESTIMATE; to tag a claim VERIFIED you must have opened the page (or a page that quotes it) and the tag must carry that page's full address, scheme included, copied from the URL you passed to `open_url` rather than shortened or retyped from memory. Prefer regulator, government, journal and company pages over blogs and aggregators.
+
+**Budget roughly half your tool calls for reading, not searching.** Your search and open allowances are equal and deliberately so. Searching more never makes a claim VERIFIED — only opening the page does — so a turn that spends every call on `web_search` ends with nothing verified and a page of estimates. The usual shape is: search until you know which two or three pages actually answer a question, then open those, then move to the next question. If you find yourself on your sixth search with nothing opened, stop searching and read what you already have.
 
 ## FORMATTING RULES
 

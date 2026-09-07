@@ -85,9 +85,23 @@ module.exports = {
     // Tavily is free (1000 req/month, no card) and a real API, not a scrape target.
     provider: process.env.TAVILY_API_KEY ? 'tavily' : process.env.BRAVE_API_KEY ? 'brave' : 'duckduckgo',
     max_results: 8,
-    max_searches_per_turn: 12,   // web_search calls one agent may make in a single turn
-    max_opens_per_turn: 10,      // open_url calls per turn
-    max_tool_rounds: 12,         // model <-> tool exchanges per turn before we stop (kept under Vercel's 800s function cap)
+    // These three are one budget, not three independent caps, and the previous
+    // values made reading impossible. Searches and rounds were both 12, and the
+    // model issues one search per round, so it exhausted the round budget on
+    // search alone and never reached open_url: measured across a live Round 1,
+    // regulatory did 12 searches and 1 open, clinical 11 and 1, commercial 11
+    // and 0. max_opens_per_turn: 10 was unreachable. Since a snippet only ever
+    // justifies ESTIMATE, every VERIFIED tag in that run was correctly demoted
+    // by transcript.js — the whole evidence layer was snippet-deep.
+    //
+    // Searches and opens now sum to the round budget, so an agent that uses its
+    // full search allowance still has an equal number of rounds left to read
+    // what it found. Raising rounds costs wall-clock: turns ran 180-280s at 12
+    // rounds, and each open adds a page fetch plus its text to the context, so
+    // this stays well inside TURN_TIMEOUT_MS and Vercel's 800s function cap.
+    max_searches_per_turn: 8,    // web_search calls one agent may make in a single turn
+    max_opens_per_turn: 8,       // open_url calls per turn
+    max_tool_rounds: 16,         // model <-> tool exchanges per turn before we stop
     page_chars: 8000,            // characters of page text returned by open_url
     timeout_ms: 15000,
   },

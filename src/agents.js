@@ -211,6 +211,7 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, disagree
   // Only the last round's text is kept as the answer — earlier rounds are the
   // model narrating what it's about to search for, not its conclusion.
   let exhaustedRounds = true;
+  let nudgedToRead = false;
   for (let round = 0; round < config.SEARCH.max_tool_rounds; round++) {
     if (Date.now() - turnStarted > config.TURN_TIMEOUT_MS) {
       const err = new Error(`Turn exceeded its ${Math.round(config.TURN_TIMEOUT_MS / 1000)}s time budget after ${round} tool round(s).`);
@@ -232,6 +233,32 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, disagree
         if (out.trace) trace.push(out.trace);
         convo.push({ role: 'tool', tool_call_id: c.id, content: out.content });
       }
+      continue;
+    }
+    // The agent has stopped calling tools and started writing. If it searched but
+    // never opened anything, everything it is about to assert rests on snippets,
+    // and transcript.js will demote every VERIFIED tag in it — measured: three
+    // agents, 33 tags, 33 demoted, because they had read nothing. Telling them to
+    // read in the prompt moved this only halfway (opens 0/2/3, one agent still
+    // reading nothing with eight rounds to spare), so the turn refuses to end
+    // here instead: it hands back the URLs already in hand and spends a round.
+    // Once only — a second refusal would just burn the budget on a model that
+    // has demonstrated it will not open pages this turn.
+    if (!nudgedToRead && counters.searches > 0 && counters.opens === 0 && abilities.can_open_url && counters.knownUrls.size) {
+      nudgedToRead = true;
+      const candidates = [...counters.knownUrls].slice(0, 12);
+      // Some providers reject an assistant turn with empty content.
+      convo.push({ role: 'assistant', content: r.text || '(no answer written yet)' });
+      convo.push({
+        role: 'user',
+        content: [
+          `Stop. You have run ${counters.searches} search${counters.searches === 1 ? '' : 'es'} and opened nothing, so every claim above rests on a search snippet and none of it can be tagged VERIFIED.`,
+          'Open the two or three pages that actually decide your answers, then rewrite your response in full with the tags corrected. These URLs are already in hand:',
+          candidates.map((u) => `- ${u}`).join('\n'),
+          'If none of them is worth opening, say so in one line and leave the claims tagged ESTIMATE.',
+        ].join('\n\n'),
+      });
+      onEvent('status', { text: 'Searched but read nothing — asking for sources to be opened…' });
       continue;
     }
     exhaustedRounds = false;

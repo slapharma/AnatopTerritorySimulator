@@ -17,7 +17,39 @@
         <span>Anatop Territory Evaluation</span>
       </button>
       <button id="btn-new" class="btn btn-primary btn-block" type="button">New session</button>
+      <button id="btn-warroom" class="btn btn-accent btn-block" type="button" title="Sources, disagreements, cost, meeting minutes, agent notes">Intelligence</button>
     </div>
+
+    <!-- Every control that advances or reports on the simulation, in one panel.
+         Keeps id="toolbar" because the run-state disable in setRunning() targets
+         it; hidden outside the session view, which the sidebar does not switch. -->
+    <nav class="sidebar-panel" id="toolbar" aria-label="Simulation process" hidden>
+      <div class="sidebar-panel-title">Simulation Process</div>
+      <div class="meeting-steps">
+        <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
+        <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
+        <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
+        <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
+      </div>
+      <button class="btn btn-sm btn-block btn-start" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
+      <button class="btn btn-sm btn-block btn-start" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
+      <div class="menu">
+        <button class="btn btn-sm btn-block btn-start" type="button" id="btn-reports">Reports ▾</button>
+        <div class="menu-items" id="reports-menu" hidden>
+          <button type="button" id="btn-report-interim">Interim report…</button>
+          <button type="button" id="btn-report-final">Final report…</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="btn btn-sm btn-block btn-start" type="button" id="btn-export">Export ▾</button>
+        <div class="menu-items" id="export-menu" hidden>
+          <a id="link-docx" href="#" download>Word (.docx)</a>
+          <a id="link-pdf" href="#" download>PDF</a>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-block btn-start btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
+    </nav>
+
     <div id="session-list" class="session-list" aria-label="Saved sessions"></div>
     <div class="sidebar-foot" id="sidebar-foot"></div>
   </aside>
@@ -68,14 +100,6 @@
           <select id="model-select" class="model-select" title="Model used for this session's turns from now on"></select>
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
-          <div class="menu">
-            <button class="btn" type="button" id="btn-export">Export ▾</button>
-            <div class="menu-items" id="export-menu" hidden>
-              <a id="link-docx" href="#" download>Word (.docx)</a>
-              <a id="link-pdf" href="#" download>PDF</a>
-            </div>
-          </div>
-          <button class="btn btn-sm" type="button" id="btn-warroom" title="Sources, disagreements, cost, meeting minutes, intelligence">War Room</button>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this session">Delete</button>
         </div>
       </header>
@@ -90,27 +114,6 @@
 
       <div class="session-body">
         <div class="transcript-col">
-          <nav class="meeting-nav" id="toolbar" aria-label="Meetings">
-            <span class="toolbar-label">Meetings</span>
-            <div class="meeting-steps">
-              <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
-              <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
-              <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
-              <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
-            </div>
-            <button class="btn btn-sm" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
-            <button class="btn btn-sm" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
-            <span class="spacer"></span>
-            <div class="menu">
-              <button class="btn btn-sm btn-accent" type="button" id="btn-reports">Reports ▾</button>
-              <div class="menu-items" id="reports-menu" hidden>
-                <button type="button" id="btn-report-interim">Interim report…</button>
-                <button type="button" id="btn-report-final">Final report…</button>
-              </div>
-            </div>
-            <button class="btn btn-sm btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
-          </nav>
-
           <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
             <button type="button" class="chip active" data-speaker="all">All</button>
             <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>
@@ -119,6 +122,17 @@
             <button type="button" class="chip chip-moderator" data-speaker="moderator">Decision Output</button>
             <button type="button" class="chip chip-user" data-speaker="user">You</button>
             <button type="button" class="chip chip-fav" data-speaker="favourites">★ Favourites</button>
+          </div>
+          <div class="agent-columns" id="agent-columns" hidden>
+            <div class="agent-columns-tools">
+              <div class="seg" role="group" aria-label="How the transcript is ordered">
+                <button type="button" class="seg-btn" data-group="meeting" title="Group responses by meeting, aligned in rows">By meeting</button>
+                <button type="button" class="seg-btn" data-group="time" title="One continuous feed per agent, in the order they spoke">By time</button>
+              </div>
+              <span class="spacer"></span>
+              <button type="button" class="btn btn-sm" id="btn-expand-all" title="Show every long response in full">Expand all</button>
+              <button type="button" class="btn btn-sm" id="btn-collapse-all" title="Shorten every long response">Collapse all</button>
+            </div>
           </div>
           <div id="transcript" class="transcript" aria-live="polite"></div>
 
@@ -137,9 +151,9 @@
           </form>
         </div>
 
-        <aside class="panel" id="war-room" aria-label="War Room">
+        <aside class="panel" id="war-room" aria-label="Intelligence">
           <div class="panel-head">
-            <span class="panel-title">War Room</span>
+            <span class="panel-title">Intelligence</span>
             <button type="button" class="panel-close" id="btn-warroom-close" title="Close">✕</button>
           </div>
           <div class="tabs" role="tablist">
@@ -148,7 +162,7 @@
             <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
             <button class="tab" data-tab="cost" role="tab" type="button">Cost</button>
             <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
-            <button class="tab" data-tab="intelligence" role="tab" type="button">Intelligence</button>
+            <button class="tab" data-tab="intelligence" role="tab" type="button">Agent notes</button>
             <button class="tab" data-tab="inputs" role="tab" type="button">Inputs</button>
           </div>
           <div class="tab-body" id="tab-sources"></div>
@@ -172,6 +186,18 @@
     </section>
   </main>
 </div>
+
+<!-- Left slide-over: User guide / Agents / Admin -->
+<aside class="panel panel-left" id="nav-panel" aria-label="Reference panel" aria-hidden="true">
+  <div class="panel-head">
+    <span class="panel-title" id="nav-panel-title"></span>
+    <div class="panel-head-actions">
+      <a class="panel-openfull" id="nav-open-full" href="#" target="_blank" rel="noopener" title="Open in a new tab">↗</a>
+      <button type="button" class="panel-close" id="btn-nav-close" title="Close">✕</button>
+    </div>
+  </div>
+  <iframe class="panel-frame" id="nav-frame" title="Reference content"></iframe>
+</aside>
 
 <!-- Custom round dialog -->
 <dialog id="dlg-custom">

@@ -71,4 +71,40 @@ function parseBlocks(md) {
 
 function plain(runs) { return runs.map((r) => r.text).join(''); }
 
-module.exports = { parseBlocks, parseInline, plain, BADGE_RE };
+// Every agent response ends with a Slides block (see the SLIDES section of
+// prompts/evidence-rules.md) — a summary deck, plus the closing takeaway as
+// the last slide's final line. Without this pass it parses as three more
+// headings and reads as a second argument rather than a summary.
+//
+// Retags the deck in place: the `## Slides` heading becomes {type:'slides-label'},
+// each `### Slide N — Title` becomes {type:'slide-title', n, runs}, and every
+// block inside the deck is marked `inSlides`. A later heading at the same or a
+// higher level closes the deck, so anything the model writes afterwards is body
+// text again.
+function tagSlides(blocks) {
+  const out = [];
+  let level = 0; // heading level of the open `Slides` heading; 0 = not in a deck
+  for (const b of blocks) {
+    if (b.type === 'heading') {
+      if (!level && /^\s*slides\s*$/i.test(plain(b.runs))) {
+        level = b.level;
+        out.push({ type: 'slides-label' });
+        continue;
+      }
+      if (level && b.level <= level) {
+        level = 0; // deck closed; fall through and emit as an ordinary heading
+      } else if (level) {
+        const raw = plain(b.runs).trim();
+        // Tolerate the numbering drifting (any dash, a colon, or no prefix at all)
+        // rather than dropping the slide entirely when the model deviates.
+        const m = raw.match(/^slide\s*(\d+)\s*[—–:.-]*\s*(.*)$/i);
+        out.push({ type: 'slide-title', n: m ? m[1] : null, runs: m ? parseInline(m[2]) : b.runs });
+        continue;
+      }
+    }
+    out.push(level ? { ...b, inSlides: true } : b);
+  }
+  return out;
+}
+
+module.exports = { parseBlocks, parseInline, plain, tagSlides, BADGE_RE };

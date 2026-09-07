@@ -2,7 +2,7 @@
 const path = require('path');
 const docx = require('docx');
 const pdfmake = require('pdfmake');
-const { parseBlocks, plain } = require('./markdown-blocks');
+const { parseBlocks, plain, tagSlides } = require('./markdown-blocks');
 const prompts = require('./prompts');
 
 const FONT_DIR = path.join(__dirname, '..', 'fonts');
@@ -66,11 +66,21 @@ function docxRuns(runs, base = {}) {
 }
 
 function docxBlocks(md) {
-  const { Paragraph, HeadingLevel, Table, TableRow, TableCell, WidthType, TextRun, ShadingType } = docx;
+  const { Paragraph, HeadingLevel, Table, TableRow, TableCell, WidthType, TextRun, ShadingType, BorderStyle } = docx;
   const out = [];
   const H = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
-  for (const b of parseBlocks(md)) {
-    if (b.type === 'heading') out.push(new Paragraph({ heading: H[Math.min(b.level, 5) - 1], children: docxRuns(b.runs), spacing: { before: 200, after: 80 } }));
+  for (const b of tagSlides(parseBlocks(md))) {
+    if (b.type === 'slides-label') out.push(new Paragraph({
+      children: [new TextRun({ text: 'S L I D E S', font: FONT, size: 15, bold: true, color: COLOURS.muted })],
+      border: { top: { style: BorderStyle.SINGLE, size: 6, color: 'E2E8F0' } },
+      spacing: { before: 280, after: 120 },
+    }));
+    else if (b.type === 'slide-title') out.push(new Paragraph({
+      children: docxRuns(b.n ? [{ text: `${b.n}. `, bold: true }, ...b.runs] : b.runs, { bold: true, size: 20 }),
+      shading: { type: ShadingType.CLEAR, fill: 'F1F5F9' },
+      spacing: { before: 140, after: 50 },
+    }));
+    else if (b.type === 'heading') out.push(new Paragraph({ heading: H[Math.min(b.level, 5) - 1], children: docxRuns(b.runs), spacing: { before: 200, after: 80 } }));
     else if (b.type === 'para') out.push(new Paragraph({ children: docxRuns(b.runs), spacing: { after: 100 } }));
     else if (b.type === 'bullet') out.push(new Paragraph({ children: docxRuns(b.runs), bullet: { level: b.level }, spacing: { after: 40 } }));
     else if (b.type === 'disagreement') out.push(new Paragraph({ children: docxRuns(b.runs, { bold: true, color: '9A3412' }), shading: { type: ShadingType.CLEAR, fill: 'FFF7ED' }, spacing: { before: 120, after: 60 } }));
@@ -288,9 +298,11 @@ function pdfBlocks(md) {
   const out = [];
   let list = null;
   const flushList = () => { if (list) { out.push(list.ordered ? { ol: list.items, margin: [0, 0, 0, 6] } : { ul: list.items, margin: [0, 0, 0, 6] }); list = null; } };
-  for (const b of parseBlocks(md)) {
+  for (const b of tagSlides(parseBlocks(md))) {
     if (b.type !== 'bullet') flushList();
-    if (b.type === 'heading') out.push({ text: pdfRuns(b.runs), style: `h${Math.min(b.level, 4)}` });
+    if (b.type === 'slides-label') out.push({ text: 'S L I D E S', bold: true, fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 14, 0, 5] });
+    else if (b.type === 'slide-title') out.push({ text: [...(b.n ? [{ text: `${b.n}. `, bold: true, color: '#' + COLOURS.link }] : []), ...pdfRuns(b.runs, { bold: true })], fontSize: 10, margin: [0, 6, 0, 2] });
+    else if (b.type === 'heading') out.push({ text: pdfRuns(b.runs), style: `h${Math.min(b.level, 4)}` });
     else if (b.type === 'para') out.push({ text: pdfRuns(b.runs), margin: [0, 0, 0, 6] });
     else if (b.type === 'bullet') { if (!list || list.ordered !== b.ordered) { flushList(); list = { ordered: b.ordered, items: [] }; } list.items.push({ text: pdfRuns(b.runs) }); }
     else if (b.type === 'disagreement') out.push({ text: pdfRuns(b.runs, { bold: true, color: '#9A3412' }), fillColor: '#FFF7ED', margin: [0, 4, 0, 4] });

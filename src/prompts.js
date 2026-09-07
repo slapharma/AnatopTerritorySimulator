@@ -305,7 +305,7 @@ function reportMetaBlock({ disagreements, autopilotRuns, sourcesCount, inputs })
   ].join('\n');
 }
 
-// The human moderator's RESOLVED/UNRESOLVED toggles (War Room > Disagreements)
+// The human moderator's RESOLVED/UNRESOLVED toggles (Intelligence > Disagreements)
 // otherwise never reach the model — an agent would keep re-litigating a topic
 // the moderator already marked settled, or "resolve" one still flagged open.
 function disagreementLogText(disagreements) {

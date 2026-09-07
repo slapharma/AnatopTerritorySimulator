@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin — Anatop Territory Evaluation</title>
 <link rel="stylesheet" href="/styles.css">
+<script>
+  // When framed inside the app's left slide-over, drop the standalone page
+  // chrome (centred column, "Back to the app" link) and let Escape close the
+  // drawer from inside the frame. Set on <html> before styles apply, so there
+  // is no flash of the standalone layout.
+  if (window.self !== window.top) {
+    document.documentElement.classList.add('embedded');
+    addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') parent.postMessage({ type: 'nav-panel-close' }, location.origin);
+    });
+  }
+</script>
 <style>
   body { max-width: 720px; margin: 0 auto; padding: 32px 24px 80px; background: var(--bg); }
   .page h1 { font-size: 22px; margin: 0 0 4px; }
@@ -29,6 +41,8 @@
   .add-form select { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
   td.kb-title { max-width: 240px; }
   td.kb-note { max-width: 320px; color: var(--text-2); font-size: 12.5px; }
+  .embedded body { max-width: none; margin: 0; padding: 18px 20px 60px; }
+  .embedded .back { display: none !important; }
 </style>
 </head>
 <body>

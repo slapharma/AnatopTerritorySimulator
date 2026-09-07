@@ -4,7 +4,8 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, intelCut: 'agent' };
+  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, navPanel: null, intelCut: 'agent',
+    groupBy: localStorage.getItem('lwg.groupBy') === 'time' ? 'time' : 'meeting' };
 
   // ---------------- API ----------------
   const api = {
@@ -95,10 +96,16 @@
     // Tolerant of case drift and the colon landing inside or outside the bold —
     // the model is prompted for an exact literal, but treating any deviation
     // as "not a closing block" would just silently drop the badge, not fail loudly.
-    html = html.replace(/<p>(\s*)<strong>\s*(Next step|Question|Consideration|Conclusion)\s*:?\s*<\/strong>\s*:?/gi,
-      (m, lead, label) => {
+    // Matches <li> as well as <p>. The SLIDES contract puts the closing block on
+    // the last slide's final bullet; today normalizeSpacing always inserts a blank
+    // line before that bullet, so marked emits a loose list (<li><p>…) and the <p>
+    // branch already catches it. The <li> branch is a safety net for the tight-list
+    // case — it does not fire on current output, and is here so a later change to
+    // normalizeSpacing cannot silently drop the badge.
+    html = html.replace(/<(p|li)>(\s*)<strong>\s*(Next step|Question|Consideration|Conclusion)\s*:?\s*<\/strong>\s*:?/gi,
+      (m, tag, lead, label) => {
         const norm = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
-        return `<p>${lead}<span class="badge badge-endpoint badge-${norm.toLowerCase().replace(/\s+/g, '')}">${norm}</span>`;
+        return `<${tag}>${lead}<span class="badge badge-endpoint badge-${norm.toLowerCase().replace(/\s+/g, '')}">${norm}</span>`;
       });
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
@@ -124,6 +131,60 @@
         while (sib && sib.nodeType === 1 && /^(P|UL|OL)$/.test(sib.tagName) && /position|evidence|status/i.test(sib.textContent) && box.children.length < 6) {
           const next = sib.nextSibling; box.appendChild(sib); sib = next;
         }
+      }
+    }
+    // Slides deck — the SLIDES contract in prompts/evidence-rules.md. Runs last,
+    // after Questions and ⚠ DISAGREEMENT: both of those stop their sibling walk
+    // at a heading, so the `## Slides` heading keeps the deck out of them.
+    // Grouped into cards so the summary reads as a summary and not as a second
+    // argument appended to the body.
+    for (const head of Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
+      if (!/^\s*slides\s*$/i.test(head.textContent) || head.closest('.slides')) continue;
+      const deck = document.createElement('section');
+      deck.className = 'slides';
+      const label = document.createElement('div');
+      label.className = 'slides-label';
+      label.textContent = 'Slides';
+      deck.appendChild(label);
+      head.parentNode.insertBefore(deck, head);
+      // Everything up to the end of the message, or to the next heading at the
+      // same or a higher level if the model kept writing after the deck.
+      const headLevel = Number(head.tagName.slice(1));
+      const collected = [];
+      for (let sib = head.nextSibling; sib;) {
+        if (sib.nodeType === 1 && /^H[1-6]$/.test(sib.tagName) && Number(sib.tagName.slice(1)) <= headLevel) break;
+        const next = sib.nextSibling;
+        collected.push(sib);
+        sib = next;
+      }
+      head.remove();
+      let card = null;
+      for (const node of collected) {
+        if (node.nodeType === 1 && /^H[1-6]$/.test(node.tagName)) {
+          card = document.createElement('article');
+          card.className = 'slide';
+          const title = document.createElement('div');
+          title.className = 'slide-title';
+          while (node.firstChild) title.appendChild(node.firstChild);
+          // "Slide 1 — Title" -> number chip + title. Tolerates any dash, a colon,
+          // or no prefix at all; a slide that deviates still renders as a slide.
+          const first = title.firstChild;
+          if (first && first.nodeType === 3) {
+            const m = first.nodeValue.match(/^\s*slide\s*(\d+)\s*[—–:.-]*\s*/i);
+            if (m) {
+              first.nodeValue = first.nodeValue.slice(m[0].length);
+              const chip = document.createElement('span');
+              chip.className = 'slide-n';
+              chip.textContent = m[1];
+              title.insertBefore(chip, first);
+            }
+          }
+          card.appendChild(title);
+          deck.appendChild(card);
+          node.remove();
+          continue;
+        }
+        (card || deck).appendChild(node);
       }
     }
     return root;
@@ -274,6 +335,7 @@
     $('#view-dashboard').hidden = true;
     $('#view-session').hidden = true;
     $('#view-setup').hidden = false;
+    $('#toolbar').hidden = true;
     $$('.session-item').forEach((el) => el.classList.remove('active'));
   }
 
@@ -282,6 +344,7 @@
     $('#view-setup').hidden = true;
     $('#view-session').hidden = true;
     $('#view-dashboard').hidden = false;
+    $('#toolbar').hidden = true;
     $$('.session-item').forEach((el) => el.classList.remove('active'));
     renderDashboard();
   }
@@ -321,6 +384,7 @@
     $('#view-dashboard').hidden = true;
     $('#view-setup').hidden = true;
     $('#view-session').hidden = false;
+    $('#toolbar').hidden = false;
     renderSession();
     $$('.session-item').forEach((el) => el.classList.remove('active'));
     await loadSessions();
@@ -383,15 +447,63 @@
 
   // Speaker filter (chips above the transcript) + round/mode dividers, so a long
   // session stays navigable: jump to one agent's thread, or see where a round starts.
+  // One column per agent, always in the same order and always all three, so a
+  // column position means the same agent everywhere on the page. An agent that
+  // didn't speak in a block leaves its column empty rather than shifting the
+  // other two along — that shifting is what made the old layout hard to read
+  // down. The agent's name is not repeated on each card: it's in the column
+  // head above the transcript, which stays put while the transcript scrolls.
+  function agentGridBlock(msgs) {
+    const frag = document.createDocumentFragment();
+    const grid = document.createElement('div'); grid.className = 'agent-grid';
+    for (const key of ALL) {
+      const col = document.createElement('div');
+      col.className = `agent-col agent-col-${key}`;
+      col.dataset.speaker = key;
+      for (const m of msgs) if (m.speaker === key) col.appendChild(messageElement(m));
+      grid.appendChild(col);
+    }
+    frag.appendChild(grid);
+    // Anything in the block that isn't one of the three columned agents (a
+    // moderator note that landed inside a round) still has to be shown.
+    for (const m of msgs) if (!ALL.includes(m.speaker)) frag.appendChild(messageElement(m));
+    return frag;
+  }
+
+  const isColumnMessage = (m) => m.role !== 'user' && ALL.includes(m.speaker);
+
+  // The heads live inside the transcript as a sticky row, not above it: that
+  // way they share the scroll container's box and padding, so they stay aligned
+  // with the columns whether or not a scrollbar is taking width.
+  function columnHeadsRow() {
+    const row = document.createElement('div');
+    row.className = 'agent-columns-heads';
+    row.id = 'agent-columns-heads';
+    row.innerHTML = ALL
+      .map((key) => `<div class="agent-head agent-head-${key}" data-speaker="${key}">${escapeHtml(AGENT_LABEL[key])}</div>`)
+      .join('');
+    return row;
+  }
+
   function renderTranscript() {
     const s = state.session;
     const t = $('#transcript');
     t.innerHTML = '';
+    $$('#agent-columns .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.group === state.groupBy));
+    $('#agent-columns').hidden = !s.messages.length;
     if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Baselines to start.</div>'; return; }
+    t.appendChild(columnHeadsRow());
+    if (state.groupBy === 'time') renderByTime(t, s.messages); else renderByMeeting(t, s.messages);
+    applyFilter();
+  }
+
+  // By meeting: rows are meetings. Each round (and each autopilot cycle) is one
+  // aligned row across the three columns, under a divider naming the meeting.
+  function renderByMeeting(t, msgs) {
     let lastMode = null;
     let i = 0;
-    while (i < s.messages.length) {
-      const m = s.messages[i];
+    while (i < msgs.length) {
+      const m = msgs[i];
       if (m.mode && m.mode !== lastMode && m.role !== 'user') {
         const div = document.createElement('div'); div.className = 'round-divider'; div.dataset.mode = m.mode;
         div.innerHTML = `<span>${escapeHtml(MODE_LABEL[m.mode] || m.mode)}</span>`;
@@ -406,38 +518,63 @@
         const header = document.createElement('div'); header.className = 'cycle-header';
         header.innerHTML = `<span>Cycle ${meta.cycle ?? '?'}${meta.run_id ? ` · run ${meta.run_id}` : ''}</span>`;
         t.appendChild(header);
-        const grid = document.createElement('div'); grid.className = 'agent-grid';
         const cycle = meta.cycle;
-        while (i < s.messages.length && s.messages[i].mode === 'autopilot' && s.messages[i].role !== 'user' && (autopilotMeta(s.messages[i]) || {}).cycle === cycle) {
-          const col = document.createElement('div'); col.className = 'agent-col';
-          col.appendChild(messageElement(s.messages[i]));
-          grid.appendChild(col);
-          i++;
-        }
-        t.appendChild(grid);
+        const group = [];
+        while (i < msgs.length && msgs[i].mode === 'autopilot' && msgs[i].role !== 'user' && (autopilotMeta(msgs[i]) || {}).cycle === cycle) { group.push(msgs[i]); i++; }
+        t.appendChild(agentGridBlock(group));
       } else if (GRID_MODES.includes(m.mode) && m.role !== 'user') {
-        // Every agent round (Round 1/2/3, cross-talk) is laid out as three
-        // side-by-side columns instead of stacking responses top to bottom.
         const mode = m.mode;
-        const grid = document.createElement('div'); grid.className = 'agent-grid';
-        while (i < s.messages.length && s.messages[i].mode === mode && s.messages[i].role !== 'user') {
-          const col = document.createElement('div'); col.className = 'agent-col';
-          col.appendChild(messageElement(s.messages[i]));
-          grid.appendChild(col);
-          i++;
-        }
-        t.appendChild(grid);
+        const group = [];
+        while (i < msgs.length && msgs[i].mode === mode && msgs[i].role !== 'user') { group.push(msgs[i]); i++; }
+        t.appendChild(agentGridBlock(group));
       } else {
         t.appendChild(messageElement(m));
         i++;
       }
     }
-    applyFilter();
+  }
+
+  // By time: no meeting grouping at all — each column is that agent's own feed
+  // in the order they spoke. Moderator and user messages interrupt full-width
+  // at the point they happened, which is what keeps the three feeds in step.
+  function renderByTime(t, msgs) {
+    let i = 0;
+    while (i < msgs.length) {
+      if (isColumnMessage(msgs[i])) {
+        const group = [];
+        while (i < msgs.length && isColumnMessage(msgs[i])) { group.push(msgs[i]); i++; }
+        t.appendChild(agentGridBlock(group));
+      } else {
+        t.appendChild(messageElement(msgs[i]));
+        i++;
+      }
+    }
+  }
+
+  // Expand all / Collapse all act on every long response currently rendered.
+  // Short responses have no collapse control and are left alone.
+  function setAllExpanded(expanded) {
+    const btns = $$('#transcript .msg-expand');
+    if (!btns.length) { toast('No response here is long enough to be shortened.'); return; }
+    btns.forEach((btn) => {
+      const body = $('.msg-body', btn.parentElement);
+      if (!body) return;
+      body.classList.toggle('collapsed', !expanded);
+      btn.textContent = expanded ? 'Collapse' : 'Show full message';
+    });
   }
 
   function applyFilter() {
     const active = state.filterSpeaker || 'all';
     $$('#filter-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.speaker === active));
+    // Filtering to a single agent collapses the three columns to that one,
+    // full width, instead of leaving two empty thirds on screen.
+    const single = ALL.includes(active) ? active : null;
+    $('#transcript').classList.toggle('single-agent', Boolean(single));
+    $('#agent-columns').classList.toggle('single-agent', Boolean(single));
+    $$('#transcript .agent-columns-heads').forEach((r) => r.classList.toggle('single-agent', Boolean(single)));
+    $$('#transcript .agent-col').forEach((c) => { c.hidden = Boolean(single) && c.dataset.speaker !== single; });
+    $$('#agent-columns-heads .agent-head').forEach((h) => { h.hidden = Boolean(single) && h.dataset.speaker !== single; });
     $$('#transcript .msg').forEach((el) => {
       el.hidden = active === 'favourites' ? !el.classList.contains('favourited')
         : active !== 'all' && el.dataset.speaker !== active;
@@ -692,7 +829,7 @@
     <p class="muted" style="margin-top:10px">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check the Anthropic console for billing.</p>`;
   }
 
-  // Marks each meeting-nav pill as "ran" once at least one message exists for its mode.
+  // Marks each Simulation Process step as "ran" once at least one message exists for its mode.
   function renderMeetingNav() {
     const s = state.session;
     $$('#toolbar [data-round]').forEach((b) => {
@@ -798,7 +935,7 @@
 
   function setRunning(on) {
     state.running = on;
-    $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (b.id !== 'btn-stop') b.disabled = on; });
+    $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (b.id !== 'btn-stop' && b.id !== 'btn-export') b.disabled = on; });
     $('#btn-stop').hidden = !on;
     if (!on) state.stopRequested = false;
   }
@@ -815,6 +952,7 @@
       const appendTarget = container || t;
       const el = document.createElement('article');
       el.className = `msg msg-${speaker}`;
+      el.dataset.speaker = speaker;
       el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${escapeHtml(MODE_LABEL[mode] || mode)}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
       appendTarget.appendChild(el);
       const body = $('.msg-body', el); const statusEl = $('.msg-status .txt', el); const searchesEl = $('.msg-searches', el);
@@ -924,7 +1062,10 @@
       if (gridEligible) {
         const grid = document.createElement('div'); grid.className = 'agent-grid';
         cols = {};
-        for (const a of ALL) { const col = document.createElement('div'); col.className = 'agent-col'; grid.appendChild(col); cols[a] = col; }
+        for (const a of ALL) {
+          const col = document.createElement('div'); col.className = `agent-col agent-col-${a}`; col.dataset.speaker = a;
+          grid.appendChild(col); cols[a] = col;
+        }
         t.appendChild(grid);
         t.scrollTop = t.scrollHeight;
       }
@@ -955,7 +1096,7 @@
       const grid = document.createElement('div'); grid.className = 'agent-grid';
       const cols = {};
       for (const a of ALL) {
-        const col = document.createElement('div'); col.className = 'agent-col';
+        const col = document.createElement('div'); col.className = `agent-col agent-col-${a}`; col.dataset.speaker = a;
         grid.appendChild(col);
         cols[a] = col;
       }
@@ -1200,10 +1341,12 @@
     // false, no auth configured at all) is treated as admin, same as every
     // server-side admin gate in this app (auth.js noAuthConfigured()).
     document.body.classList.toggle('non-admin', Boolean(me.authenticated) && !me.is_admin);
+    // These three open in the left slide-over, not a new tab: reading the guide
+    // or editing an agent mid-meeting shouldn't take you out of the session.
     const links = [
-      '<a href="/guide.html" target="_blank" rel="noopener">User guide ↗</a>',
-      '<a href="/agents.html" target="_blank" rel="noopener">Agents ↗</a>',
-      me.is_admin ? '<a href="/admin.html" target="_blank" rel="noopener">Admin ↗</a>' : '',
+      '<button type="button" class="navlink" data-nav="guide" data-nav-title="User Guide">User guide</button>',
+      '<button type="button" class="navlink" data-nav="agents" data-nav-title="Agent Profiles">Agents</button>',
+      me.is_admin ? '<button type="button" class="navlink" data-nav="admin" data-nav-title="Admin">Admin</button>' : '',
     ].filter(Boolean).join(' · ');
     const modelLine = document.body.classList.contains('non-admin') ? '' : `<br>Model <code>${escapeHtml(state.config.model)}</code>`;
     $('#sidebar-foot').innerHTML = `${links}${modelLine}${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
@@ -1360,6 +1503,16 @@
 
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
+    // Column-header controls: how the transcript is ordered, and bulk expand.
+    $$('#agent-columns .seg-btn').forEach((b) => b.addEventListener('click', () => {
+      if (state.groupBy === b.dataset.group) return;
+      state.groupBy = b.dataset.group;
+      localStorage.setItem('lwg.groupBy', state.groupBy);
+      renderTranscript();
+    }));
+    $('#btn-expand-all').addEventListener('click', () => setAllExpanded(true));
+    $('#btn-collapse-all').addEventListener('click', () => setAllExpanded(false));
+
     $('#btn-custom').addEventListener('click', () => { $('#dlg-custom').showModal(); $('#custom-instruction').focus(); });
     $('#dlg-custom form').addEventListener('submit', (e) => {
       if (e.submitter && e.submitter.value === 'run') {
@@ -1426,14 +1579,53 @@
       state.activeTab = tab.dataset.tab;
     }));
 
-    // War Room: floating pop-out panel toggle.
+    // Intelligence: floating pop-out panel toggle.
     function setWarRoom(open) {
       state.warRoomOpen = open;
       $('#war-room').classList.toggle('open', open);
     }
     $('#btn-warroom').addEventListener('click', () => setWarRoom(!state.warRoomOpen));
     $('#btn-warroom-close').addEventListener('click', () => setWarRoom(false));
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.warRoomOpen) setWarRoom(false); });
+
+    // Left slide-over for the guide / agent profiles / admin pages. The pages
+    // themselves are unchanged and still work as standalone URLs (the ↗ in the
+    // panel head opens one); here they're framed so the session stays behind.
+    function setNavPanel(page, title) {
+      const panel = $('#nav-panel');
+      if (!page) {
+        state.navPanel = null;
+        panel.classList.remove('open');
+        panel.setAttribute('aria-hidden', 'true');
+        // Drop the frame so an admin edit isn't left half-typed behind a
+        // closed panel, and so the next open shows fresh server state.
+        $('#nav-frame').removeAttribute('src');
+        return;
+      }
+      const url = `/${page}.html`;
+      state.navPanel = page;
+      $('#nav-panel-title').textContent = title;
+      $('#nav-open-full').href = url;
+      $('#nav-frame').src = url;
+      panel.classList.add('open');
+      panel.setAttribute('aria-hidden', 'false');
+    }
+    $('#sidebar-foot').addEventListener('click', (e) => {
+      const btn = e.target.closest('.navlink');
+      if (!btn) return;
+      setNavPanel(btn.dataset.nav === state.navPanel ? null : btn.dataset.nav, btn.dataset.navTitle);
+    });
+    $('#btn-nav-close').addEventListener('click', () => setNavPanel(null));
+    // Escape pressed with focus inside the frame: the keydown never reaches
+    // this document, so the framed page forwards it.
+    addEventListener('message', (e) => {
+      if (e.origin === location.origin && e.data && e.data.type === 'nav-panel-close') setNavPanel(null);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (state.navPanel) setNavPanel(null);
+      else if (state.warRoomOpen) setWarRoom(false);
+    });
 
     $('#brand-home').addEventListener('click', showDashboard);
     $('#btn-dashboard-new').addEventListener('click', showSetup);

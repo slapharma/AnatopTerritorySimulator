@@ -34,7 +34,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .app.sidebar-collapsed .sidebar { display: none; }
-.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .sidebar-head { position: relative; padding: 16px 14px 12px; border-bottom: 1px solid var(--border); }
 .sidebar-collapse-btn { position: absolute; top: 14px; right: 10px; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 11px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); }
 .sidebar-collapse-btn:hover { background: var(--surface-2); color: var(--text); }
@@ -44,7 +44,25 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .brand-btn { border: none; background: none; padding: 0; cursor: pointer; text-align: left; width: 100%; font: inherit; }
 .brand-stack { flex-direction: column; align-items: flex-start; gap: 6px; }
 .brand-logo { width: 100%; max-width: 160px; height: auto; object-fit: contain; margin-bottom: 8px; }
-.session-list { flex: 1; overflow-y: auto; padding: 8px; }
+/* Simulation Process panel — every control that advances or reports on the
+   simulation, stacked in the sidebar above the session list. Vertical because
+   the sidebar is 268px: the old horizontal pill row does not fit. */
+.sidebar-panel { flex: none; padding: 12px 14px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.sidebar-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.sidebar-panel .meeting-steps { flex-direction: column; align-items: stretch; gap: 2px; border-radius: var(--radius); margin-bottom: 4px; }
+.sidebar-panel .meeting-btn { justify-content: flex-start; border-radius: 8px; min-height: 32px; }
+.sidebar-panel .menu { display: block; }
+/* Sidebar menus open below their full-width trigger, so they align left and
+   match its width rather than hanging off the right edge as in the old topbar. */
+.sidebar-panel .menu-items { left: 0; right: auto; min-width: 100%; }
+/* Left-aligned so the panel's labels form one scannable column with the
+   numbered meeting steps above them. Declared with .btn-block because
+   .btn-block's own `justify-content: center` is defined later in the file. */
+.btn-block.btn-start { justify-content: flex-start; }
+/* Floor so the Simulation Process panel above cannot squeeze the session list
+   to a couple of pixels on a short viewport; the sidebar itself scrolls once
+   head + panel + this floor exceed the available height. */
+.session-list { flex: 1; min-height: 120px; overflow-y: auto; padding: 8px; }
 .session-item { display: block; width: 100%; text-align: left; padding: 10px 10px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; transition: background .15s, border-color .15s; }
 .session-item:hover { background: var(--surface-2); }
 .session-item.active { background: var(--primary-soft); border-color: #A5F3FC; }
@@ -85,8 +103,8 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .btn-accent:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-danger-ghost { color: var(--danger); border-color: transparent; background: none; }
 /* Visual gap + divider before the one destructive, unrecoverable action in
-   this row, so it doesn't sit flush against Export/War Room where a misclick
-   is one pixel away from a delete instead of a download. */
+   this row, so it doesn't sit flush against the cost meter where a misclick
+   is one pixel away from deleting the session. */
 .btn-delete-session { margin-left: 14px; padding-left: 16px; border-left: 1px solid var(--border); }
 .btn-danger-ghost:hover { background: var(--danger-soft); }
 .btn-sm { padding: 6px 10px; min-height: 32px; font-size: 12.5px; }
@@ -125,8 +143,6 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 /* ---------- session view ---------- */
 .session-body { display: grid; grid-template-columns: 1fr; flex: 1; min-height: 0; }
 .transcript-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.meeting-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
-.toolbar-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: -2px; }
 .meeting-steps { display: flex; align-items: center; gap: 2px; padding: 3px; background: var(--surface-2); border-radius: 999px; }
 .meeting-btn { display: inline-flex; align-items: center; gap: 7px; border: none; background: none; cursor: pointer; padding: 6px 14px 6px 8px; border-radius: 999px; font-weight: 600; font-size: 12.5px; color: var(--text-2); transition: background .15s, color .15s; }
 .meeting-btn:hover { color: var(--text); }
@@ -162,6 +178,44 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .round-divider span { white-space: nowrap; }
 
 .agent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: none; }
+
+/* ---------- agent columns: one fixed column per agent ---------- */
+/* The head sits outside .transcript so it stays visible while the transcript
+   scrolls. It has to line up with the grid inside, so it repeats that grid's
+   template, gap and horizontal padding; scrollbar-gutter keeps the transcript's
+   content box the same width whether or not a scrollbar is showing, which is
+   what stops the heads drifting out of alignment mid-session. */
+.transcript { scrollbar-gutter: stable; }
+.agent-columns { padding: 10px 20px 0; background: var(--bg); }
+.agent-columns-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.agent-columns-tools .spacer { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.seg-btn { border: none; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 12px; cursor: pointer; }
+.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+.seg-btn:hover { background: var(--surface-2); }
+.seg-btn.active { background: var(--primary); color: #fff; }
+.agent-columns-heads {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  position: sticky; top: -18px; z-index: 5;
+  /* -18px/18px cancels .transcript's own top padding so the row parks flush
+     against the top edge rather than floating 18px below it. */
+  margin: -18px -20px 0; padding: 18px 20px 8px; background: var(--bg);
+}
+.agent-head {
+  font-size: 12px; font-weight: 700; letter-spacing: .03em; padding: 7px 12px;
+  border-radius: var(--radius); background: var(--surface);
+  border: 1px solid var(--border); border-top: 3px solid var(--moderator);
+}
+.agent-head-regulatory { border-top-color: var(--regulatory); color: var(--regulatory); }
+.agent-head-clinical { border-top-color: var(--clinical); color: var(--clinical); }
+.agent-head-commercial { border-top-color: var(--commercial); color: var(--commercial); }
+/* The agent's name is in the column head, so the cards below don't repeat it.
+   Full-width cards (moderator, you, replies) keep theirs. */
+.agent-col .msg-who { display: none; }
+.agent-col .msg-head { padding-left: 12px; }
+/* Filtering to one agent: that column goes full width, the others go away. */
+.transcript.single-agent .agent-grid,
+.agent-columns-heads.single-agent { grid-template-columns: 1fr; }
 .agent-col { display: flex; flex-direction: column; min-width: 0; }
 .agent-col .msg { max-width: none; }
 
@@ -239,18 +293,50 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .disagreement { margin: 10px 0; padding: 10px 14px; background: #FFF7ED; border: 1px solid #FED7AA; border-radius: var(--radius); }
 .disagreement > :first-child { margin-top: 0; }
 
+/* Slides deck — the SLIDES block every agent response ends with
+   (see prompts/evidence-rules.md). Set apart from the body so it reads as a
+   summary of what was argued above, not as more argument. */
+.slides { margin: 16px 0 4px; padding: 12px 14px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.slides-label { font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.slide { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px 6px; margin-bottom: 8px; box-shadow: var(--shadow); }
+.slide:last-child { margin-bottom: 0; }
+.slide-title { display: flex; align-items: baseline; gap: 8px; font-weight: 700; font-size: 13.5px; margin-bottom: 6px; }
+.slide-n { flex: none; min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; align-self: center; border-radius: 999px; background: var(--primary-soft); color: var(--primary-hover); font-size: 10.5px; font-weight: 700; }
+.slide ul, .slide ol { margin: 0 0 6px; padding-left: 20px; }
+.slide li { margin-bottom: 3px; }
+.slide p { margin: 0 0 6px; }
+.slide > :last-child { margin-bottom: 0; }
+.slide li .badge-endpoint { display: inline-block; margin-bottom: 0; }
+
 .composer { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: end; padding: 12px 20px; background: var(--surface); border-top: 1px solid var(--border); }
 .composer-to { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .composer select { padding: 9px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 .composer textarea { resize: vertical; min-height: 44px; }
 
-/* ---------- War Room (floating right panel) ---------- */
+/* ---------- Intelligence (floating right panel) ---------- */
 .panel {
   position: fixed; top: 0; right: 0; height: 100vh; width: var(--panel-w); z-index: 40;
   border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0;
   transform: translateX(100%); transition: transform .2s ease; box-shadow: -8px 0 24px rgba(15, 23, 42, .12);
 }
 .panel.open { transform: translateX(0); }
+
+/* Left slide-over (User guide / Agents / Admin) — same drawer mechanics as the
+   Intelligence panel, mirrored. These pages used to open in a new tab, which threw the
+   user out of the session they were reading; as a drawer the transcript stays
+   put behind them. */
+.panel-left {
+  left: 0; right: auto;
+  border-left: none; border-right: 1px solid var(--border);
+  transform: translateX(-100%);
+  box-shadow: 8px 0 24px rgba(15, 23, 42, .12);
+}
+.panel-head-actions { display: flex; align-items: center; gap: 2px; }
+.panel-openfull { text-decoration: none; color: var(--muted); font-size: 14px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }
+.panel-openfull:hover { background: var(--surface-2); color: var(--text); }
+.panel-frame { flex: 1; width: 100%; border: none; background: var(--bg); min-height: 0; }
+.navlink { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; text-decoration: underline; }
+.navlink:hover { color: var(--primary-hover); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .panel-title { font-weight: 700; font-size: 13.5px; }
 .panel-close { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 15px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }
@@ -317,6 +403,10 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .panel { width: 100vw; }
   .fields { grid-template-columns: 1fr; }
   .agent-grid { grid-template-columns: 1fr; }
+  .agent-columns-heads { display: none; }
+  /* Columns are stacked here, so the head can't say who's speaking: put the
+     name back on the card. */
+  .agent-col .msg-who { display: inline; }
   .dashboard-grid { grid-template-columns: 1fr; }
 }
 
@@ -360,7 +450,7 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .dashboard-card .m { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; }
 .dashboard-empty { color: var(--muted); font-size: 13px; padding: 40px 0; text-align: center; }
 
-/* ---------- meeting minutes / intelligence (War Room tabs) ---------- */
+/* ---------- meeting minutes / agent notes (Intelligence tabs) ---------- */
 .minutes-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
 .minutes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .minutes-head .label { font-weight: 700; font-size: 12.5px; }

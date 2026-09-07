@@ -110,11 +110,35 @@ Priority is by user-visible harm, then by cost of leaving it.
    within three years and there is no field to enforce it against. Either capture the
    published date from the provider or drop the recency claim from the rules — an
    unenforceable rule in a prompt is worse than no rule.
-7. **RLS decision.** Not a toggle. Someone who owns auth decides between: (a) leave
-   disabled and treat the anon key as a secret, documenting that; (b) enable RLS with a
-   deny-all policy, since the app never uses PostgREST; (c) full policies. Option (b) is
-   the cheap correct answer given the app connects over `DATABASE_URL` — verify by
-   enabling on one low-traffic table first and confirming the app is unaffected.
+7. ~~**RLS decision.**~~ **Done 2026-09-07.** RLS is enabled on all twelve tables, each
+   with a single policy granting the application's own role and nobody else; Supabase's
+   security advisor now returns zero findings. Migrations `rls_pilot_agents` and
+   `rls_enable_remaining_tables`.
+
+   Two things found on the way in that contradict what this plan and both handovers said,
+   and that matter more than the change itself:
+
+   - **The exposure described was never real.** `anon` and `authenticated` hold no grants
+     at all on any of the twelve tables — only `app_user` does. PostgREST would have
+     refused on privileges before RLS was ever consulted, so holding the anon key got
+     nobody anything. The Supabase linter flags `rls_disabled_in_public` on the RLS flag
+     alone and does not look at grants. Both handovers, and this plan's own P1 item 7,
+     overstated it.
+   - **A literal deny-all would have taken the application down.** The app connects as
+     `app_user`, which is not the table owner, is not superuser and has no `BYPASSRLS`, so
+     RLS applies to it in full. The policy is therefore scoped to `app_user` rather than
+     denying everyone: every other role is still denied by omission, since with RLS on and
+     no policy naming a role, that role sees nothing.
+
+   So the value delivered is defence in depth, not the closing of a live hole: an
+   accidental future `GRANT ... TO anon` no longer becomes an exposure on its own.
+
+   Verified rather than assumed. RLS was enabled on `agents` alone first; the app still
+   read and wrote it, while a throwaway role holding `SELECT` on both `agents` and `users`
+   saw 0 rows in `agents` and 2 in `users` — the control that rules out "the probe simply
+   cannot read". After the rollout, all twelve tables are readable by the app, and a full
+   create/insert/read/delete cycle through the app's own functions succeeds and leaves
+   nothing behind.
 
 ### P2 — extensibility, blocked on nothing
 
@@ -186,8 +210,11 @@ else in that group, then 14, 15, 16, 18.
 - Repo is `slapharma/AnatopTerritorySimulator`. Run `gh auth switch --user slapharma`
   before pushing.
 - Supabase project ref `unqexnqlxdmlglyuzyfs`. Three tables (`autopilot_runs`, `reports`,
-  `report_emails`) plus `sessions.owner_id` and `agents.stance_default` exist only as live
-  migrations — see item 11.
+  `report_emails`) plus `sessions.owner_id`, `agents.stance_default` and the RLS policies
+  from item 7 exist only as live migrations — see item 11.
+- The application's database role is `app_user`, and it is deliberately not the owner and
+  has no `BYPASSRLS`. Any future RLS work has to name that role explicitly or the app
+  loses access to its own data.
 - Two `agents.knowledge` rows were edited live (regulatory: PV + supply chain; commercial:
   IP + pricing reconciliation). Nothing in a deploy restores those if the row is reset.
 - Verification standard for this plan: every check must be one that can fail. An HTTP 200

@@ -275,7 +275,9 @@
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     btn.classList.toggle('open', open);
     const n = state.sessions.length;
-    $('#session-toggle-label').textContent = open ? 'Hide simulations' : `View all simulations${n ? ` (${n})` : ''}`;
+    const count = $('#session-toggle-count');
+    count.textContent = n;
+    count.hidden = !n;
   }
 
   // HTTP Basic auth has no true sign-out: the browser holds the credential for
@@ -465,7 +467,6 @@
     renderDashStats();
     renderDashActions();
     renderDashResources();
-    renderSessionCards();
   }
 
   // KPI strip. Cost is admin-only for the same reason the session header's cost
@@ -541,58 +542,6 @@
         <span class="resource-title">${escapeHtml(c.title)}</span>
         <span class="resource-sub">${escapeHtml(c.sub)}</span>
       </button>`).join('');
-  }
-
-  // Groups the (filtered) session list by country, newest-updated first within
-  // each group; countries themselves are ordered by most-recent activity.
-  function renderSessionCards() {
-    const box = $('#dashboard-body');
-    const term = ($('#dash-search').value || '').trim().toLowerCase();
-    if (!state.sessions.length) {
-      box.innerHTML = '<div class="dashboard-empty">No evaluations yet. Start one with the tile above.</div>';
-      return;
-    }
-    const matches = state.sessions.filter((s) => !term
-      || `${s.title} ${s.product || ''} ${s.country || ''}`.toLowerCase().includes(term));
-    if (!matches.length) {
-      box.innerHTML = `<div class="dashboard-empty">Nothing matches &ldquo;${escapeHtml(term)}&rdquo;.</div>`;
-      return;
-    }
-    const byCountry = new Map();
-    for (const s of matches) {
-      const country = s.country || 'Unspecified';
-      if (!byCountry.has(country)) byCountry.set(country, []);
-      byCountry.get(country).push(s);
-    }
-    const countries = [...byCountry.keys()].sort((a, b) => {
-      const ta = Math.max(...byCountry.get(a).map((s) => new Date(s.updated_at).getTime() || 0));
-      const tb = Math.max(...byCountry.get(b).map((s) => new Date(s.updated_at).getTime() || 0));
-      return tb - ta;
-    });
-    box.innerHTML = countries.map((country) => {
-      const sessions = byCountry.get(country);
-      const cards = sessions.map((s) => {
-        const cost = Number(s.cost_usd || 0);
-        return `
-        <button type="button" class="dashboard-card" data-id="${s.id}" title="Last updated ${escapeHtml(fmtTime(s.updated_at))}">
-          <span class="dc-head">
-            <span class="dc-title">${escapeHtml(s.title)}</span>
-            <span class="status-pill ${s.has_decision ? 'status-done' : 'status-open'}">${s.has_decision ? 'Decision ready' : 'In progress'}</span>
-          </span>
-          <span class="dc-product">${escapeHtml(s.product || 'Product: INPUT MISSING')}</span>
-          <span class="dc-stats">
-            <span class="dc-stat">${icon('chat')}${s.message_count} responses</span>
-            <span class="dc-stat">${icon('clock')}${escapeHtml(fmtRelative(s.updated_at))}</span>
-            ${isAdminUser() && cost ? `<span class="dc-stat">${icon('sliders')}$${cost.toFixed(2)}</span>` : ''}
-          </span>
-        </button>`;
-      }).join('');
-      return `<div class="dashboard-country">
-        <div class="dashboard-country-head">${icon('globe', 'icon-sm')}<h3>${escapeHtml(country)}</h3><span class="count">${sessions.length}</span></div>
-        <div class="dashboard-grid">${cards}</div>
-      </div>`;
-    }).join('');
-    box.querySelectorAll('.dashboard-card').forEach((c) => c.addEventListener('click', () => openSession(Number(c.dataset.id))));
   }
 
   // ---------------- session view ----------------
@@ -1128,7 +1077,7 @@
 
   function setRunning(on) {
     state.running = on;
-    $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (b.id !== 'btn-stop' && b.id !== 'btn-export') b.disabled = on; });
+    $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (!['btn-stop', 'btn-export', 'btn-toggle-process'].includes(b.id)) b.disabled = on; });
     $('#btn-stop').hidden = !on;
     if (!on) state.stopRequested = false;
   }
@@ -1650,6 +1599,15 @@
     // so it stays collapsed until asked for. Not persisted: collapsed is the
     // intended default on every load.
     $('#btn-toggle-sessions').addEventListener('click', () => setSessionListOpen($('#session-list').hidden));
+    // Same head component, same behaviour; this one starts open because the
+    // meeting buttons are the main reason the sidebar exists during a session.
+    $('#btn-toggle-process').addEventListener('click', () => {
+      const head = $('#btn-toggle-process');
+      const open = $('#process-body').hidden;
+      $('#process-body').hidden = !open;
+      head.classList.toggle('open', open);
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
     $('#btn-load-korea').addEventListener('click', async () => {
       const defaults = await api.get('/api/defaults');
       fillForm($('#setup-form'), defaults, { clear: true });
@@ -1907,9 +1865,6 @@
 
     $('#brand-home').addEventListener('click', showDashboard);
     $('#btn-logout').addEventListener('click', logout);
-    // Only the session cards are rebuilt while typing; the KPI strip stays put
-    // so the numbers don't flicker as you narrow the list.
-    $('#dash-search').addEventListener('input', renderSessionCards);
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');

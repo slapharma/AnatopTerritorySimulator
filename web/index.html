@@ -24,7 +24,10 @@
          Keeps id="toolbar" because the run-state disable in setRunning() targets
          it; hidden outside the session view, which the sidebar does not switch. -->
     <nav class="sidebar-panel" id="toolbar" aria-label="Simulation process" hidden>
-      <div class="sidebar-panel-title">Simulation Process</div>
+      <button type="button" class="side-section-head open" id="btn-toggle-process" aria-expanded="true" aria-controls="process-body">
+        <span>Simulation Process</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="side-section-body" id="process-body">
       <!-- One box: the four numbered meetings, then the two ways to run a
            meeting that isn't one of them. All six start a turn, so they belong
            together and apart from Reports/Export, which only read the result. -->
@@ -41,25 +44,26 @@
         </div>
       </div>
       <div class="menu">
-        <button class="btn btn-sm btn-block btn-start" type="button" id="btn-reports">Reports ▾</button>
+        <button class="btn btn-sm btn-block btn-start menu-btn" type="button" id="btn-reports">Reports<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         <div class="menu-items" id="reports-menu" hidden>
           <button type="button" id="btn-report-interim">Interim report…</button>
           <button type="button" id="btn-report-final">Final report…</button>
         </div>
       </div>
       <div class="menu">
-        <button class="btn btn-sm btn-block btn-start" type="button" id="btn-export">Export ▾</button>
+        <button class="btn btn-sm btn-block btn-start menu-btn" type="button" id="btn-export">Export<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
         <div class="menu-items" id="export-menu" hidden>
           <a id="link-docx" href="#" download>Word (.docx)</a>
           <a id="link-pdf" href="#" download>PDF</a>
         </div>
       </div>
       <button class="btn btn-sm btn-block btn-start btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
+      </div>
     </nav>
 
     <div class="session-list-wrap">
-      <button type="button" id="btn-toggle-sessions" class="session-toggle" aria-expanded="false" aria-controls="session-list">
-        <span id="session-toggle-label">View all simulations</span><span class="session-toggle-caret">▾</span>
+      <button type="button" id="btn-toggle-sessions" class="side-section-head" aria-expanded="false" aria-controls="session-list">
+        <span id="session-toggle-label">All simulations</span><span class="count" id="session-toggle-count" hidden>0</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div id="session-list" class="session-list" aria-label="Saved sessions" hidden></div>
     </div>
@@ -78,25 +82,16 @@
       <div class="scroll">
         <div class="dashboard">
           <!-- Filled by renderDashboard(): KPI strip, the two big start/resume
-               tiles, the reference tiles, then the grouped session cards. Each
-               block is its own container so re-rendering one (the search box
-               only rebuilds the session list) leaves the others alone, and the
-               renderers address their container by id, so this order is set
-               here and nowhere else. -->
+               tiles, then the reference tiles. The saved evaluations are not
+               here any more — they are the sidebar's All simulations list.
+               Each block is its own container and each renderer addresses its
+               own by id, so this order is set here and nowhere else. -->
           <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
           <div id="dash-actions" class="action-grid"></div>
 
           <section class="dash-section">
             <div class="dash-section-head"><h2>Reference</h2></div>
             <div id="dash-resources" class="resource-grid"></div>
-          </section>
-
-          <section class="dash-section">
-            <div class="dash-section-head">
-              <h2>Evaluations</h2>
-              <input type="search" id="dash-search" class="dash-search" placeholder="Filter by product, country or title…" aria-label="Filter sessions">
-            </div>
-            <div id="dashboard-body" class="dashboard-body"></div>
           </section>
         </div>
       </div>

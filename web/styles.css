@@ -51,7 +51,22 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
    simulation, stacked in the sidebar above the session list. Vertical because
    the sidebar is 268px: the old horizontal pill row does not fit. */
 .sidebar-panel { flex: none; padding: 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
-.sidebar-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
+/* One collapsible-section head for the whole sidebar, set in the dashboard's
+   section typography (12px/700/.07em uppercase muted) so the two read as the
+   same system. The chevron is the same stroked SVG the dashboard tiles use,
+   not a text glyph, so it scales and inherits colour with everything else. */
+.side-section-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 0; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); transition: color .15s; }
+.side-section-head:hover { color: var(--text); }
+.side-section-head:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 6px; }
+.side-section-head .count { margin-left: 0; letter-spacing: 0; text-transform: none; }
+.side-section-caret { width: 15px; height: 15px; flex: none; margin-left: auto; transition: transform .15s; }
+.side-section-head.open .side-section-caret { transform: rotate(180deg); }
+.side-section-body { display: flex; flex-direction: column; gap: 8px; }
+/* Reports and Export are dropdowns rather than sections, but they sit in the
+   same stack, so they carry the same chevron instead of a "▾" in the label. */
+.menu-btn { justify-content: space-between; }
+.menu-btn .side-section-caret { width: 14px; height: 14px; margin-left: 0; }
 /* The run group is the one tinted box; .meeting-steps sits inside it plain, so
    the four steps and the two custom-run buttons read as one set rather than a
    box followed by two loose buttons. */
@@ -72,7 +87,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 /* Floor so the Simulation Process panel above cannot squeeze the session list
    to a couple of pixels on a short viewport; the sidebar itself scrolls once
    head + panel + this floor exceed the available height. */
-.session-list { max-height: 46vh; overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+.session-list { max-height: 46vh; overflow-y: auto; padding: 6px 0 10px; display: flex; flex-direction: column; gap: 2px; }
 .session-item { display: block; flex: none; width: 100%; text-align: left; padding: 10px 10px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; transition: background .15s, border-color .15s; }
 .session-item:hover { background: var(--surface-2); }
 .session-item.active { background: var(--primary-soft); border-color: #A5F3FC; }
@@ -80,12 +95,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .session-item .m { font-size: 11.5px; color: var(--muted); display: flex; gap: 8px; margin-top: 2px; }
 /* The saved-session list sits behind this button, collapsed by default. The
    wrapper takes the flex space the list itself used to claim. */
-.session-list-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: 10px; }
-.session-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; margin: 0 10px 6px; padding: 8px 10px; min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text-2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-.session-toggle:hover { background: var(--surface-2); color: var(--text); }
-.session-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.session-toggle-caret { font-size: 10px; transition: transform .15s; }
-.session-toggle.open .session-toggle-caret { transform: rotate(180deg); }
+.session-list-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 14px 0; }
 .sidebar-foot { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
 .main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .view { display: flex; flex-direction: column; height: 100vh; min-height: 0; }
@@ -462,12 +472,12 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .report-kind-final { color: var(--accent); }
 
 /* ---------- dashboard ---------- */
-.dashboard { max-width: 1180px; margin: 0 auto; padding: 24px 24px 72px; display: flex; flex-direction: column; gap: 30px; }
+.dashboard { max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px; display: flex; flex-direction: column; gap: 40px; }
 .icon { width: 18px; height: 18px; flex: none; }
 .icon-sm { width: 14px; height: 14px; }
 
 /* KPI strip — the numbers you want before deciding what to open. */
-.stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); gap: 12px; }
+.stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); gap: 14px; }
 .stat { display: flex; gap: 11px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .stat-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
 .stat-accent .stat-icon { background: var(--verified-bg); color: var(--verified-fg); }
@@ -477,54 +487,27 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .stat-sub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The two big things you come here to do. */
-.action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
-.action-tile { display: flex; align-items: center; gap: 15px; width: 100%; text-align: left; padding: 20px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; transition: background .18s, border-color .18s, box-shadow .18s; }
+.action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
+.action-tile { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 116px; text-align: left; padding: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; transition: background .18s, border-color .18s, box-shadow .18s; }
 .action-tile:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .16); }
 .action-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .action-tile-start { background: var(--accent); border-color: var(--accent); color: #fff; }
 .action-tile-start:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .action-tile-start:focus-visible { outline-color: var(--text); }
-.action-icon { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 12px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
-.action-icon .icon { width: 22px; height: 22px; }
+.action-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
+.action-icon .icon { width: 25px; height: 25px; }
 .action-tile-start .action-icon { background: rgba(255, 255, 255, .18); color: #fff; }
 .action-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.action-title { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
-.action-sub { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.action-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.action-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
 .action-tile-start .action-sub { color: rgba(255, 255, 255, .88); }
 
-.dash-section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 13px; }
+.dash-section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .dash-section-head h2 { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; }
-.dash-search { flex: 0 1 320px; margin-left: auto; padding: 7px 12px; min-height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); font-size: 13px; }
-.dash-search:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-
-.dashboard-country { margin-bottom: 22px; }
-.dashboard-country-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--text-2); }
-.dashboard-country-head h3 { font-size: 14px; margin: 0; font-weight: 700; color: var(--text); }
-/* Three fixed columns, not auto-fill: the cards line up in a consistent grid
-   whether a country has two evaluations or nine. Every override below lives
-   after this rule — the .dashboard-grid rules that used to sit up in the
-   layout media blocks came before it and never applied. */
-.dashboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-/* The left rail is the status colour, so an at-a-glance scan of the grid shows
-   which evaluations have landed on a recommendation without reading a word. */
-.dashboard-card { display: flex; flex-direction: column; gap: 12px; width: 100%; min-height: 168px; text-align: left; padding: 20px; border: 1px solid var(--border); border-left: 4px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; transition: border-color .18s, box-shadow .18s; }
-.dashboard-card:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .14); }
-.dashboard-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.dashboard-card:has(.status-done) { border-left-color: var(--accent); }
-.dc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.dc-title { font-weight: 700; font-size: 16px; line-height: 1.35; }
-.dc-product { font-size: 13px; color: var(--text-2); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.dc-stats { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-.dc-stat { display: inline-flex; align-items: center; gap: 5px; }
-.dc-stat .icon { width: 14px; height: 14px; }
-.status-pill { flex: none; padding: 3px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
-.status-done { color: var(--verified-fg); background: var(--verified-bg); }
-.status-open { color: var(--unknown-fg); background: var(--unknown-bg); }
-
 /* Reference tiles — the same three pages as the sidebar links, sized to be hit
    rather than read. */
-.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
-.resource-card { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; row-gap: 2px; width: 100%; text-align: left; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: border-color .18s, box-shadow .18s; }
+.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.resource-card { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 13px; row-gap: 2px; width: 100%; text-align: left; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: border-color .18s, box-shadow .18s; }
 .resource-card:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .14); }
 .resource-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .resource-icon { grid-row: span 2; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 9px; background: var(--primary-soft); color: var(--primary-hover); }
@@ -532,17 +515,12 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .resource-title { font-size: 14px; font-weight: 700; align-self: end; }
 .resource-sub { font-size: 12px; color: var(--muted); line-height: 1.4; align-self: start; }
 
-.dashboard-empty { color: var(--muted); font-size: 13px; padding: 36px 0; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
 
-/* Two-up as soon as three would squeeze: 1100px with the sidebar still taking
-   268px, and on down through the 900px point where the sidebar disappears. */
-@media (max-width: 1100px) {
-  .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 640px) {
-  .dashboard { padding: 16px 14px 60px; gap: 22px; }
-  .dash-section-head { flex-wrap: wrap; }
-  .dash-search { flex-basis: 100%; margin-left: 0; }
+  .dashboard { padding: 16px 14px 60px; gap: 26px; }
+  .action-tile { min-height: 0; padding: 18px; gap: 14px; }
+  .action-icon { width: 42px; height: 42px; }
+  .action-title { font-size: 15px; }
   /* Two-up rather than a stack: six full-width KPI cards would push the two
      action tiles a whole screen below the fold on a phone. */
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -551,11 +529,9 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .stat-icon .icon { width: 15px; height: 15px; }
   .stat-value { font-size: 19px; }
   .stat-label { font-size: 9.5px; letter-spacing: .05em; }
-  .dashboard-grid { grid-template-columns: 1fr; }
-  .dashboard-card { min-height: 0; padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .action-tile, .dashboard-card, .resource-card { transition: none; }
+  .action-tile, .resource-card { transition: none; }
 }
 
 /* ---------- meeting minutes / agent notes (Intelligence tabs) ---------- */

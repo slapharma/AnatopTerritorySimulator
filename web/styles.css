@@ -488,39 +488,56 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 
 /* The two big things you come here to do. */
 .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
-.action-tile { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 116px; text-align: left; padding: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; transition: background .18s, border-color .18s, box-shadow .18s; }
-.action-tile:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .16); }
-.action-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Reference tiles are the same component as the action tiles, in a grid that
+   fits three rather than two. The selectors are grouped, not copied, so the
+   two cannot drift the next time either is adjusted. */
+.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.action-tile, .resource-card { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 116px; text-align: left; padding: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: background .18s, border-color .18s, box-shadow .18s; }
+.action-tile:hover, .resource-card:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .16); }
+.action-tile:focus-visible, .resource-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .action-tile-start { background: var(--accent); border-color: var(--accent); color: #fff; }
 .action-tile-start:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .action-tile-start:focus-visible { outline-color: var(--text); }
-.action-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
-.action-icon .icon { width: 25px; height: 25px; }
+.action-icon, .resource-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
+.action-icon .icon, .resource-icon .icon { width: 25px; height: 25px; }
 .action-tile-start .action-icon { background: rgba(255, 255, 255, .18); color: #fff; }
-.action-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.action-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
-.action-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.action-text, .resource-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.action-title, .resource-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.action-sub, .resource-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
 .action-tile-start .action-sub { color: rgba(255, 255, 255, .88); }
 
-.dash-section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-.dash-section-head h2 { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; }
-/* Reference tiles — the same three pages as the sidebar links, sized to be hit
-   rather than read. */
-.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
-.resource-card { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 13px; row-gap: 2px; width: 100%; text-align: left; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: border-color .18s, box-shadow .18s; }
-.resource-card:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .14); }
-.resource-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.resource-icon { grid-row: span 2; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 9px; background: var(--primary-soft); color: var(--primary-hover); }
-.resource-icon .icon { width: 18px; height: 18px; }
-.resource-title { font-size: 14px; font-weight: 700; align-self: end; }
-.resource-sub { font-size: 12px; color: var(--muted); line-height: 1.4; align-self: start; }
 
+/* How an evaluation runs — four steps left to right, chevrons drawn in the
+   grid gaps rather than as extra elements, so the list stays four <li>s and
+   reads as four items to a screen reader. The chevron is a rotated square
+   border, which needs no SVG and turns 90 degrees with the flow when the row
+   stacks on a phone. */
+.process-flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 34px; }
+.process-step { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.process-step::after { content: ''; position: absolute; top: 50%; right: -22px; width: 9px; height: 9px; border-top: 2px solid var(--border-strong); border-right: 2px solid var(--border-strong); transform: translateY(-50%) rotate(45deg); }
+.process-step:last-child::after { content: none; }
+.process-num { position: absolute; top: -10px; left: 18px; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.process-icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 10px; background: var(--primary-soft); color: var(--primary-hover); margin-top: 6px; }
+.process-icon .icon { width: 20px; height: 20px; }
+.process-text { display: flex; flex-direction: column; gap: 3px; }
+.process-title { font-size: 14px; font-weight: 700; line-height: 1.35; }
+.process-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+@media (max-width: 900px) {
+  .process-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 34px; }
+  /* Two-up: the arrow after the second card would point off the row's edge. */
+  .process-step:nth-child(2n)::after { content: none; }
+}
 
 @media (max-width: 640px) {
   .dashboard { padding: 16px 14px 60px; gap: 26px; }
-  .action-tile { min-height: 0; padding: 18px; gap: 14px; }
-  .action-icon { width: 42px; height: 42px; }
-  .action-title { font-size: 15px; }
+  /* Stacked: the chevrons turn to point down the column. */
+  .process-flow { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .process-step { padding: 14px; }
+  .process-step::after, .process-step:nth-child(2n)::after { content: ''; top: auto; bottom: -18px; right: auto; left: 50%; transform: translateX(-50%) rotate(135deg); }
+  .process-step:last-child::after { content: none; }
+  .action-tile, .resource-card { min-height: 0; padding: 18px; gap: 14px; }
+  .action-icon, .resource-icon { width: 42px; height: 42px; }
+  .action-title, .resource-title { font-size: 15px; }
   /* Two-up rather than a stack: six full-width KPI cards would push the two
      action tiles a whole screen below the fold on a phone. */
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

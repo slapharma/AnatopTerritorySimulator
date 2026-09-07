@@ -542,8 +542,10 @@
     $('#dash-resources').innerHTML = cards.map((c) => `
       <button type="button" class="resource-card navlink" data-nav="${c.nav}" data-nav-title="${escapeHtml(c.title)}">
         <span class="resource-icon">${icon(c.icon)}</span>
-        <span class="resource-title">${escapeHtml(c.title)}</span>
-        <span class="resource-sub">${escapeHtml(c.sub)}</span>
+        <span class="resource-text">
+          <span class="resource-title">${escapeHtml(c.title)}</span>
+          <span class="resource-sub">${escapeHtml(c.sub)}</span>
+        </span>
       </button>`).join('');
   }
 

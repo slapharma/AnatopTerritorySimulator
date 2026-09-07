@@ -18,7 +18,55 @@
   };
 
   // ---------------- helpers ----------------
-  const AGENT_LABEL = { regulatory: 'Regulatory Agent', clinical: 'Clinical Agent', commercial: 'Commercial Agent', moderator: 'Moderator Assistant', user: 'Moderator (you)', autopilot: 'Autopilot' };
+  // Filled from /api/config once it loads (see boot()). `user` and `autopilot`
+  // are UI-only pseudo-speakers with no manifest entry; everything else — label,
+  // order and colour — comes from prompts/agents/index.json, so adding an agent
+  // needs no edit here. The literals below are only the pre-config fallback.
+  const AGENT_LABEL = { moderator: 'Moderator Assistant', user: 'Moderator (you)', autopilot: 'Autopilot' };
+  const AGENT_COLOUR = {};
+  // Enabled agent keys in manifest order. Populated by applyAgentRoster().
+  const ALL = [];
+  // The agent chips are built from the roster; only All / You / Favourites are
+  // fixed markup, because they are not agents. Called from boot() before the
+  // shared chip wiring, so these get their click handler from that, not here.
+  function renderFilterChips() {
+    const box = document.querySelector('#filter-chips');
+    if (!box) return;
+    const fixedTail = Array.from(box.querySelectorAll('.chip')).filter((c) => ['user', 'favourites'].includes(c.dataset.speaker));
+    for (const c of Array.from(box.querySelectorAll('.chip'))) if (!['all', 'user', 'favourites'].includes(c.dataset.speaker)) c.remove();
+    const first = box.querySelector('.chip[data-speaker="all"]');
+    const frag = document.createDocumentFragment();
+    for (const key of ALL) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `chip chip-${key}`;
+      b.dataset.speaker = key;
+      if (AGENT_COLOUR[key]) b.style.setProperty('--chip-dot', AGENT_COLOUR[key]);
+      b.textContent = (state.config.agents[key] || {}).short || AGENT_LABEL[key] || key;
+      frag.appendChild(b);
+    }
+    if (fixedTail.length) box.insertBefore(frag, fixedTail[0]);
+    else if (first) first.after(frag);
+    else box.appendChild(frag);
+  }
+
+  function applyAgentRoster(config) {
+    const agents = config.agents || {};
+    for (const [key, a] of Object.entries(agents)) {
+      AGENT_LABEL[key] = a.label || key;
+      if (a.colour) AGENT_COLOUR[key] = a.colour;
+      if (a.colour_soft) AGENT_COLOUR[key + '_soft'] = a.colour_soft;
+    }
+    ALL.length = 0;
+    ALL.push(...(config.agent_order || []));
+  }
+  // Inline custom properties let the stylesheet paint an agent it has never
+  // heard of; the named .msg-<key> rules still win for the original three.
+  function speakerStyle(key) {
+    const c = AGENT_COLOUR[key];
+    if (!c) return '';
+    return ` style="--speaker: ${c}; --speaker-soft: ${AGENT_COLOUR[key + '_soft'] || 'transparent'}"`;
+  }
   const MODE_LABEL = { opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom meeting', decision: 'Decision output', dive_deeper: 'Dive Deeper', autopilot: 'Autopilot' };
   // Modes where all three agents answer independently within the round — laid
   // out as a 3-column grid instead of stacked, both live and on reload.
@@ -195,7 +243,7 @@
   // response, so "Clinical Agent" in a Round 2 rebuttal jumps to what they said.
   function linkAgentMentions(bodyEl, m) {
     if (!['round2', 'round3', 'crosstalk', 'dive_deeper'].includes(m.mode)) return;
-    const others = ['regulatory', 'clinical', 'commercial'].filter((a) => a !== m.speaker);
+    const others = ALL.filter((a) => a !== m.speaker);
     for (const other of others) {
       const target = state.session.messages.filter((x) => x.speaker === other && x.seq < m.seq && !x.error).pop();
       if (!target) continue;
@@ -625,7 +673,7 @@
     row.className = 'agent-columns-heads';
     row.id = 'agent-columns-heads';
     row.innerHTML = ALL
-      .map((key) => `<div class="agent-head agent-head-${key}" data-speaker="${key}">${escapeHtml(AGENT_LABEL[key])}</div>`)
+      .map((key) => `<div class="agent-head agent-head-${key}" data-speaker="${key}"${speakerStyle(key)}>${escapeHtml(AGENT_LABEL[key])}</div>`)
       .join('');
     return row;
   }
@@ -741,6 +789,7 @@
     const isSystem = m.role === 'system';
     const el = document.createElement('article');
     el.className = `msg msg-${speaker}${isSystem ? ' msg-system' : ''}${m.favourite ? ' favourited' : ''}`;
+    if (AGENT_COLOUR[speaker]) { el.style.setProperty('--speaker', AGENT_COLOUR[speaker]); el.style.setProperty('--speaker-soft', AGENT_COLOUR[speaker + '_soft'] || 'transparent'); }
     el.id = `msg-${m.id}`;
     el.dataset.speaker = speaker;
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` → ${AGENT_LABEL[m.addressed_to]}` : '';
@@ -1036,7 +1085,7 @@
   function renderIntelligenceBody(body) {
     const s = state.session;
     if (state.intelCut === 'agent') {
-      const groups = ['regulatory', 'clinical', 'commercial', 'moderator', 'user'].map((sp) => ({
+      const groups = [...ALL, 'moderator', 'user'].map((sp) => ({
         key: sp, label: AGENT_LABEL[sp], rows: s.messages.filter((m) => (m.role === 'user' ? 'user' : m.speaker) === sp && !m.error),
       })).filter((g) => g.rows.length);
       body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelRow(`#msg-${m.id}`, `#${m.seq} · ${MODE_LABEL[m.mode] || m.mode || ''}`, fmtTime(m.created_at))).join('')}</div>`).join('')
@@ -1259,8 +1308,6 @@
       loadSessions();
     }
   }
-
-  const ALL = ['regulatory', 'clinical', 'commercial'];
 
   // ---------------- autopilot ----------------
   // A boosted, multi-cycle cross-talk that runs until a stop condition is met.
@@ -1560,6 +1607,8 @@
   // ---------------- events ----------------
   async function init() {
     state.config = await api.get('/api/config');
+    applyAgentRoster(state.config);
+    renderFilterChips();
     buildForm($('#setup-form'), { saveDefault: true });
     buildForm($('#session-inputs-form'), { saveDefault: false });
     const me = await api.get('/api/me').catch(() => ({ authenticated: false }));
@@ -1637,7 +1686,7 @@
       for (let i = 0; i < seqIdx; i++) {
         const prior = GRID_MODES[i];
         const done = new Set(state.session.messages.filter((m) => m.mode === prior && m.role === 'agent' && !m.error).map((m) => m.speaker));
-        if (ALL.some((a) => !done.has(a))) return toast(`Run ${MODE_LABEL[prior] || prior} for all three agents before starting ${MODE_LABEL[mode] || mode}.`);
+        if (ALL.some((a) => !done.has(a))) return toast(`Run ${MODE_LABEL[prior] || prior} for all ${ALL.length} agents before starting ${MODE_LABEL[mode] || mode}.`);
       }
       const pending = turnsForRound(mode, ALL);
       if (pending.length === ALL.length) return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));

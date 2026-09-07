@@ -164,8 +164,10 @@ function inputsBlock(inputs) {
 // on the Agents page and stays entirely file-based.
 async function personaFor(agentKey) {
   if (agentKey === 'moderator') return readPrompt(AGENTS.moderator.file);
-  const row = await db.getAgent(agentKey);
-  if (!row) throw new Error(`Agent ${agentKey} has no DB row — run the agents migration/seed`);
+  // The row is an overlay, so its absence means "no overlay", not an error. An
+  // agent added to the manifest works from its files alone; the row only exists
+  // once someone edits its stance, knowledge or tools on the Agents page.
+  const row = (await db.getAgent(agentKey)) || {};
   const persona = readAgentFile(agentKey, 'persona.md').replace('{{STANCE_TEXT}}', stanceText(row.stance_default));
   const cv = stripVerificationNote(readAgentFile(agentKey, 'cv.md'));
   const questions = readAgentFile(agentKey, 'questions.md');

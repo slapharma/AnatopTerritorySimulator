@@ -122,8 +122,18 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
 // abilities, challenge level) plus a read-only preview of the file text.
 app.get('/api/agents', async (req, res, next) => {
   try {
+    // Driven by the roster manifest, not by what happens to be in the agents
+    // table: an agent added to prompts/agents/index.json has no row until
+    // someone edits its overlay, and it still belongs on this page.
     const rows = await db.listAgents();
-    res.json(rows.map((r) => ({ ...r, persona_preview: prompts.AGENTS[r.key] ? prompts.personaFilesRaw(r.key) : null })));
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    res.json(prompts.AGENT_ORDER.map((key) => ({
+      key,
+      label: prompts.AGENTS[key].label,
+      knowledge: '', can_web_search: true, can_open_url: true, stance_default: 3,
+      ...(byKey.get(key) || {}),
+      persona_preview: prompts.personaFilesRaw(key),
+    })));
   } catch (e) { next(e); }
 });
 app.get('/api/stance-levels', (req, res) => res.json(prompts.STANCE));

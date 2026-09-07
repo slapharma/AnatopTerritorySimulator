@@ -179,6 +179,8 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .chip-clinical { --chip-dot: var(--clinical); }
 .chip-commercial { --chip-dot: var(--commercial); }
 .chip-user { --chip-dot: var(--user); }
+/* Agents added to the roster manifest have no named rule here; the chip
+   renderer sets --chip-dot inline from the manifest colour instead. */
 
 .round-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 -4px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .round-divider::before, .round-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -253,6 +255,14 @@ body.non-admin .msg-cost, body.non-admin [data-tab="cost"] { display: none; }
 .msg-commercial { border-left-color: var(--commercial); }
 .msg-moderator { border-left-color: var(--moderator); }
 .msg-user { border-left-color: var(--user); background: var(--user-soft); }
+/* Paints any agent from the roster manifest, including one this stylesheet
+   has never heard of: messageElement() sets --speaker inline from the
+   manifest colour. Class+attribute outranks the named .msg-<key> rules
+   above, so the manifest is what actually decides — those are kept as the
+   pre-config fallback and carry the same hexes. */
+.msg[style*='--speaker'] { border-left-color: var(--speaker); }
+.msg[style*='--speaker'] .msg-who { color: var(--speaker); }
+.agent-head[style*='--speaker'] { background: var(--speaker-soft); color: var(--speaker); border-top-color: var(--speaker); border-color: color-mix(in srgb, var(--speaker) 30%, white); }
 .msg-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px 6px; }
 .msg-who { font-weight: 700; font-size: 13px; }
 .msg-regulatory .msg-who { color: var(--regulatory); }

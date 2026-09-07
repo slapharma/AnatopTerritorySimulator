@@ -143,9 +143,8 @@
         <div class="transcript-col">
           <div id="filter-chips" class="filter-chips" aria-label="Filter transcript by agent">
             <button type="button" class="chip active" data-speaker="all">All</button>
-            <button type="button" class="chip chip-regulatory" data-speaker="regulatory">Regulatory</button>
-            <button type="button" class="chip chip-clinical" data-speaker="clinical">Clinical</button>
-            <button type="button" class="chip chip-commercial" data-speaker="commercial">Commercial</button>
+            <!-- One chip per enabled agent is inserted here from the roster
+                 manifest by renderFilterChips(); these two are not agents. -->
             <button type="button" class="chip chip-user" data-speaker="user">You</button>
           </div>
           <div class="agent-columns" id="agent-columns" hidden>

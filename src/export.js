@@ -7,8 +7,12 @@ const prompts = require('./prompts');
 
 const FONT_DIR = path.join(__dirname, '..', 'fonts');
 const FONT = 'Montserrat';
+// Agent colours come from the roster manifest (prompts/agents/index.json) so a
+// new agent is one manifest entry, not an edit here as well. The rest are fixed
+// document colours with no per-agent meaning.
 const COLOURS = {
-  regulatory: '1D4ED8', clinical: '0F766E', commercial: '6D28D9', moderator: '334155', user: 'B45309',
+  ...Object.fromEntries(Object.entries(prompts.AGENTS).map(([k, a]) => [k, String(a.colour || '#334155').replace('#', '').toUpperCase()])),
+  user: 'B45309',
   verified: '166534', estimate: '92400E', unknown: '4B5563', link: '0891B2', muted: '64748B', system: '94A3B8',
 };
 

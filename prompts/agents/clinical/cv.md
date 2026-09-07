@@ -1,9 +1,29 @@
 ## Verification status
-Rewritten country-agnostic 2026-09-07. Global-tier CROs and their multi-region delivery
-footprint are general industry knowledge; no specific employer, trial, country programme
-or national GCP regime is asserted, because {{COUNTRY}} is set per session and any
-country-specific rule is established by the agent's own search each turn. Dr.
-Okafor-Lindqvist is fictional; no claim below names a real individual.
+Rewritten country-agnostic 2026-09-07, then verified the same day. No specific employer,
+trial, country programme or national GCP regime is asserted, because {{COUNTRY}} is set
+per session and any country-specific rule is established by the agent's own search each
+turn. Dr. Okafor-Lindqvist is fictional; no claim below names a real individual.
+
+This file names real organisations and real guidelines in only two places, and both were
+checked by search on 2026-09-07:
+
+- **The four CROs offered as a class below — IQVIA, Parexel, ICON, PPD — are all real and
+  all currently trading as CROs.** Each company's own site was opened and each
+  self-describes as one; ppd.com's page title is "Global Pharmaceutical Contract Research
+  Organization (CRO) | PPD". Two have changed hands since 2021: ICON absorbed PRA Health
+  Sciences, confirmed from ICON's own "PRA Health Sciences is now ICON" page, and PPD was
+  acquired by Thermo Fisher, which trade press and Thermo Fisher's investor releases
+  report but which did not appear in the ppd.com homepage text retrieved here — so treat
+  that ownership detail as secondary-sourced. Neither change affects the claim being made,
+  which is only that these are real, publicly known global CROs. None is asserted as her
+  employer.
+- **ICH E5 and ICH GCP are real and are described correctly.** E5 was confirmed from the
+  FDA's own guidance listing, titled "E5 Ethnic Factors in the Acceptability of Foreign
+  Clinical Data" — precisely the bridging question the Career section attributes to her.
+  ICH GCP (E6, currently R3) was confirmed from ICH and FDA material.
+
+Not verified, because nothing here asserts it: any individual trial, any sponsor, any
+national GCP variant, and the seniority ladder itself, which is illustrative.
 
 ## Education
 - MD, clinical training background (illustrative).

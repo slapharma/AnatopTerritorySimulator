@@ -271,15 +271,24 @@ app.delete('/api/knowledge/:id', requireAdmin, async (req, res, next) => {
 // ---------- form defaults ----------
 // A stored value overrides prompts.BASE_VALUES field-by-field; an unconfigured
 // field still falls back to the hardcoded example rather than coming back blank.
+// Stored values for a field that has since been removed from the form are not
+// served: nothing renders them, and handing them to the client would put keys
+// in the form payload that the PATCH route then rejects as unknown.
+// scripts/prune-defaults.js clears them from the row itself.
+function knownDefaults(stored) {
+  const out = {};
+  for (const f of prompts.INPUT_FIELDS) if (f.key in stored) out[f.key] = stored[f.key];
+  return out;
+}
 app.get('/api/defaults', async (req, res, next) => {
-  try { res.json({ ...prompts.BASE_VALUES, ...(await db.getDefaults()) }); } catch (e) { next(e); }
+  try { res.json({ ...prompts.BASE_VALUES, ...knownDefaults(await db.getDefaults()) }); } catch (e) { next(e); }
 });
 app.patch('/api/defaults', requireAdmin, async (req, res, next) => {
   try {
     const { key, value } = req.body;
     if (!prompts.INPUT_FIELDS.some((f) => f.key === key)) return res.status(400).json({ error: `Unknown field ${key}` });
     const stored = await db.setDefaultField(key, typeof value === 'string' ? value : '');
-    res.json({ ...prompts.BASE_VALUES, ...stored });
+    res.json({ ...prompts.BASE_VALUES, ...knownDefaults(stored) });
   } catch (e) { next(e); }
 });
 

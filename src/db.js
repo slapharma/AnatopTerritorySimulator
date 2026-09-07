@@ -308,13 +308,18 @@ async function getDefaults() {
 async function setDefaultField(key, value) {
   const current = await getDefaults();
   current[key] = value;
-  const json = JSON.stringify(current);
+  return replaceDefaults(current);
+}
+// Whole-blob write, so a caller can drop keys as well as add them —
+// setDefaultField cannot express a deletion, and a field removed from the form
+// leaves its value stranded here (scripts/prune-defaults.js).
+async function replaceDefaults(values) {
   await q(
     `INSERT INTO app_defaults (id, values_json, updated_at) VALUES (true, $1, now())
      ON CONFLICT (id) DO UPDATE SET values_json = $1, updated_at = now()`,
-    [json],
+    [JSON.stringify(values)],
   );
-  return current;
+  return values;
 }
 
 // ---------- users (auth) ----------
@@ -381,7 +386,7 @@ async function deleteKnowledgeItem(id) { await q('DELETE FROM knowledge_items WH
 
 module.exports = {
   pool,
-  getDefaults, setDefaultField,
+  getDefaults, setDefaultField, replaceDefaults,
   listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, updateInputs, deleteSession, createSession,
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, beginAgentTurn, setFavourite,
   listSources, upsertSource,

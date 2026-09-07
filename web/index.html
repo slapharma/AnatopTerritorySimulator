@@ -86,15 +86,13 @@
                here any more — they are the sidebar's All simulations list.
                Each block is its own container and each renderer addresses its
                own by id, so this order is set here and nowhere else. -->
-          <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
-          <div id="dash-actions" class="action-grid"></div>
-
-          <!-- The four steps a run actually takes, in order. Static markup:
-               it never varies with data, so there is nothing for a renderer to
-               decide. The icons are the same Lucide geometry as ICON in
-               app.js, inlined here because this block is not built in JS. -->
-          <section class="dash-section">
-            <div class="dash-section-head"><h2>How an evaluation runs</h2></div>
+          <!-- Onboarding: what the four steps of a run are, in order. Sits
+               above the numbers; dismissed state is remembered per browser. -->
+          <section class="dash-section dash-callout" id="process-callout">
+            <div class="dash-section-head">
+              <h2>How an evaluation runs</h2>
+              <button type="button" class="dash-callout-close" id="btn-close-process" title="Hide this" aria-label="Hide how an evaluation runs">✕</button>
+            </div>
             <ol class="process-flow">
               <li class="process-step">
                 <span class="process-num">1</span>
@@ -138,6 +136,9 @@
               </li>
             </ol>
           </section>
+
+          <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
+          <div id="dash-actions" class="action-grid"></div>
 
           <section class="dash-section">
             <div class="dash-section-head"><h2>Reference</h2></div>

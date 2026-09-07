@@ -1870,6 +1870,16 @@
 
     $('#brand-home').addEventListener('click', showDashboard);
     $('#btn-logout').addEventListener('click', logout);
+    // The onboarding callout is only useful until you know the flow, so a
+    // dismissal sticks. localStorage rather than the server: it is a per-person,
+    // per-browser preference, not session state worth a column.
+    const PROCESS_HIDDEN = 'lwg.hideProcess';
+    const setProcessHidden = (hidden) => {
+      $('#process-callout').hidden = hidden;
+      try { localStorage.setItem(PROCESS_HIDDEN, hidden ? '1' : '0'); } catch { /* private mode: it just reappears next load */ }
+    };
+    try { if (localStorage.getItem(PROCESS_HIDDEN) === '1') $('#process-callout').hidden = true; } catch { /* ignore */ }
+    $('#btn-close-process').addEventListener('click', () => setProcessHidden(true));
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');

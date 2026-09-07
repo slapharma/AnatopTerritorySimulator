@@ -512,9 +512,25 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
    reads as four items to a screen reader. The chevron is a rotated square
    border, which needs no SVG and turns 90 degrees with the flow when the row
    stacks on a phone. */
+/* Restored: 6049231 removed these along with the evaluation-card rules, which
+   left every dashboard section heading rendering as a bare <h2>. The sidebar
+   heads in .side-section-head are matched to this, so the two move together. */
+.dash-section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.dash-section-head h2 { font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; }
+
+/* The onboarding callout: its own tinted container so it reads as guidance
+   sitting above the dashboard rather than another section of it. The white
+   step cards inside gain contrast from the tint rather than needing more
+   border. Dismissable, because it is only useful until you know the flow. */
+.dash-callout { position: relative; padding: 22px 24px 24px; border: 1px solid #A5F3FC; border-radius: var(--radius); background: var(--primary-soft); }
+.dash-callout .dash-section-head { margin-bottom: 16px; }
+.dash-callout .dash-section-head h2 { color: var(--primary-hover); }
+.dash-callout-close { margin-left: auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 8px; background: none; color: var(--primary-hover); font-size: 13px; line-height: 1; cursor: pointer; transition: background .15s, color .15s; }
+.dash-callout-close:hover { background: rgba(8, 145, 178, .12); color: var(--text); }
+.dash-callout-close:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .process-flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 34px; }
-.process-step { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-.process-step::after { content: ''; position: absolute; top: 50%; right: -22px; width: 9px; height: 9px; border-top: 2px solid var(--border-strong); border-right: 2px solid var(--border-strong); transform: translateY(-50%) rotate(45deg); }
+.process-step { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 18px; background: var(--surface); border: 1px solid #CFFAFE; border-radius: var(--radius); box-shadow: var(--shadow); }
+.process-step::after { content: ''; position: absolute; top: 50%; right: -22px; width: 9px; height: 9px; border-top: 2px solid #67E8F9; border-right: 2px solid #67E8F9; transform: translateY(-50%) rotate(45deg); }
 .process-step:last-child::after { content: none; }
 .process-num { position: absolute; top: -10px; left: 18px; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .process-icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 10px; background: var(--primary-soft); color: var(--primary-hover); margin-top: 6px; }
@@ -535,6 +551,7 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .process-step { padding: 14px; }
   .process-step::after, .process-step:nth-child(2n)::after { content: ''; top: auto; bottom: -18px; right: auto; left: 50%; transform: translateX(-50%) rotate(135deg); }
   .process-step:last-child::after { content: none; }
+  .dash-callout { padding: 18px 16px 20px; }
   .action-tile, .resource-card { min-height: 0; padding: 18px; gap: 14px; }
   .action-icon, .resource-icon { width: 42px; height: 42px; }
   .action-title, .resource-title { font-size: 15px; }

@@ -18,8 +18,11 @@ Files under `prompts/agents/`:
 - `prompts/stance.json` — five challenge levels, Supportive to Adversarial, with the sentence substituted into each persona.
 - `prompts/evidence-rules.md` — extended with a mandatory `## Slides` block at the end of every agent response, and the closing `**Next step:**` line moved inside the last slide.
 
+> **Updated 2026-09-07.** The regulatory persona below has since been rewritten. See
+> "Corrections" at the end of this document before relying on this section.
+
 Personas (all fictional people; institutions and dates are real and public):
-- Regulatory: Dr. Yoon Seo-jin, director-level MFDS official, in the room off the record.
+- Regulatory: originally Dr. Yoon Seo-jin, director-level MFDS official, in the room off the record. **Superseded** - the persona is now anonymous ("the Regulator") and country-agnostic; see Corrections.
 - Clinical: Dr. Margaret Okafor-Lindqvist, ex-senior clinical-development lead at a global CRO, now independent.
 - Commercial: Henrik Waldenström, thirty years pharma commercial and market access, ex-country GM, now board advisor.
 
@@ -49,16 +52,20 @@ All three are framed as outside experts who want SLA to succeed, impartial, chal
 ## 3. Open items, in priority order
 
 1. **Front end and exports still hardcode three agents.** `public/app.js` has `ALL`, `AGENT_LABEL`; `src/export.js` has `COLOURS`. Harmless while the roster is exactly regulatory, clinical, commercial. A fourth agent needs those switched to read `/api/config.agents`. Plan section 5 describes the change.
-2. **Live turn not yet run with the new personas.** Run the Korea example Round 1 and check that each response ends with a `## Slides` block, speaks in first person by name, and does not say "we at SLA". Plan section 7 lists the checks that can fail.
-3. **Slides rendering.** The prompt now demands a Slides block, but nothing in `public/app.js` or `src/export.js` renders it specially yet. It will appear as plain markdown headings until that is built. Plan build-order step 5.
-4. **Clinical `cv.md` verification pass.** The regulatory and commercial CVs were anchored to facts checked by search this session (MFDS 2013 rename, PIC/S 2014, HIRA/NHIS process, one real Kwangdong in-licensing deal used only to confirm the deal type). The clinical CV's specific CRO name and Korean CRO references were not individually re-verified. The file says so in its header.
-5. **STANCE rename.** Another session was renaming the "aggressive/passive" control. This session used `stance_default` and `prompts/stance.json`. If that other session lands a different name, reconcile to one.
-6. **Legacy files.** `prompts/regulatory.md`, `prompts/clinical.md`, `prompts/commercial.md` at the top level are now dead; nothing reads them. Safe to delete once the live turn in item 2 passes.
-7. **Autopilot and reports** are plans only from this session. Other sessions have already created `autopilot_runs`, `reports` and `report_emails` tables and `src/email.js` (Resend), so parts of both plans are underway elsewhere. Check with those sessions before starting either.
+2. ~~**Live turn not yet run with the new personas.**~~ **Done 2026-09-07** (`5d18178`). Korea Round 1 run live for all three agents. Slides blocks, first person, no "we at SLA" and no unsubstituted placeholders all passed first time. Two things failed and were fixed: none of the three introduced itself (the clinical agent signed as "Clinical Agent"), and two of three opened with a process preamble. `prompts/rounds.json` now asks for a one-line self-introduction in Round 1, and the no-preamble rule in `evidence-rules.md` was promoted from a clause to its own rule.
+3. ~~**Slides rendering.**~~ **Done 2026-09-07** (`89af3c2`). `tagSlides()` in `src/markdown-blocks.js` retags the deck for both exporters; the client renders it as a card per slide. DOCX gets a ruled label and shaded numbered titles, PDF the same.
+4. ~~**Clinical `cv.md` verification pass.**~~ **Moot as of 2026-09-07.** The CV was rewritten country-agnostic, and its header now states that no specific employer, trial, country programme or national GCP regime is asserted - so the unverified CRO and Korean-CRO references that needed checking are gone rather than confirmed.
+5. ~~**STANCE rename.**~~ **Resolved.** One name survived: `prompts/stance.json` -> `prompts.STANCE` -> `agents.stance_default`. No `stanceBank()` remains anywhere in the tree.
+6. ~~**Legacy files.**~~ **Deleted 2026-09-07** (`16aef58`), once item 2 passed. Every question in them was confirmed to survive verbatim in the matching `questions.md` first.
+7. ~~**Autopilot and reports** are plans only from this session.~~ **Both shipped** by the worktree session (`d667ecb`, merged `62934e9` and `b707f44`). Still open there: no report email has ever actually been sent (`RESEND_API_KEY` and `MAIL_FROM` unset, sending domain undecided), and the Autopilot stance slider still opens at the bank default rather than each agent's `stance_default`.
+
+Item 1 is the only one of these seven still fully open.
 
 ## 4. Security flag, pre-existing, not touched
 
-Row Level Security is disabled on all twelve tables in the Supabase project, including `users` and `sessions`. Anyone holding the anon key can read or write every row. This was reported by the Supabase tooling while adding the `stance_default` column; it predates this session and nothing here changed it. Enabling RLS without policies would block the app, so it needs a deliberate decision by whoever owns auth, not a quick toggle.
+Row Level Security is disabled on all twelve tables in the Supabase project, including `users` and `sessions`. This was reported by the Supabase tooling while adding the `stance_default` column; it predates this session and nothing here changed it. Enabling RLS without policies would block the app, so it needs a deliberate decision by whoever owns auth, not a quick toggle. Still true on 2026-09-07: Supabase's linter reports it on all twelve.
+
+**Severity correction, 2026-09-07.** The original wording here - "anyone holding the anon key can read or write every row" - reads as an active exposure and overstates it. There is no Supabase client, no anon key and no project URL anywhere in `public/`; the app connects over `DATABASE_URL`, a server-side Postgres connection string (`src/db.js:8-10`). So the PostgREST surface is only reachable by someone who already has the anon key, which this app never publishes. It remains a genuine ERROR-level finding, because an anon key is designed to be public in normal Supabase apps and leaks easily - but it is not currently exploitable from this app. Since the app never uses PostgREST, enabling RLS with a deny-all policy is the cheap correct fix; verify on one low-traffic table first.
 
 ## 5. Where things are
 
@@ -67,3 +74,34 @@ Row Level Security is disabled on all twelve tables in the Supabase project, inc
 - Stance levels: `prompts/stance.json`.
 - Coordination notes from other sessions: `tasks/coordination-cb.md`, `tasks/audit-2026-09-05.md`.
 - Push routing: this repo is owned by `slapharma`; run `gh auth switch --user slapharma` before pushing.
+
+---
+
+## 6. Corrections (added 2026-09-07)
+
+Written by a later session after auditing this document against the tree. The
+body above is left as it was written; these are the points where it no longer
+describes reality.
+
+**The regulatory persona is anonymous now, not Dr. Yoon Seo-jin.**
+`prompts/agents/regulatory/persona.md` reads: *"You are **the Regulator**... You
+give no personal name and are addressed simply as 'the Regulator'... Do not
+invent a name for yourself, and do not let anyone assign you one."* The name and
+the MFDS-specific career history were both removed as part of the
+country-agnostic rewrite recorded in section 2, decision 5 - the persona is a
+director-level official at whichever regulator `{{COUNTRY}}` implies, and states
+that agency's specifics only after confirming them by search in the turn.
+
+This matters because it is a testable claim that fails. A live run on 2026-09-07
+checked the regulatory output for "Yoon" and reported a failure; the output was
+correct and the expectation was stale. Clinical (Dr. Margaret Okafor-Lindqvist)
+and commercial (Henrik Waldenstrom) do still carry their fixed names, and both
+introduce themselves by name.
+
+**Section 4's RLS wording overstated the exposure.** Corrected in place above.
+
+**Commit trail for the items closed since this handover was written:**
+`89af3c2` Slides rendering, `7fc0f19` OpenRouter strings, `5d18178` Round 1
+self-introduction and no-preamble, `16aef58` legacy prompt files deleted.
+Current status of everything open across all sessions is in
+`tasks/plan-converged-2026-09-07.md`.

@@ -25,14 +25,21 @@
          it; hidden outside the session view, which the sidebar does not switch. -->
     <nav class="sidebar-panel" id="toolbar" aria-label="Simulation process" hidden>
       <div class="sidebar-panel-title">Simulation Process</div>
-      <div class="meeting-steps">
-        <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
-        <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
-        <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
-        <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
+      <!-- One box: the four numbered meetings, then the two ways to run a
+           meeting that isn't one of them. All six start a turn, so they belong
+           together and apart from Reports/Export, which only read the result. -->
+      <div class="sim-run">
+        <div class="meeting-steps">
+          <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
+          <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
+          <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
+          <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
+        </div>
+        <div class="sim-run-extra">
+          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
+          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
+        </div>
       </div>
-      <button class="btn btn-sm btn-block btn-start" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
-      <button class="btn btn-sm btn-block btn-start" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
       <div class="menu">
         <button class="btn btn-sm btn-block btn-start" type="button" id="btn-reports">Reports ▾</button>
         <div class="menu-items" id="reports-menu" hidden>

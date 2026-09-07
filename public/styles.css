@@ -35,21 +35,31 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .app.sidebar-collapsed .sidebar { display: none; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-.sidebar-head { position: relative; padding: 16px 14px 12px; border-bottom: 1px solid var(--border); }
+/* One gap value drives the whole head, so the brand, New session and
+   Intelligence are evenly spaced instead of the two buttons sitting flush
+   against each other. */
+.sidebar-head { position: relative; padding: 16px 14px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .sidebar-collapse-btn { position: absolute; top: 14px; right: 10px; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 11px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); }
 .sidebar-collapse-btn:hover { background: var(--surface-2); color: var(--text); }
 .sidebar-expand-btn { position: fixed; top: 12px; left: 12px; z-index: 45; border: 1px solid var(--border-strong); background: var(--surface); box-shadow: var(--shadow); border-radius: var(--radius); width: 28px; height: 28px; font-size: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-2); }
 .sidebar-expand-btn:hover { background: var(--surface-2); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--primary-hover); margin-bottom: 12px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--primary-hover); margin-bottom: 4px; }
 .brand-btn { border: none; background: none; padding: 0; cursor: pointer; text-align: left; width: 100%; font: inherit; }
 .brand-stack { flex-direction: column; align-items: flex-start; gap: 6px; }
 .brand-logo { width: 100%; max-width: 160px; height: auto; object-fit: contain; margin-bottom: 8px; }
 /* Simulation Process panel — every control that advances or reports on the
    simulation, stacked in the sidebar above the session list. Vertical because
    the sidebar is 268px: the old horizontal pill row does not fit. */
-.sidebar-panel { flex: none; padding: 12px 14px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
-.sidebar-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
-.sidebar-panel .meeting-steps { flex-direction: column; align-items: stretch; gap: 2px; border-radius: var(--radius); margin-bottom: 4px; }
+.sidebar-panel { flex: none; padding: 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.sidebar-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
+/* The run group is the one tinted box; .meeting-steps sits inside it plain, so
+   the four steps and the two custom-run buttons read as one set rather than a
+   box followed by two loose buttons. */
+.sim-run { background: var(--surface-2); border-radius: var(--radius); padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.sim-run-extra { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; margin-top: 2px; border-top: 1px solid var(--border); }
+.sim-run .btn-quiet { background: none; border-color: transparent; color: var(--text-2); min-height: 32px; }
+.sim-run .btn-quiet:hover { background: var(--surface); color: var(--text); }
+.sidebar-panel .meeting-steps { flex-direction: column; align-items: stretch; gap: 2px; padding: 0; background: none; border-radius: 0; }
 .sidebar-panel .meeting-btn { justify-content: flex-start; border-radius: 8px; min-height: 32px; }
 .sidebar-panel .menu { display: block; }
 /* Sidebar menus open below their full-width trigger, so they align left and
@@ -62,8 +72,8 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 /* Floor so the Simulation Process panel above cannot squeeze the session list
    to a couple of pixels on a short viewport; the sidebar itself scrolls once
    head + panel + this floor exceed the available height. */
-.session-list { flex: 1; min-height: 120px; overflow-y: auto; padding: 8px; }
-.session-item { display: block; width: 100%; text-align: left; padding: 10px 10px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; transition: background .15s, border-color .15s; }
+.session-list { flex: 1; min-height: 120px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.session-item { display: block; flex: none; width: 100%; text-align: left; padding: 10px 10px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; transition: background .15s, border-color .15s; }
 .session-item:hover { background: var(--surface-2); }
 .session-item.active { background: var(--primary-soft); border-color: #A5F3FC; }
 .session-item .t { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

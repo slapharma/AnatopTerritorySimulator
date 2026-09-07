@@ -826,7 +826,7 @@
       <tr><td>Agent turns</td><td>${s.messages.filter((m) => m.role !== 'user').length}</td></tr>
       <tr class="total"><td>Estimated cost</td><td>${money(total)}</td></tr>
     </table>
-    <p class="muted" style="margin-top:10px">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check the Anthropic console for billing.</p>`;
+    <p class="muted" style="margin-top:10px">Prices from <code>src/config.js</code>: $${p.input_per_mtok}/M in, $${p.output_per_mtok}/M out, $${p.web_search_per_1000}/1k searches. Estimate only; check your <a href="https://openrouter.ai/activity" target="_blank" rel="noopener">OpenRouter activity page</a> for actual billing.</p>`;
   }
 
   // Marks each Simulation Process step as "ran" once at least one message exists for its mode.
@@ -1379,7 +1379,7 @@
 
     $('#setup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!state.config.has_api_key) return toast('No API key set. Add ANTHROPIC_API_KEY to .env and restart the server.', 5000);
+      if (!state.config.has_api_key) return toast('No API key set. Add OPENROUTER_API_KEY to .env and restart the server.', 5000);
       const form = e.target;
       if (!form.reportValidity()) return; // native tooltip on the first missing required field
       const inputs = readForm(form);

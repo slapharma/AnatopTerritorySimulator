@@ -14,7 +14,13 @@ const { basicAuth, requireAdmin, hashPassword } = require('./auth');
 const app = express();
 app.use(basicAuth);
 app.use(express.json({ limit: '4mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// The front end lives in web/, NOT public/. Vercel serves a root-level public/
+// straight off its CDN, matching it before any rewrite reaches this function —
+// so while these files sat there, every page and asset was fetchable without
+// credentials even though basicAuth is mounted above express.static. Renaming
+// the directory is the fix: nothing is a static output any more, so /(.*) falls
+// through to the rewrite and every request is authenticated here.
+app.use(express.static(path.join(__dirname, '..', 'web')));
 app.use('/fonts', express.static(path.join(__dirname, '..', 'fonts')));
 
 // marked (Markdown renderer) is served from wherever npm put it.

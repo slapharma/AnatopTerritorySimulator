@@ -73,11 +73,18 @@
       <div class="scroll">
         <div class="dashboard">
           <!-- Filled by renderDashboard(): KPI strip, the two big start/resume
-               tiles, the grouped session cards, then the reference tiles. Each
+               tiles, the reference tiles, then the grouped session cards. Each
                block is its own container so re-rendering one (the search box
-               only rebuilds the session list) leaves the others alone. -->
+               only rebuilds the session list) leaves the others alone, and the
+               renderers address their container by id, so this order is set
+               here and nowhere else. -->
           <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
           <div id="dash-actions" class="action-grid"></div>
+
+          <section class="dash-section">
+            <div class="dash-section-head"><h2>Reference</h2></div>
+            <div id="dash-resources" class="resource-grid"></div>
+          </section>
 
           <section class="dash-section">
             <div class="dash-section-head">
@@ -85,11 +92,6 @@
               <input type="search" id="dash-search" class="dash-search" placeholder="Filter by product, country or title…" aria-label="Filter sessions">
             </div>
             <div id="dashboard-body" class="dashboard-body"></div>
-          </section>
-
-          <section class="dash-section">
-            <div class="dash-section-head"><h2>Reference</h2></div>
-            <div id="dash-resources" class="resource-grid"></div>
           </section>
         </div>
       </div>

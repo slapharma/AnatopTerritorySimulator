@@ -433,7 +433,6 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   /* Columns are stacked here, so the head can't say who's speaking: put the
      name back on the card. */
   .agent-col .msg-who { display: inline; }
-  .dashboard-grid { grid-template-columns: 1fr; }
 }
 
 /* ---------- autopilot ---------- */
@@ -502,7 +501,11 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .dashboard-country { margin-bottom: 22px; }
 .dashboard-country-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--text-2); }
 .dashboard-country-head h3 { font-size: 14px; margin: 0; font-weight: 700; color: var(--text); }
-.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 12px; }
+/* Three fixed columns, not auto-fill: the cards line up in a consistent grid
+   whether a country has two evaluations or nine. Every override below lives
+   after this rule — the .dashboard-grid rules that used to sit up in the
+   layout media blocks came before it and never applied. */
+.dashboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 /* The left rail is the status colour, so an at-a-glance scan of the grid shows
    which evaluations have landed on a recommendation without reading a word. */
 .dashboard-card { display: flex; flex-direction: column; gap: 9px; width: 100%; text-align: left; padding: 15px 16px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; transition: border-color .18s, box-shadow .18s; }
@@ -532,6 +535,11 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 
 .dashboard-empty { color: var(--muted); font-size: 13px; padding: 36px 0; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
 
+/* Two-up as soon as three would squeeze: 1100px with the sidebar still taking
+   268px, and on down through the 900px point where the sidebar disappears. */
+@media (max-width: 1100px) {
+  .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 640px) {
   .dashboard { padding: 16px 14px 60px; gap: 22px; }
   .dash-section-head { flex-wrap: wrap; }
@@ -544,6 +552,7 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .stat-icon .icon { width: 15px; height: 15px; }
   .stat-value { font-size: 19px; }
   .stat-label { font-size: 9.5px; letter-spacing: .05em; }
+  .dashboard-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .action-tile, .dashboard-card, .resource-card { transition: none; }

@@ -52,6 +52,45 @@ function toIsoDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
+// A 2xx response is not proof the page arrived. Two ways it lies:
+//
+//  * HTTP 203 means, by definition (RFC 9110), that a transforming proxy
+//    altered the payload — what you are reading is not what the origin sent.
+//    A filtering appliance on this network answers pubmed.ncbi.nlm.nih.gov
+//    with 203 and its own "Cookies must be enabled" page, served by IIS for a
+//    host that does not run IIS.
+//  * Consent walls, bot checks and cookie gates return 200 with a page that
+//    contains none of the article.
+//
+// Either way res.ok is true, so without this the interstitial is handed to the
+// agent as the source text and can be read, summarised and cited as evidence.
+const INTERSTITIAL_MARKERS = [
+  /cookies? (?:must be|need to be|are required)/i,
+  /enable (?:cookies|javascript)/i,
+  /javascript is (?:required|disabled)/i,
+  /(?:verify|confirm) (?:you are|you're) (?:a )?human/i,
+  /checking your browser/i,
+  /are you a robot/i,
+  /captcha/i,
+  /access (?:to this page )?(?:denied|restricted)/i,
+  /unusual traffic from your/i,
+  /request blocked/i,
+];
+// Long enough that a genuinely terse page (a one-paragraph gazette notice)
+// is not mistaken for a wall, short enough to catch a real interstitial.
+const INTERSTITIAL_MAX_CHARS = 1200;
+
+function detectInterstitial(status, text) {
+  if (status === 203) {
+    return 'HTTP 203: a proxy between this tool and the site rewrote the response, so the text below is NOT the page at this URL.';
+  }
+  if (text.length <= INTERSTITIAL_MAX_CHARS) {
+    const hit = INTERSTITIAL_MARKERS.find((re) => re.test(text));
+    if (hit) return 'This looks like a cookie, JavaScript or bot-check interstitial rather than the page itself.';
+  }
+  return null;
+}
+
 // Ordered best-first: an explicit publication date beats a modification date,
 // which beats the server's Last-Modified (often just the last deploy).
 function extractPublished(html, headers) {
@@ -191,8 +230,8 @@ async function openUrl(url) {
   const type = (res.headers.get('content-type') || '').toLowerCase();
   // Every open_url result carries `published`, including the failures — an
   // absent field reads as 'not applicable', null reads as 'unknown'.
-  if (!res.ok) return { url, status: res.status, title: '', published: null, published_source: null, text: `HTTP ${res.status} when fetching this page.` };
-  if (type.includes('application/pdf')) return { url, status: res.status, title: '', published: null, published_source: null, text: 'This URL is a PDF; the tool cannot read PDFs. Cite the URL only if the search snippet or another page confirms the claim.' };
+  if (!res.ok) return { url, status: res.status, title: '', blocked: true, published: null, published_source: null, text: `HTTP ${res.status} when fetching this page. You have NOT read it; do not cite it.` };
+  if (type.includes('application/pdf')) return { url, status: res.status, title: '', blocked: true, published: null, published_source: null, text: 'This URL is a PDF; the tool cannot read PDFs. Cite the URL only if the search snippet or another page confirms the claim.' };
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let html = '';
@@ -215,8 +254,22 @@ async function openUrl(url) {
   const max = config.SEARCH.page_chars;
   if (text.length > max) text = text.slice(0, max) + `\n…[truncated at ${max} characters of ${text.length}]`;
   else if (truncatedBody) text += '\n…[page body was larger than the fetch limit; truncated]';
+  const interstitial = detectInterstitial(res.status, text);
+  if (interstitial) {
+    return {
+      url: res.url || url,
+      status: res.status,
+      title: stripTags(title),
+      blocked: true,
+      published: null,
+      published_source: null,
+      text: `${interstitial} You have NOT read this page: do not quote it, summarise it, or tag any claim VERIFIED from it. The URL itself may still be sound — try another route to the same fact, or a different source. What was returned instead, for reference: ${text.slice(0, 300)}`,
+    };
+  }
+
   return {
     url: res.url || url, status: res.status, title: stripTags(title),
+    blocked: false,
     published: dated.published, published_source: dated.published_source,
     ...(dated.published ? {} : { published_note: 'No publication date found on this page. Treat its age as UNKNOWN; do not describe it as current unless the page itself says so.' }),
     text,
@@ -236,10 +289,10 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'open_url',
-      description: 'Open a web page and return its readable text (truncated), plus published: the page\'s own publication date where it declares one, and published_source saying which field that came from. Use it to confirm a claim before tagging it VERIFIED, to read primary sources such as regulator pages, gazettes, guidelines and journal abstracts, and to establish how old a source is when search gave no date.',
+      description: 'Open a web page and return its readable text (truncated), plus published: the page\'s own publication date where it declares one, and published_source saying which field that came from. Use it to confirm a claim before tagging it VERIFIED, to read primary sources such as regulator pages, gazettes, guidelines and journal abstracts, and to establish how old a source is when search gave no date. If the result has blocked: true the page did not actually arrive — a proxy, cookie wall or bot check answered instead — so nothing in it may be cited.',
       parameters: { type: 'object', properties: { url: { type: 'string', description: 'Absolute http(s) URL from a search result' } }, required: ['url'] },
     },
   },
 ];
 
-module.exports = { webSearch, openUrl, TOOLS, extractPublished, toIsoDate };
+module.exports = { webSearch, openUrl, TOOLS, extractPublished, toIsoDate, detectInterstitial };

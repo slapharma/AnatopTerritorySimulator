@@ -105,12 +105,22 @@ Curated for: the country-regulatory-launch simulator's Regulatory Agent and Clin
 
 Batch CoAs / Named Patient batch records, shipment invoices, vendor/supplier admin (Vendors, Pharmafile, PLG, Monthly Cases), meeting minutes, audits, marketing website/branding assets, `.Archive`/`.OneHub Backup` folders, `.Prospects` (BD sales pipeline), `.Templates` (business/legal only — no CTD or SmPC templates found), events/conference trackers.
 
-## Handle with care — commercially sensitive, do not embed verbatim into agent prompts
+## Handle with care — commercially sensitive
 
-- `SLA_PV_Vendor_Cost_Comparison.xlsx` — PV vendor pricing.
-- `ANATOP_Wave 2 Price Strategy.xlsx`, `Anatop Pricing Strategy: Wave 1 EU` — internal pricing.
-- `ANATOP_Licence Agreement_Partner PV Requirements` — may reference contractual/financial terms.
-- `rectiv sales data.xlsx`, `Anotrit-Rectogesic sales Evolution pt 2015-24.xlsx` — competitor sales figures.
-- `ANATOP_Competitive_Pricing_Matrix.xlsx`, `ANATOP - CPM Pricing_Volumes`, `ANATOP Sales Forecasting - MAIN.xlsx`, `Signed Partners: Deals`, `ANOTOP_Territory Forecasts / Royalties - CLEAN.xlsx` — partner deal economics, royalties.
-- `GCC - Partner & Milestone Payment Strategy`, Greece pricing/P&L sheets, DEVON_Spain and .PORTAL comparator-pricing sheets — country-level commercial terms.
-- `SLA PARTNERS_RUP_ CONTACT DETAILS.docx` — personal/business contact details.
+Commercial-in-confidence: pricing, forecasts, partner deal terms and contact details.
+Linked and imported like everything else, and the agents may quote from them — this is
+an internal tool, and these are the documents the Commercial agent is here to reason
+about. They import with the sensitive flag set, which marks them on the Admin page so a
+human knows what they are before sharing anything derived from them outside SLA.
+
+- [SLA_PV_Vendor_Cost_Comparison.xlsx](https://drive.google.com/file/d/1P_2MYrt8dJ0duNOd7Fr4tVB2Kij-VMs3/view?usp=drivesdk) — PV vendor pricing.
+- [ANATOP_Wave 2 Price Strategy.xlsx](https://drive.google.com/file/d/1RBApyVDFS9C6g8ldpkNV_5uIikARH6WK/view?usp=drivesdk), [Anatop Pricing Strategy: Wave 1 EU](https://docs.google.com/spreadsheets/d/15tuXDnmzjMiaY7tuUQu3ldphwosAwaWh99CciaTlkGI/edit) — internal pricing.
+- [ANATOP_Licence Agreement_Partner PV Requirements](https://drive.google.com/file/d/1D6BoTVWt0Q8jN3alcrRE7I-GZaaY7iyJ/view?usp=drivesdk) — may reference contractual/financial terms.
+- [rectiv sales data.xlsx](https://drive.google.com/file/d/1r47VmKsgZaSZ1hVm2bAJqVOUpItmo2cw/view?usp=drivesdk), [Anotrit-Rectogesic sales Evolution pt 2015-24.xlsx](https://drive.google.com/file/d/1QC6Q9frP7aIXwreFnF97Hyu26KP6BLQ5/view?usp=drivesdk) — competitor sales figures.
+- [ANATOP_Competitive_Pricing_Matrix.xlsx](https://drive.google.com/file/d/1c8aDxLgJINDcDm0PgoPHA7S1QatognUs/view?usp=drivesdk), [ANATOP - CPM Pricing_Volumes](https://docs.google.com/spreadsheets/d/1WXzcgynN9-bKRtYvX_35f9fOL-zgs4bYPkeajxYa388/edit), [ANATOP Sales Forecasting - MAIN.xlsx](https://drive.google.com/file/d/11XoUFoSpkxh1UX04uA0hJ7zM0PPc6mG4/view?usp=drivesdk), [Signed Partners: Deals](https://docs.google.com/spreadsheets/d/1cvM5NP2w35djkgSk5476MErng3FZOm_t1In_k0vJDJA/edit), [ANOTOP_Territory Forecasts / Royalties - CLEAN](https://drive.google.com/file/d/1Eiw9qgpmOUE0HktV3FViR_RAVkrUQmge/view?usp=drivesdk) — partner deal economics, royalties.
+- [GCC - Partner & Milestone Payment Strategy](https://docs.google.com/spreadsheets/d/1mpzJQiPz8_MRa52R1Wjr3oTpBJdWqh-hjg1QQ7l1VnA/edit) — country-level commercial terms. Greece pricing/P&L sheets, DEVON_Spain and .PORTAL comparator-pricing sheets are the same class of document and are not indexed here.
+- [SLA PARTNERS_RUP_ CONTACT DETAILS.docx](https://drive.google.com/file/d/1rM93kM3sRxfMSQ5_EMDfaFmAN4-TGvMj/view?usp=drivesdk) — personal/business contact details.
+
+Where a document exists in more than one Drive folder the link is to one copy only;
+`SLA_PV_Vendor_Cost_Comparison.xlsx` and `Anotrit-Rectogesic sales Evolution pt
+2015-24.xlsx` each have a second, byte-identical copy elsewhere on the drive.

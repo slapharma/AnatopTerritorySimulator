@@ -25,10 +25,16 @@ const db = require('../src/db');
 
 const SOURCE = path.join(__dirname, '..', 'agent knowledgebase', 'drive-document-index.md');
 const LINK = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
-// Sections that carry no importable rows: one is an explicit "not listed" note,
-// the other is a do-not-quote list of file names with no links at all.
+// "Skipped / low relevance" is an explicit not-listed note and carries no rows.
+// "Handle with care" holds the commercial-in-confidence documents: its rows import
+// like any other, with sensitive set, under a short category of their own rather
+// than the section's long prose heading. The flag is a label for the humans on the
+// Admin page — prompts.knowledgeBlock() does not restrict the agents on it. Any
+// name still written there without a link is collected too, so it can flag a
+// matching row imported from elsewhere.
 const SKIP_SECTION = /^Skipped \/ low relevance/i;
 const SENSITIVE_SECTION = /^Handle with care/i;
+const SENSITIVE_CATEGORY = 'Commercial — pricing, forecasts and partner terms';
 
 const NOTE_MAX = 240;
 
@@ -64,10 +70,7 @@ function parse(markdown) {
       continue;
     }
     if (!heading || inSkip) continue;
-    if (inSensitive) {
-      for (const m of line.matchAll(/`([^`]+)`/g)) sensitiveNames.push(m[1]);
-      continue;
-    }
+    if (inSensitive) for (const m of line.matchAll(/`([^`]+)`/g)) sensitiveNames.push(m[1]);
 
     const links = [...line.matchAll(LINK)];
     if (!links.length) continue;
@@ -78,7 +81,7 @@ function parse(markdown) {
     const boldPrefix = /^\s*(?:[-*]\s*)?\*\*(.+?)\*\*/.exec(line);
     const sub = boldPrefix ? boldPrefix[1].replace(/^\.+/, '').replace(/[:\s]+$/, '').trim() : null;
     const base = sub ? heading.replace(/\s*\([^)]*\)\s*$/, '').trim() : heading;
-    const category = sub ? `${base} — ${sub}` : base;
+    const category = inSensitive ? SENSITIVE_CATEGORY : (sub ? `${base} — ${sub}` : base);
 
     const leadIn = cleanNote(line.slice(boldPrefix ? boldPrefix[0].length : 0, links[0].index));
     const trailing = cleanNote(line.slice(links[links.length - 1].index + links[links.length - 1][0].length));
@@ -91,7 +94,7 @@ function parse(markdown) {
         title: m[1].trim(),
         url: m[2].trim(),
         note: own || trailing || leadIn || '',
-        sensitive: false,
+        sensitive: inSensitive,
       });
     });
   }
@@ -103,21 +106,24 @@ function parse(markdown) {
   for (const r of rows) {
     const existing = byUrl.get(r.url);
     if (!existing) { byUrl.set(r.url, r); continue; }
+    // Sensitivity is the union, never the first occurrence: a document listed
+    // in a normal section and again under "handle with care" is sensitive.
+    existing.sensitive = existing.sensitive || r.sensitive;
     if (existing.category !== r.category && !existing.alsoIn) existing.alsoIn = [];
     if (existing.category !== r.category && !existing.alsoIn.includes(r.category)) existing.alsoIn.push(r.category);
   }
   const deduped = [...byUrl.values()].map((r) => {
     const also = r.alsoIn && r.alsoIn.length ? `also filed under: ${r.alsoIn.join('; ')}` : '';
     const note = [r.note, also].filter(Boolean).join(' · ').slice(0, NOTE_MAX);
-    return { category: r.category, title: r.title, url: r.url, note, sensitive: false };
+    return { category: r.category, title: r.title, url: r.url, note, sensitive: r.sensitive };
   });
 
-  // The "handle with care" list names files by name, not link. Flag any imported
-  // row whose title is one of them, so knowledgeBlock() marks it SENSITIVE.
+  // Second path to the flag, for a name still written in that section without a
+  // link: match it by title against rows imported from the other sections.
   const normNames = sensitiveNames.map(norm).filter((n) => n.length >= 12);
   for (const r of deduped) {
     const t = norm(r.title);
-    r.sensitive = normNames.some((n) => t.includes(n) || n.includes(t));
+    if (normNames.some((n) => t.includes(n) || n.includes(t))) r.sensitive = true;
   }
 
   return { rows: deduped, sensitiveNames, skippedLinkless: sensitiveNames.length };
@@ -165,8 +171,10 @@ async function main() {
   if (orphans.length) for (const o of orphans) console.log(`            keep  [${o.category}] ${o.title}`);
   if (duplicates.length) for (const d of duplicates) console.log(`            drop  #${d.id} [${d.category}] ${d.title}`);
 
-  console.log(`\nNot importable: ${sensitiveNames.length} commercially sensitive files listed by name only,`);
-  console.log('  with no Drive link in the markdown, and url is required on a knowledge item.');
+  const linkedTitles = new Set(rows.map((r) => norm(r.title)));
+  const unlinked = sensitiveNames.filter((n) => ![...linkedTitles].some((t) => t.includes(norm(n)) || norm(n).includes(t)));
+  console.log(`\nSensitive files still named without a Drive link: ${unlinked.length}`);
+  for (const n of unlinked) console.log(`            ${n}`);
 
   if (!apply) {
     console.log('\nDry run. Re-run with --apply to write.');

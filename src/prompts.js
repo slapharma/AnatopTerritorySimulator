@@ -70,7 +70,9 @@ const INDICATION_SUGGESTIONS = [
 // Every field in Section 0 of the spec, in order. `key` is what the form posts.
 // REGULATOR and REIMBURSEMENT_BODIES are deliberately not asked here: they are
 // determined by COUNTRY, and the agents identify them themselves as their first
-// research step (see prompts/regulatory.md, prompts/commercial.md).
+// research step (see prompts/agents/regulatory/questions.md and
+// prompts/agents/commercial/questions.md — the live files; the legacy
+// prompts/{regulatory,clinical,commercial}.md are no longer read by anything).
 const INPUT_FIELDS = [
   { key: 'product',              label: 'PRODUCT', required: true },
   { key: 'indication',           label: 'INDICATION', suggestions: INDICATION_SUGGESTIONS },
@@ -199,13 +201,14 @@ async function knowledgeBlock() {
     if (!byCategory.has(it.category)) byCategory.set(it.category, []);
     byCategory.get(it.category).push(it);
   }
+  // No do-not-quote gate: this is an internal tool and the commercial documents
+  // (pricing, forecasts, partner terms) are exactly what the Commercial agent is
+  // here to reason about. The knowledge_items.sensitive column still marks them
+  // for the humans on the Admin page; it does not restrict the agents.
   const lines = [];
   for (const [category, rows] of byCategory) {
     lines.push(`### ${category}`);
-    for (const r of rows) {
-      const flag = r.sensitive ? ' [SENSITIVE — commercial terms; do not quote figures]' : '';
-      lines.push(`- ${r.title}${r.note ? ` — ${r.note}` : ''}${flag}`);
-    }
+    for (const r of rows) lines.push(`- ${r.title}${r.note ? ` — ${r.note}` : ''}`);
   }
   return [
     '## INTERNAL KNOWLEDGEBASE (curated company Drive index — titles/notes only)',

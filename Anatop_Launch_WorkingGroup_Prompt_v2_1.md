@@ -13,14 +13,10 @@ INDICATION:            Chronic anal fissure (adults)
 COUNTRY:               South Korea
 REGULATOR:             MFDS (Ministry of Food and Drug Safety)
 REIMBURSEMENT BODIES:  HIRA (Health Insurance Review & Assessment Service), NHIS (National Health Insurance Service), MOHW
-REFERENCE APPROVALS:   [list each country, approval date, pathway used, and whether a Certificate of Pharmaceutical Product (CPP) is available]
-DOSSIER ON HAND:       [CTD modules available; pivotal trials — n, population, comparator, primary endpoint, result; stability data and shelf life; QP release site]
-MANUFACTURING:         [site name, country, GMP certificates held (EU GMP / PIC/S), date of last inspection]
-COMMERCIAL TARGETS:    [target ex-factory or net price range; year-3 and year-5 volume ambition; minimum acceptable margin; preferred deal structure (licence / distribution / direct)]
+REFERENCE APPROVALS:   [one line per country, each marked Approved / Submitted / In Process]
 PARTNER STATUS:        [e.g. Kwangdong Pharmaceutical — assessed, status; any others in dialogue]
-EXCLUSIONS:            [companies that must not be proposed as partners — e.g. any company marketing a competing diltiazem or nifedipine fissure product]
-BUDGET CEILING:        [max spend to first revenue]
-DECISION DEADLINE:     [date]
+EXCLUSIONS:            [brands or companies that must not be proposed as partners — e.g. any company marketing a competing diltiazem or nifedipine fissure product]
+TARGET LAUNCH:         [how far out the launch is aimed]
 COMPETITOR FILE:       [attach or paste the existing competitor landscape if available]
 ```
 

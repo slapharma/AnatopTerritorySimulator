@@ -41,22 +41,21 @@ const COUNTRY_OPTIONS = [
   'Zimbabwe',
 ];
 
-const BUDGET_OPTIONS = ['Under $1M', '$1M–$5M', '$5M–$10M', '$10M–$25M', '$25M–$50M', 'Over $50M', 'Not yet defined'];
-
-const DEADLINE_OPTIONS = ['Within 3 months', '3–6 months', '6–12 months', '12–18 months', '18–24 months', 'No fixed deadline'];
+const TARGET_LAUNCH_OPTIONS = [
+  'Within 6 months', '6–12 months', '12–18 months', '18–24 months', '2–3 years', 'More than 3 years',
+  'Not yet set',
+];
 
 const PARTNER_STATUS_OPTIONS = [
   'No partner yet — going direct', 'Identifying candidate partners', 'In discussions with a partner',
   'Partner selected, agreement pending', 'Partner agreement signed',
 ];
 
-// Common global launch partners/competitors to exclude with one click, per the
-// EXCLUSIONS field below. Free text still covers anything not on this list.
-const COMPANY_OPTIONS = [
-  'Pfizer', 'Novartis', 'Roche', 'Merck & Co', 'AbbVie', 'Johnson & Johnson', 'Sanofi', 'GSK', 'AstraZeneca',
-  'Bristol Myers Squibb', 'Eli Lilly', 'Bayer', 'Takeda', 'Amgen', 'Gilead Sciences', 'Boehringer Ingelheim',
-  'Novo Nordisk', 'Teva', 'Viatris', 'Sun Pharma',
-];
+// Reference approvals are captured one country per row, so an agent can read a
+// per-country status instead of parsing a paragraph. The statuses are ticks,
+// not a single choice: a country can hold an approval and have a variation in
+// process at the same time.
+const APPROVAL_STATUSES = ['Approved', 'Submitted', 'In Process'];
 
 // Autocomplete suggestions only (not a closed list) — INDICATION stays free text
 // since the real value space is far too large to enumerate.
@@ -77,20 +76,14 @@ const INPUT_FIELDS = [
   { key: 'product',              label: 'PRODUCT', required: true },
   { key: 'indication',           label: 'INDICATION', suggestions: INDICATION_SUGGESTIONS },
   { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS, required: true },
-  { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', multiline: true,
-    hint: 'Each country, approval date, pathway used, and whether a CPP is available' },
-  { key: 'dossier',              label: 'DOSSIER ON HAND', multiline: true,
-    hint: 'CTD modules available; pivotal trials: n, population, comparator, primary endpoint, result; stability data and shelf life; QP release site' },
-  { key: 'manufacturing',        label: 'MANUFACTURING', multiline: true,
-    hint: 'Site name, country, GMP certificates held (EU GMP / PIC/S), date of last inspection' },
-  { key: 'commercial_targets',   label: 'COMMERCIAL TARGETS', multiline: true,
-    hint: 'Target ex-factory or net price range; year-3 and year-5 volume ambition; minimum acceptable margin; preferred deal structure' },
+  { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', type: 'country-status',
+    options: COUNTRY_OPTIONS, statuses: APPROVAL_STATUSES,
+    hint: 'One row per country already holding or seeking an approval; tick every status that applies' },
   { key: 'partner_status',       label: 'PARTNER STATUS', type: 'select-other', options: PARTNER_STATUS_OPTIONS,
     hint: 'Choose Other to name a specific partner or add detail' },
-  { key: 'exclusions',           label: 'EXCLUSIONS', type: 'multiselect', options: COMPANY_OPTIONS,
-    hint: 'Companies that must not be proposed as partners — tick any that apply, add others below' },
-  { key: 'budget_ceiling',       label: 'BUDGET CEILING', options: BUDGET_OPTIONS },
-  { key: 'decision_deadline',    label: 'DECISION DEADLINE', options: DEADLINE_OPTIONS },
+  { key: 'exclusions',           label: 'EXCLUSIONS',
+    hint: 'Brands or companies that must not be proposed as partners, comma-separated' },
+  { key: 'target_launch',        label: 'TARGET LAUNCH', options: TARGET_LAUNCH_OPTIONS },
   { key: 'competitor_file',      label: 'COMPETITOR FILE', multiline: true,
     hint: 'Paste the existing competitor landscape if available' },
 ];

@@ -4,7 +4,8 @@
   "description": "Simulated cross-functional launch working group (Regulatory / Clinical / Commercial agents) for pharma country launch decisions",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "import-knowledgebase": "node scripts/import-knowledgebase.js"
   },
   "license": "UNLICENSED",
   "private": true,

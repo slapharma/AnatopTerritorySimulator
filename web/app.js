@@ -4,8 +4,7 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, navPanel: null, intelCut: 'agent',
-    groupBy: localStorage.getItem('lwg.groupBy') === 'time' ? 'time' : 'meeting' };
+  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, navPanel: null, intelCut: 'agent' };
 
   // ---------------- API ----------------
   const api = {
@@ -334,21 +333,52 @@
   // ---------------- setup view ----------------
   const OTHER_SENTINEL = '__other__';
 
+  // ---- country-status field (REFERENCE APPROVALS) ----
+  // Stored as one line per country, "Country: Status, Status", so the value
+  // stays a plain string like every other input and reads sensibly in the
+  // INPUTS block the agents receive.
+  function csRow(f, value) {
+    const row = document.createElement('div');
+    row.className = 'cs-row';
+    row.innerHTML = `<select class="cs-country"><option value="">— Country —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>
+      <div class="cs-checks">${f.statuses.map((st) => `<label class="check-item"><input type="checkbox" value="${escapeHtml(st)}"> ${escapeHtml(st)}</label>`).join('')}</div>
+      <button type="button" class="cs-remove" title="Remove this country" aria-label="Remove this country">×</button>`;
+    if (value) {
+      $('.cs-country', row).value = value.country;
+      $$('input[type=checkbox]', row).forEach((b) => { b.checked = value.statuses.includes(b.value); });
+    }
+    return row;
+  }
+  // An empty field still shows one blank row, so the control never looks broken.
+  function csEnsureRow(div, f) {
+    const rows = $('.cs-rows', div);
+    if (!$('.cs-row', rows)) rows.appendChild(csRow(f));
+  }
+  function csParse(val, f) {
+    return (val || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+      const i = line.indexOf(':');
+      const country = (i === -1 ? line : line.slice(0, i)).trim();
+      const statuses = i === -1 ? []
+        : line.slice(i + 1).split(',').map((x) => x.trim()).filter((x) => f.statuses.includes(x));
+      return { country, statuses };
+    }).filter((r) => f.options.includes(r.country));
+  }
+
   function buildForm(root, { saveDefault = false } = {}) {
     const wrap = $('.fields', root);
     wrap.innerHTML = '';
     for (const f of state.config.input_fields) {
       const div = document.createElement('div');
-      div.className = 'field' + (f.multiline || f.type === 'multiselect' ? ' wide' : '');
+      div.className = 'field' + (f.multiline || f.type === 'country-status' ? ' wide' : '');
       div.dataset.key = f.key;
       const id = `f-${f.key}`;
       let control;
       if (f.type === 'select-other') {
         control = `<select id="${id}" name="${f.key}"><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}<option value="${OTHER_SENTINEL}">Other…</option></select>
           <input type="text" class="other-input" placeholder="Specify…" hidden>`;
-      } else if (f.type === 'multiselect') {
-        control = `<div class="check-grid">${f.options.map((o) => `<label class="check-item"><input type="checkbox" value="${escapeHtml(o)}"> ${escapeHtml(o)}</label>`).join('')}</div>
-          <input type="text" class="other-input" placeholder="Other companies (comma-separated)…">`;
+      } else if (f.type === 'country-status') {
+        control = `<div class="cs-rows"></div>
+          <button type="button" class="btn btn-sm cs-add">+ Add country</button>`;
       } else if (f.options) {
         control = `<select id="${id}" name="${f.key}"${f.required ? ' required' : ''}><option value="">— Select —</option>${f.options.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
       } else if (f.multiline) {
@@ -360,6 +390,26 @@
       }
       div.innerHTML = `<div class="field-label-row"><label for="${id}">${escapeHtml(f.label)}${f.required ? ' <span class="required-star" title="Required">*</span>' : ''}</label>${saveDefault ? `<button type="button" class="save-default" data-key="${f.key}" title="Save this value as the new default">Save as default</button>` : ''}</div>${control}${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}`;
       wrap.appendChild(div);
+      if (f.type === 'country-status') csEnsureRow(div, f);
+    }
+    // Delegated once per wrap: buildForm re-runs on the same element, and a
+    // second listener would add two rows on every click.
+    if (!wrap.dataset.csWired) {
+      wrap.dataset.csWired = '1';
+      wrap.addEventListener('click', (e) => {
+        const div = e.target.closest('.field');
+        if (!div) return;
+        const f = state.config.input_fields.find((x) => x.key === div.dataset.key);
+        if (!f || f.type !== 'country-status') return;
+        if (e.target.closest('.cs-add')) {
+          const row = csRow(f);
+          $('.cs-rows', div).appendChild(row);
+          $('.cs-country', row).focus();
+        } else if (e.target.closest('.cs-remove')) {
+          e.target.closest('.cs-row').remove();
+          csEnsureRow(div, f);
+        }
+      });
     }
     if (saveDefault) {
       wrap.addEventListener('click', async (e) => {
@@ -394,16 +444,11 @@
         const sel = $('select', div); const other = $('.other-input', div);
         if (f.options.includes(val)) { sel.value = val; other.hidden = true; other.value = ''; }
         else { sel.value = val ? OTHER_SENTINEL : ''; other.hidden = !val; other.value = val; }
-      } else if (f.type === 'multiselect') {
-        const boxes = $$('input[type=checkbox]', div); const other = $('.other-input', div);
-        const parts = val ? val.split(', ') : [];
-        const leftover = [];
-        for (const p of parts) {
-          const box = boxes.find((b) => b.value === p);
-          if (box) box.checked = true; else if (p) leftover.push(p);
-        }
-        if (!val) boxes.forEach((b) => { b.checked = false; });
-        other.value = leftover.join(', ');
+      } else if (f.type === 'country-status') {
+        const rows = $('.cs-rows', div);
+        rows.innerHTML = '';
+        for (const r of csParse(val, f)) rows.appendChild(csRow(f, r));
+        csEnsureRow(div, f);
       } else {
         const el = $(`[name="${f.key}"]`, div);
         if (el) el.value = val;
@@ -417,10 +462,15 @@
       const sel = $('select', div); const other = $('.other-input', div);
       return (sel.value === OTHER_SENTINEL ? other.value : sel.value).trim();
     }
-    if (f.type === 'multiselect') {
-      const checked = $$('input[type=checkbox]:checked', div).map((b) => b.value);
-      const other = $('.other-input', div).value.trim();
-      return checked.concat(other ? [other] : []).join(', ');
+    if (f.type === 'country-status') {
+      return $$('.cs-row', div).map((row) => {
+        const country = $('.cs-country', row).value.trim();
+        if (!country) return '';
+        const statuses = $$('input[type=checkbox]:checked', row).map((b) => b.value);
+        // A row naming a country with nothing ticked is a deliberate "not
+        // known", not a blank — say so in the agents' own vocabulary.
+        return `${country}: ${statuses.length ? statuses.join(', ') : 'INPUT MISSING'}`;
+      }).filter(Boolean).join('\n');
     }
     return ($(`[name="${f.key}"]`, div).value || '').trim();
   }
@@ -658,8 +708,6 @@
     return frag;
   }
 
-  const isColumnMessage = (m) => m.role !== 'user' && ALL.includes(m.speaker);
-
   // The heads live inside the transcript as a sticky row, not above it: that
   // way they share the scroll container's box and padding, so they stay aligned
   // with the columns whether or not a scrollbar is taking width.
@@ -677,11 +725,9 @@
     const s = state.session;
     const t = $('#transcript');
     t.innerHTML = '';
-    $$('#agent-columns .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.group === state.groupBy));
-    $('#agent-columns').hidden = !s.messages.length;
     if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Baselines to start.</div>'; return; }
     t.appendChild(columnHeadsRow());
-    if (state.groupBy === 'time') renderByTime(t, s.messages); else renderByMeeting(t, s.messages);
+    renderByMeeting(t, s.messages);
     applyFilter();
   }
 
@@ -722,36 +768,6 @@
     }
   }
 
-  // By time: no meeting grouping at all — each column is that agent's own feed
-  // in the order they spoke. Moderator and user messages interrupt full-width
-  // at the point they happened, which is what keeps the three feeds in step.
-  function renderByTime(t, msgs) {
-    let i = 0;
-    while (i < msgs.length) {
-      if (isColumnMessage(msgs[i])) {
-        const group = [];
-        while (i < msgs.length && isColumnMessage(msgs[i])) { group.push(msgs[i]); i++; }
-        t.appendChild(agentGridBlock(group));
-      } else {
-        t.appendChild(messageElement(msgs[i]));
-        i++;
-      }
-    }
-  }
-
-  // Expand all / Collapse all act on every long response currently rendered.
-  // Short responses have no collapse control and are left alone.
-  function setAllExpanded(expanded) {
-    const btns = $$('#transcript .msg-expand');
-    if (!btns.length) { toast('No response here is long enough to be shortened.'); return; }
-    btns.forEach((btn) => {
-      const body = $('.msg-body', btn.parentElement);
-      if (!body) return;
-      body.classList.toggle('collapsed', !expanded);
-      btn.textContent = expanded ? 'Collapse' : 'Show full message';
-    });
-  }
-
   function applyFilter() {
     const active = state.filterSpeaker || 'all';
     $$('#filter-chips .chip').forEach((c) => c.classList.toggle('active', c.dataset.speaker === active));
@@ -759,7 +775,6 @@
     // full width, instead of leaving two empty thirds on screen.
     const single = ALL.includes(active) ? active : null;
     $('#transcript').classList.toggle('single-agent', Boolean(single));
-    $('#agent-columns').classList.toggle('single-agent', Boolean(single));
     $$('#transcript .agent-columns-heads').forEach((r) => r.classList.toggle('single-agent', Boolean(single)));
     $$('#transcript .agent-col').forEach((c) => { c.hidden = Boolean(single) && c.dataset.speaker !== single; });
     $$('#agent-columns-heads .agent-head').forEach((h) => { h.hidden = Boolean(single) && h.dataset.speaker !== single; });
@@ -1776,16 +1791,6 @@
     });
 
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
-
-    // Column-header controls: how the transcript is ordered, and bulk expand.
-    $$('#agent-columns .seg-btn').forEach((b) => b.addEventListener('click', () => {
-      if (state.groupBy === b.dataset.group) return;
-      state.groupBy = b.dataset.group;
-      localStorage.setItem('lwg.groupBy', state.groupBy);
-      renderTranscript();
-    }));
-    $('#btn-expand-all').addEventListener('click', () => setAllExpanded(true));
-    $('#btn-collapse-all').addEventListener('click', () => setAllExpanded(false));
 
     $('#btn-custom').addEventListener('click', () => { $('#dlg-custom').showModal(); $('#custom-instruction').focus(); });
     $('#dlg-custom form').addEventListener('submit', (e) => {

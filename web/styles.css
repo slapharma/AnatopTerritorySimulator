@@ -142,8 +142,8 @@ body.non-admin .msg-cost { display: none; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field.wide { grid-column: 1 / -1; }
 /* :not(.check-item) — otherwise this (higher-specificity: .field label vs
-   .check-item) overrides the exclusions checkbox grid's own label styling
-   below, bolding and greying every checkbox row instead of a clean list. */
+   .check-item) overrides the per-country approval rows' own label styling
+   below, bolding and greying every checkbox instead of a clean list. */
 .field label:not(.check-item) { font-weight: 600; font-size: 12px; letter-spacing: .02em; color: var(--text-2); }
 .required-star { color: var(--danger); }
 .field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -152,9 +152,20 @@ body.non-admin .msg-cost { display: none; }
 .save-default:hover { color: var(--primary-hover); background: var(--surface-2); }
 .field .hint { font-size: 11.5px; color: var(--muted); }
 .field .other-input { margin-top: 4px; }
-.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px 12px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 .check-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 400; }
-.check-item input { margin: 0; }
+/* Beats `.field input` below on specificity, not source order: that rule
+   sets width:100% and a text-input's padding, which stretches a checkbox
+   across the row. */
+.field .check-item input { width: auto; margin: 0; padding: 0; }
+
+/* Reference approvals: one row per country, status ticks alongside. */
+.cs-rows { display: flex; flex-direction: column; gap: 6px; }
+.cs-row { display: grid; grid-template-columns: minmax(150px, 260px) 1fr auto; align-items: center; gap: 12px; }
+.cs-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.cs-remove { border: none; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 4px 8px; border-radius: var(--radius); cursor: pointer; }
+.cs-remove:hover { color: var(--danger); background: var(--danger-soft); }
+.cs-add { align-self: flex-start; margin-top: 6px; }
+
 .field input, .field textarea, .field select, .composer textarea, .composer select, dialog textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); transition: border-color .15s, box-shadow .15s; }
 .field input:focus, .field textarea:focus, .field select:focus, .composer textarea:focus, dialog textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(8, 145, 178, .15); }
 .field textarea { min-height: 76px; resize: vertical; }
@@ -208,14 +219,6 @@ body.non-admin .msg-cost { display: none; }
    content box the same width whether or not a scrollbar is showing, which is
    what stops the heads drifting out of alignment mid-session. */
 .transcript { scrollbar-gutter: stable; }
-.agent-columns { padding: 10px 20px 0; background: var(--bg); }
-.agent-columns-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.agent-columns-tools .spacer { flex: 1; }
-.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
-.seg-btn { border: none; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 12px; cursor: pointer; }
-.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
-.seg-btn:hover { background: var(--surface-2); }
-.seg-btn.active { background: var(--primary); color: #fff; }
 .agent-columns-heads {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
   position: sticky; top: -18px; z-index: 5;
@@ -230,13 +233,14 @@ body.non-admin .msg-cost { display: none; }
    in its agent's colour, set in uppercase with a leading dot and a heavy top
    rule, so the eye lands on them before the responses underneath. */
 .agent-head {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
-  padding: 9px 13px; border-radius: var(--radius);
+  display: flex; align-items: center; gap: 12px;
+  min-height: 65px;
+  font-size: 15px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  padding: 16px 18px; border-radius: var(--radius);
   background: var(--moderator-soft); color: var(--moderator);
-  border: 1px solid var(--border); border-top: 4px solid var(--moderator);
+  border: 1px solid var(--border); border-top: 7px solid var(--moderator);
 }
-.agent-head::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+.agent-head::before { content: ''; flex: none; width: 12px; height: 12px; border-radius: 999px; background: currentColor; }
 .agent-head-regulatory { background: var(--regulatory-soft); border-color: #BFDBFE; border-top-color: var(--regulatory); color: var(--regulatory); }
 .agent-head-clinical { background: var(--clinical-soft); border-color: #99F6E4; border-top-color: var(--clinical); color: var(--clinical); }
 .agent-head-commercial { background: var(--commercial-soft); border-color: #DDD6FE; border-top-color: var(--commercial); color: var(--commercial); }

@@ -95,7 +95,15 @@
   const AUTOPILOT_OUTCOME_LABEL = {
     stopped_by_moderator: 'Stopped by the moderator', failed: 'A turn failed', unanimous: 'All agents reached AGREE',
     cost_cap: 'Cost cap reached', cycle_cap: 'Cycle limit reached', safety_cap: 'Safety cycle cap reached',
+    resolved: 'The asker marked the question resolved',
   };
+  const QUESTION_STATUS_LABEL = { open: 'Open', answered: 'Answered', resolved: 'Resolved', escalated: 'Escalated to moderator' };
+  // The asker's verdict line in a question discussion (see rounds.json).
+  // The last one counts: an asker may quote an earlier loop's verdict in the body.
+  function parseQuestionStatus(text) {
+    const all = [...String(text || '').matchAll(/QUESTION STATUS:\s*\**\s*(RESOLVED|OPEN)\b/gi)];
+    return all.length ? all[all.length - 1][1].toUpperCase() : null;
+  }
   function parsePosition(text) {
     const m = /POSITION:\s*(AGREE|DISAGREE)\b/i.exec(text || '');
     return m ? m[1].toUpperCase() : null;
@@ -660,7 +668,7 @@
     fillForm($('#session-inputs-form'), s.inputs, { clear: true });
     // transcript
     renderTranscript();
-    renderSources(); renderDisagreements(); renderDecisionTab(); renderFavourites(); renderReports(); renderCost(); renderMinutes(); renderIntelligence();
+    renderSources(); renderDisagreements(); renderQuestions(); renderDecisionTab(); renderFavourites(); renderReports(); renderCost(); renderMinutes(); renderIntelligence();
     renderMeetingNav();
     setRunning(state.running);
     const t = $('#transcript');
@@ -831,11 +839,23 @@
     const responseTime = m.duration_ms != null ? `⏱ ${fmtElapsed(m.duration_ms)}` : fmtTime(m.created_at);
     el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker] || speaker)}${escapeHtml(to)}</span>${m.mode && m.role !== 'user' ? `<span class="msg-mode">${escapeHtml(MODE_LABEL[m.mode] || m.mode)}</span>` : ''}<span class="msg-meta" title="${escapeHtml(fmtTime(m.created_at))}">#${m.seq} · ${responseTime}</span><span class="spacer"></span><span class="msg-meta msg-cost">${m.cost_usd ? money(m.cost_usd) : ''}</span>${isSystem ? '' : `<button type="button" class="fav-btn${m.favourite ? ' on' : ''}" title="${m.favourite ? 'Remove from favourites' : 'Favourite this response'}" aria-pressed="${m.favourite ? 'true' : 'false'}">${m.favourite ? '★' : '☆'}</button>`}</div>`;
     if (m.mode === 'autopilot' && !m.error) {
-      const pos = parsePosition(m.text);
-      const badge = document.createElement('span');
-      badge.className = `badge-position ${pos === 'AGREE' ? 'agree' : pos === 'DISAGREE' ? 'disagree' : 'missing'}`;
-      badge.textContent = pos || 'no position line';
-      $('.msg-head', el).appendChild(badge);
+      const meta = autopilotMeta(m) || {};
+      if (meta.question_id != null) {
+        // A question discussion: only the asker writes a verdict line.
+        const qs = parseQuestionStatus(m.text);
+        if (qs) {
+          const badge = document.createElement('span');
+          badge.className = `badge-position ${qs === 'RESOLVED' ? 'agree' : 'disagree'}`;
+          badge.textContent = qs === 'RESOLVED' ? 'QUESTION RESOLVED' : 'QUESTION OPEN';
+          $('.msg-head', el).appendChild(badge);
+        }
+      } else {
+        const pos = parsePosition(m.text);
+        const badge = document.createElement('span');
+        badge.className = `badge-position ${pos === 'AGREE' ? 'agree' : pos === 'DISAGREE' ? 'disagree' : 'missing'}`;
+        badge.textContent = pos || 'no position line';
+        $('.msg-head', el).appendChild(badge);
+      }
     }
     if (!isSystem) {
       const favBtn = $('.fav-btn', el);
@@ -1295,6 +1315,219 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   function writeMinutesIfComplete(mode, fullRun) {
     if (!GRID_MODES.includes(mode) || turnsForRound(mode, ALL).length) return;
     if (fullRun || !(state.session.meeting_minutes || []).some((x) => x.round === mode)) generateMeetingMinutes(mode);
+    // A completed meeting is also when questions asked earlier are most likely
+    // to have been answered, so check the open ones at the same point.
+    checkAnsweredQuestions({ quiet: true });
+  }
+
+  // ---------------- agent questions ----------------
+  // The Moderator Assistant reads the transcript and marks open questions that a
+  // later message answered. quiet: no toast unless something changed.
+  async function checkAnsweredQuestions({ quiet = false } = {}) {
+    const s = state.session;
+    if (!s || !(s.questions || []).some((x) => x.status === 'open')) {
+      if (!quiet) toast('There are no open questions to check.');
+      return;
+    }
+    const id = s.id;
+    if (!quiet) toast('Checking the transcript for answers…');
+    try {
+      const r = await api.send('POST', `/api/sessions/${id}/questions/check`, {});
+      if (!state.session || String(state.session.id) !== String(id)) return;
+      state.session.questions = r.questions;
+      renderQuestions();
+      if (r.updated) toast(`${r.updated} question(s) found answered in the transcript`);
+      else if (!quiet) toast('None of the open questions has been answered yet.');
+    } catch (e) {
+      if (!quiet) toast(`Could not check questions: ${e.message}`);
+    }
+  }
+
+  const findMessage = (id) => (id == null ? null : state.session.messages.find((x) => String(x.id) === String(id)));
+  function questionPartyChip(key) {
+    return key === 'moderator' ? '<span class="agent-chip">Moderator</span>' : agentChipHtml(key);
+  }
+  // Panel agents a question was put to, other than the asker: the people a
+  // discussion to resolution can be held between.
+  const questionAgentAddressees = (qRow) => qRow.addressees.split(',').filter((k) => ALL.includes(k) && k !== qRow.asker);
+
+  function renderQuestions() {
+    const s = state.session;
+    const list = s.questions || [];
+    const box = $('#tab-questions');
+    // The list is rebuilt after every turn, and Answer… can be open during a
+    // meeting: keep any answer being typed, and keep its box open.
+    state.questionDrafts = state.questionDrafts || {};
+    $$('.qn', box).forEach((card) => {
+      const panel = $('.qn-answer', card);
+      if (panel && !panel.hidden) state.questionDrafts[card.dataset.qid] = $('textarea', panel).value;
+      else if (panel) delete state.questionDrafts[card.dataset.qid];
+    });
+    const openN = list.filter((x) => x.status === 'open' || x.status === 'escalated').length;
+    $('#count-questions').textContent = list.length ? `${openN}/${list.length}` : '0';
+    if (!list.length) {
+      const hasAgentTurns = s.messages.some((m) => m.role === 'agent' && m.text);
+      box.innerHTML = `<div class="empty">No questions logged yet. When an agent ends a response with "Questions for …", each question appears here with who asked whom, and you can answer it or have the agents discuss it to resolution.</div>
+        ${hasAgentTurns ? '<div class="qn-footer"><button type="button" class="btn btn-sm" id="btn-questions-scan">Find questions in this evaluation</button></div>' : ''}`;
+      $('#btn-questions-scan', box)?.addEventListener('click', scanQuestions);
+      return;
+    }
+    const filter = state.questionFilter || 'open';
+    const counts = {
+      open: list.filter((x) => x.status === 'open').length,
+      escalated: list.filter((x) => x.status === 'escalated').length,
+      done: list.filter((x) => x.status === 'answered' || x.status === 'resolved').length,
+      all: list.length,
+    };
+    const shown = list.filter((x) => filter === 'all' || (filter === 'done' ? (x.status === 'answered' || x.status === 'resolved') : x.status === filter));
+    const chip = (key, label) => `<button type="button" class="chip${filter === key ? ' active' : ''}" data-qfilter="${key}">${label} (${counts[key]})</button>`;
+    box.innerHTML = `<div class="qn-filters">${chip('open', 'Open')}${chip('escalated', 'Escalated')}${chip('done', 'Answered')}${chip('all', 'All')}</div>
+      ${shown.length ? shown.map(questionCardHtml).join('') : '<div class="empty">No questions in this view.</div>'}
+      <div class="qn-footer">
+        <button type="button" class="btn btn-sm" id="btn-questions-check">Check for answers now</button>
+        <button type="button" class="btn btn-sm btn-quiet" id="btn-questions-scan">Rescan transcript</button>
+      </div>`;
+    $$('[data-qfilter]', box).forEach((b) => b.addEventListener('click', () => { state.questionFilter = b.dataset.qfilter; renderQuestions(); }));
+    $$('[data-open-msg]', box).forEach((b) => b.addEventListener('click', () => {
+      const m = findMessage(b.dataset.openMsg);
+      if (m) openMessageModal(m, m.role === 'user' ? 'user' : m.speaker);
+    }));
+    $$('.qn', box).forEach((card) => {
+      const qRow = list.find((x) => String(x.id) === card.dataset.qid);
+      if (!qRow) return;
+      $$('[data-qact]', card).forEach((b) => b.addEventListener('click', () => questionAction(qRow, b.dataset.qact, card)));
+    });
+    $('#btn-questions-check', box).addEventListener('click', () => checkAnsweredQuestions());
+    $('#btn-questions-scan', box).addEventListener('click', scanQuestions);
+    for (const [qid, draft] of Object.entries(state.questionDrafts)) {
+      const card = $$('.qn', box).find((c) => c.dataset.qid === qid);
+      if (!card) continue;
+      $('.qn-answer', card).hidden = false;
+      $('.qn-answer textarea', card).value = draft;
+    }
+  }
+
+  function questionCardHtml(qRow) {
+    const asked = findMessage(qRow.message_id);
+    const answer = findMessage(qRow.answer_message_id);
+    const addressees = qRow.addressees.split(',').filter(Boolean);
+    const canDiscuss = ALL.includes(qRow.asker) && questionAgentAddressees(qRow).length > 0;
+    const statusActions = qRow.status === 'open'
+      ? '<button type="button" class="btn btn-sm btn-quiet" data-qact="mark-answered">Mark answered</button><button type="button" class="btn btn-sm btn-quiet" data-qact="escalate">Escalate</button>'
+      : '<button type="button" class="btn btn-sm btn-quiet" data-qact="reopen">Reopen</button>';
+    const note = qRow.resolution_note ? escapeHtml(qRow.resolution_note) : '';
+    return `<div class="qn qn-${escapeHtml(qRow.status)}" data-qid="${escapeHtml(String(qRow.id))}">
+      <div class="qn-head">${questionPartyChip(qRow.asker)} <span>asked</span> ${addressees.map(questionPartyChip).join(' ')}
+        <span class="qn-status qn-status-${escapeHtml(qRow.status)}">${escapeHtml(QUESTION_STATUS_LABEL[qRow.status] || qRow.status)}</span></div>
+      <div class="qn-text">${escapeHtml(qRow.text)}</div>
+      <div class="qn-meta">Asked in ${escapeHtml(MODE_LABEL[qRow.round] || qRow.round || 'the transcript')}${asked ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(asked.id))}">#${asked.seq}</button>` : ''}${qRow.status !== 'open' && (note || answer) ? ` · ${note || 'Answered'}${answer ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(answer.id))}">#${answer.seq}</button>` : ''}` : ''}</div>
+      <div class="qn-actions">
+        <button type="button" class="btn btn-sm" data-qact="answer">Answer…</button>
+        ${canDiscuss ? '<button type="button" class="btn btn-sm" data-qact="discuss">Discuss to resolution…</button>' : ''}
+        ${statusActions}
+      </div>
+      <div class="qn-answer" hidden>
+        <textarea rows="3" placeholder="Your answer, as moderator"></textarea>
+        ${ALL.includes(qRow.asker) ? `<label class="check-inline"><input type="checkbox" class="qn-ask-back" checked> Ask ${escapeHtml(AGENT_LABEL[qRow.asker] || qRow.asker)} to respond</label>` : ''}
+        <div><button type="button" class="btn btn-sm btn-primary" data-qact="send-answer">Send answer</button></div>
+      </div>
+    </div>`;
+  }
+
+  async function scanQuestions() {
+    if (state.running) return toast('Wait for the current turn to finish.');
+    const id = state.session.id;
+    try {
+      const r = await api.send('POST', `/api/sessions/${id}/questions/scan`, {});
+      if (String(state.session.id) !== String(id)) return;
+      state.session.questions = r.questions;
+      renderQuestions();
+      toast(r.added ? `${r.added} new question(s) found` : 'No new questions found');
+      if (r.added) checkAnsweredQuestions({ quiet: true });
+    } catch (e) { toast(`Could not scan for questions: ${e.message}`); }
+  }
+
+  async function setQuestionStatus(qRow, status, resolution_note, answer_message_id) {
+    const id = state.session.id;
+    state.session.questions = await api.send('PATCH', `/api/sessions/${id}/questions/${qRow.id}`, { status, resolution_note, answer_message_id });
+    renderQuestions();
+  }
+
+  async function questionAction(qRow, act, card) {
+    if (act !== 'answer' && state.running) return toast('Wait for the current turn to finish.');
+    try {
+      if (act === 'answer') {
+        const panel = $('.qn-answer', card);
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) $('textarea', panel).focus();
+      } else if (act === 'send-answer') {
+        const text = $('.qn-answer textarea', card).value.trim();
+        if (!text) return toast('Write an answer first.');
+        const askBack = Boolean($('.qn-ask-back', card)?.checked);
+        // Tracked by question id, not by this card element: the list can be
+        // redrawn while the answer posts, replacing the card, and a second click
+        // on the new card must not post the answer twice.
+        const qid = String(qRow.id);
+        state.sendingAnswer = state.sendingAnswer || new Set();
+        if (state.sendingAnswer.has(qid)) return;
+        state.sendingAnswer.add(qid);
+        let r;
+        try {
+          r = await api.send('POST', `/api/sessions/${state.session.id}/questions/${qid}/answer`, { text });
+        } finally { state.sendingAnswer.delete(qid); }
+        // Sent: close the box on whichever card is live now, and drop the draft
+        // so the redraw below does not reopen it.
+        delete (state.questionDrafts || {})[qid];
+        const live = $$('.qn', $('#tab-questions')).find((c) => c.dataset.qid === qid);
+        if (live) $('.qn-answer', live).hidden = true;
+        state.session.messages.push(r.message);
+        state.session.questions = r.questions;
+        $('.empty', $('#transcript'))?.remove();
+        $('#transcript').appendChild(messageElement(r.message));
+        renderQuestions();
+        toast('Answer sent');
+        if (askBack && r.respondents.length) await runSequence(r.respondents.map((a) => ({ speaker: a, mode: 'reply' })));
+      } else if (act === 'mark-answered') {
+        await setQuestionStatus(qRow, 'answered', 'Marked answered by the moderator');
+      } else if (act === 'escalate') {
+        await setQuestionStatus(qRow, 'escalated', 'Escalated by the moderator for offline review');
+      } else if (act === 'reopen') {
+        await setQuestionStatus(qRow, 'open', null);
+      } else if (act === 'discuss') {
+        openQuestionDiscussDialog(qRow);
+      }
+    } catch (e) { toast(`Could not update the question: ${e.message}`); }
+  }
+
+  function openQuestionDiscussDialog(qRow) {
+    const dlg = $('#dlg-question-discuss');
+    const addressees = questionAgentAddressees(qRow);
+    dlg.dataset.qid = String(qRow.id);
+    $('#qd-question').textContent = `“${qRow.text}”`;
+    $('#qd-summary').textContent = `Each loop, ${addressees.map((k) => AGENT_LABEL[k] || k).join(' and ')} answer${addressees.length === 1 ? 's' : ''}, then ${AGENT_LABEL[qRow.asker] || qRow.asker} says whether that settles it. If it is still not settled after the last loop, the question is escalated to you for offline review.`;
+    $('#qd-loops').value = 3;
+    $('#qd-loops-label').textContent = '3';
+    $('#qd-length').value = 2;
+    $('#qd-length-label').textContent = LENGTH_LABELS[2];
+    dlg.showModal();
+  }
+
+  // Autopilot outcome → question status. Resolved when the asker said so;
+  // escalated when the loop or cost limit ran out first. A failed turn or a
+  // manual stop leaves the question open, since nothing was decided.
+  async function settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg) {
+    const qRow = (state.session.questions || []).find((x) => String(x.id) === String(settings.question_id));
+    if (!qRow) return;
+    try {
+      if (outcome === 'resolved') {
+        await setQuestionStatus(qRow, 'resolved', `Resolved in discussion after ${cycle} loop(s)`, resolvedMsg ? resolvedMsg.id : null);
+        toast('Question resolved');
+      } else if (['cycle_cap', 'safety_cap', 'cost_cap'].includes(outcome)) {
+        const why = outcome === 'cost_cap' ? 'the cost limit was reached' : `${cycle} loop(s)`;
+        await setQuestionStatus(qRow, 'escalated', `Not resolved after ${why}; escalated to the moderator for offline review`);
+        toast('Question not resolved: escalated to you for offline review', 5000);
+      }
+    } catch (e) { toast(`Could not update the question: ${e.message}`); }
   }
 
   async function generateMeetingMinutes(mode) {
@@ -1422,6 +1655,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
               if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionTab(); }
               renderSources(); renderDisagreements(); renderCost();
               if (data.new_disagreements.length) toast(`${data.new_disagreements.length} disagreement(s) logged`);
+              if (data.questions) { state.session.questions = data.questions; renderQuestions(); }
+              if (data.new_questions) toast(`${data.new_questions} question(s) logged`);
               done = true;
             } else if (name === 'error') { failed = data.message; done = true; }
           }
@@ -1553,6 +1788,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       run = await api.send('POST', `/api/sessions/${sessionId}/autopilot-runs`, {
         scope: settings.scope, disagreement_n: settings.disagreement_n, settings,
       });
+      if (!run || run.id == null) throw new Error('no run was created');
     } catch (e) { toast(`Could not start autopilot: ${e.message}`); setRunning(false); return; }
 
     const base = settings.agents.slice();
@@ -1563,16 +1799,20 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     let cycle = 0;
     let costSum = 0;
     let outcome = null;
+    // A question discussion keeps a fixed order (whoever was asked, then the
+    // asker) and ends when the asker's verdict line says RESOLVED.
+    const isQuestion = settings.scope === 'question';
+    let resolvedMsg = null;
 
     try {
       cycleLoop:
       while (true) {
         if (state.stopRequested) { outcome = 'stopped_by_moderator'; break; }
         cycle++;
-        const shift = (cycle - 1) % base.length;
+        const shift = isQuestion ? 0 : (cycle - 1) % base.length;
         const order = base.slice(shift).concat(base.slice(0, shift));
         const header = document.createElement('div'); header.className = 'cycle-header';
-        header.innerHTML = `<span>Cycle ${cycle}${Number.isFinite(interactionsCap) ? ` of ${interactionsCap}` : ''}</span>`;
+        header.innerHTML = `<span>${isQuestion ? 'Question discussion · loop' : 'Cycle'} ${cycle}${Number.isFinite(interactionsCap) ? ` of ${interactionsCap}` : ''}</span>`;
         t.appendChild(header);
         const grid = document.createElement('div'); grid.className = 'agent-grid';
         t.appendChild(grid);
@@ -1582,20 +1822,28 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
           if (state.stopRequested) { outcome = 'stopped_by_moderator'; break cycleLoop; }
           const col = document.createElement('div'); col.className = 'agent-col';
           grid.appendChild(col);
-          const turn = {
-            speaker, mode: 'autopilot', max_chars: settings.max_chars,
-            stance_index: settings.stances[speaker], disagreement_n: settings.disagreement_n,
-            autopilot: { run_id: run.id, cycle },
-          };
+          const turn = isQuestion
+            ? { speaker, mode: 'autopilot', max_chars: settings.max_chars, question_id: settings.question_id, autopilot: { run_id: run.id, cycle, question_id: settings.question_id } }
+            : {
+              speaker, mode: 'autopilot', max_chars: settings.max_chars,
+              stance_index: settings.stances[speaker], disagreement_n: settings.disagreement_n,
+              autopilot: { run_id: run.id, cycle },
+            };
           const ok = await runTurn(turn, col);
           if (!ok) { outcome = 'failed'; break cycleLoop; }
           const last = state.session.messages[state.session.messages.length - 1];
           costSum += last.cost_usd || 0;
           positions.push(parsePosition(last.text));
+          if (isQuestion && speaker === settings.asker && parseQuestionStatus(last.text) === 'RESOLVED') {
+            resolvedMsg = last;
+            outcome = 'resolved';
+            await api.send('PATCH', `/api/sessions/${sessionId}/autopilot-runs/${run.id}`, { cycles_run: cycle, cost_usd: costSum }).catch(() => {});
+            break cycleLoop;
+          }
         }
         await api.send('PATCH', `/api/sessions/${sessionId}/autopilot-runs/${run.id}`, { cycles_run: cycle, cost_usd: costSum }).catch(() => {});
         const unanimous = positions.length === order.length && positions.every((p) => p === 'AGREE');
-        if (settings.stopOnUnanimous && unanimous) { outcome = 'unanimous'; break; }
+        if (!isQuestion && settings.stopOnUnanimous && unanimous) { outcome = 'unanimous'; break; }
         if (costSum >= state.config.autopilot.max_cost_usd) { outcome = 'cost_cap'; break; }
         if (cycle >= Math.min(interactionsCap, hardCap)) { outcome = cycle >= hardCap ? 'safety_cap' : 'cycle_cap'; break; }
       }
@@ -1605,12 +1853,16 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       }).catch(() => {});
       const reasonText = AUTOPILOT_OUTCOME_LABEL[outcome] || outcome || 'stopped';
       try {
-        const note = await api.send('POST', `/api/sessions/${sessionId}/system-note`, { speaker: 'autopilot', text: `Autopilot stopped after ${cycle} cycle(s): ${reasonText}.` });
+        const noteText = isQuestion
+          ? `Question discussion stopped after ${cycle} loop(s): ${outcome === 'resolved' ? 'resolved' : ['cycle_cap', 'safety_cap', 'cost_cap'].includes(outcome) ? `${reasonText}; escalated to the moderator` : reasonText}.`
+          : `Autopilot stopped after ${cycle} cycle(s): ${reasonText}.`;
+        const note = await api.send('POST', `/api/sessions/${sessionId}/system-note`, { speaker: 'autopilot', text: noteText });
         state.session.messages.push(note);
         $('.empty', t)?.remove();
         t.appendChild(messageElement(note));
         t.scrollTop = t.scrollHeight;
       } catch (e) { /* non-fatal: the run row still has the outcome */ }
+      if (isQuestion && String(state.session.id) === String(sessionId)) await settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg);
       if (outcome === 'unanimous' && settings.autoResolve && settings.scope === 'disagreement' && settings.disagreement_n) {
         try {
           state.session.disagreements = await api.send('PATCH', `/api/sessions/${sessionId}/disagreements/${settings.disagreement_n}`, { status: 'resolved' });
@@ -2002,6 +2254,25 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       }
     });
 
+    // Agent Questions: discuss to resolution
+    $('#qd-loops').addEventListener('input', (e) => { $('#qd-loops-label').textContent = e.target.value; });
+    $('#qd-length').addEventListener('input', (e) => { $('#qd-length-label').textContent = LENGTH_LABELS[Number(e.target.value)]; });
+    $('#dlg-question-discuss form').addEventListener('submit', (e) => {
+      if (!(e.submitter && e.submitter.value === 'start')) return;
+      const dlg = $('#dlg-question-discuss');
+      const qRow = (state.session.questions || []).find((x) => String(x.id) === dlg.dataset.qid);
+      if (!qRow) return;
+      if (state.running) { e.preventDefault(); return toast('Wait for the current turn to finish.'); }
+      const settings = {
+        scope: 'question', question_id: String(qRow.id), asker: qRow.asker,
+        agents: [...questionAgentAddressees(qRow), qRow.asker],
+        max_chars: LENGTH_VALUES[Number($('#qd-length').value)],
+        interactions: Number($('#qd-loops').value),
+        stopOnUnanimous: false, autoResolve: false, stances: {},
+      };
+      setTimeout(() => runAutopilot(settings), 0);
+    });
+
     // Email report
     $('#dlg-email-report form').addEventListener('submit', (e) => {
       if (e.submitter && e.submitter.value === 'send') {
@@ -2099,7 +2370,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
     $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
       $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
+      ['sources', 'disagreements', 'questions', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
       state.activeTab = tab.dataset.tab;
     }));
 

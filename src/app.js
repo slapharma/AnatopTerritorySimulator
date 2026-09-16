@@ -9,6 +9,7 @@ const { assembleText } = require('./transcript');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
 const email = require('./email');
+const questions = require('./questions');
 const { sendMeetingMinutesEmail } = email;
 const auth = require('./auth');
 const { authenticate, requireAdmin, hashPassword } = auth;
@@ -403,7 +404,7 @@ app.post('/api/sessions/:id/autopilot-runs', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
-    const scope = req.body.scope === 'disagreement' ? 'disagreement' : 'discussion';
+    const scope = ['disagreement', 'question'].includes(req.body.scope) ? req.body.scope : 'discussion';
     const disagreement_n = scope === 'disagreement' ? Number(req.body.disagreement_n) : null;
     const run = await db.createAutopilotRun(id, { scope, disagreement_n, settings: req.body.settings || {} });
     res.json(run);
@@ -482,6 +483,115 @@ async function extractDisagreements(sessionId, messageId, text) {
   return found;
 }
 
+// ---------- agent questions ----------
+// The panel agents only (prompts.AGENTS also carries the moderator assistant).
+const panelAgents = () => Object.fromEntries(prompts.AGENT_ORDER.map((k) => [k, prompts.AGENTS[k]]));
+const agentLabel = (key) => (key === 'moderator' ? 'the Moderator' : (prompts.AGENTS[key] ? prompts.AGENTS[key].label : key));
+// A non-numeric id would reach Postgres as an invalid bigint and come back as a 500.
+const questionFor = (qid, sessionId) => (/^\d+$/.test(String(qid)) ? db.getQuestion(String(qid), sessionId) : Promise.resolve(null));
+
+// Stores the "Questions for <X>:" items of one agent message. Returns how many
+// were new. Only panel agents ask; the moderator assistant's output is not scanned.
+async function extractQuestions(sessionId, messageId, speaker, mode, text) {
+  if (!prompts.AGENT_ORDER.includes(speaker)) return 0;
+  const items = questions.parseQuestions(text, panelAgents(), speaker);
+  return db.addQuestions(sessionId, messageId, { asker: speaker, round: mode, items });
+}
+
+app.patch('/api/sessions/:id/questions/:qid', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const qRow = await questionFor(req.params.qid, id);
+    if (!qRow) return res.status(404).json({ error: 'Question not found' });
+    const status = String(req.body.status || '');
+    if (!questions.STATUSES.includes(status)) return res.status(400).json({ error: `Unknown status ${status}` });
+    const note = req.body.resolution_note === undefined ? qRow.resolution_note : String(req.body.resolution_note || '').slice(0, 500) || null;
+    // Reopening clears the record of what answered it; any other change keeps it
+    // unless a new answer message is given.
+    const answer = status === 'open' ? null
+      : (req.body.answer_message_id != null && /^\d+$/.test(String(req.body.answer_message_id)) ? String(req.body.answer_message_id) : qRow.answer_message_id);
+    await db.updateQuestion(qRow.id, id, { status, resolution_note: status === 'open' ? null : note, answer_message_id: answer });
+    res.json(await db.listQuestions(id));
+  } catch (e) { next(e); }
+});
+
+// The moderator answers a question by hand. The answer goes into the transcript
+// as a moderator message addressed to the asker (so it reaches every later turn
+// like any other reply), and the question is marked answered by it. The client
+// then asks the asker to respond, as it does for any addressed reply.
+app.post('/api/sessions/:id/questions/:qid/answer', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const qRow = await questionFor(req.params.qid, id);
+    if (!qRow) return res.status(404).json({ error: 'Question not found' });
+    const answer = String(req.body.text || '').trim().slice(0, 8000);
+    if (!answer) return res.status(400).json({ error: 'Empty answer' });
+    const to = prompts.AGENT_ORDER.includes(qRow.asker) ? qRow.asker : 'all';
+    const quoted = qRow.text.replace(/\s+/g, ' ');
+    const msg = await db.addMessage(id, {
+      role: 'user', speaker: 'user', mode: 'reply', addressed_to: to,
+      text: `**Answer to ${agentLabel(qRow.asker)}'s question:** "${quoted}"\n\n${answer}`,
+    });
+    await db.updateQuestion(qRow.id, id, { status: 'answered', resolution_note: 'Answered by the moderator', answer_message_id: msg.id });
+    res.json({ message: msg, questions: await db.listQuestions(id), respondents: to === 'all' ? [] : [to] });
+  } catch (e) { next(e); }
+});
+
+// Backfill: finds the questions in every agent message already in the session,
+// for evaluations that ran before this feature. Safe to repeat.
+app.post('/api/sessions/:id/questions/scan', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const session = await db.fullSession(id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    let added = 0;
+    for (const m of session.messages) {
+      if (m.role !== 'agent' || m.error || !m.text) continue;
+      added += await extractQuestions(id, m.id, m.speaker, m.mode, m.text);
+    }
+    res.json({ added, questions: await db.listQuestions(id) });
+  } catch (e) { next(e); }
+});
+
+// The answered-check: the Moderator Assistant reads the transcript and says
+// which open questions a later message has answered. Only 'open' questions are
+// considered, so nothing the moderator decided by hand is overwritten.
+app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const session = await db.fullSession(id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const open = (session.questions || []).filter((x) => x.status === 'open');
+    if (!open.length) return res.json({ updated: 0, questions: session.questions || [] });
+    const seqOf = new Map(session.messages.map((m) => [String(m.id), m.seq]));
+    const list = open.map((x) => `- id ${x.id} · asked by ${agentLabel(x.asker)} in message [${seqOf.get(String(x.message_id)) ?? '?'}] to ${x.addressees.split(',').map(agentLabel).join(' and ')}: ${x.text.replace(/\s+/g, ' ')}`).join('\n');
+    const result = await runTurn({
+      inputs: session.inputs, agentKey: 'moderator', mode: 'questions_check', instruction: list,
+      messages: session.messages, model: session.model || config.MODEL, onEvent: () => {},
+    });
+    const openIds = new Set(open.map((x) => String(x.id)));
+    const bySeq = new Map(session.messages.map((m) => [Number(m.seq), m]));
+    let updated = 0;
+    for (const a of questions.parseAnsweredCheck(result.text)) {
+      if (!openIds.has(a.id)) continue;
+      const qRow = open.find((x) => String(x.id) === a.id);
+      const answerMsg = bySeq.get(a.seq);
+      // An answer has to come after the question; anything else is the model
+      // pointing at the question itself or at an earlier message.
+      const askedSeq = seqOf.get(String(qRow.message_id));
+      if (!answerMsg || (askedSeq != null && answerMsg.seq <= askedSeq)) continue;
+      // It has to be a real answer from someone else: not the asker restating
+      // the question, not a system note, not a failed or unfinished turn.
+      if (!answerMsg.text || answerMsg.error || answerMsg.role === 'system' || answerMsg.speaker === qRow.asker) continue;
+      const row = await db.updateQuestion(qRow.id, id, {
+        status: 'answered', resolution_note: a.note || `Answered in #${answerMsg.seq}`, answer_message_id: answerMsg.id,
+      }, { onlyIfOpen: true });
+      if (row) updated++;
+    }
+    res.json({ updated, questions: await db.listQuestions(id) });
+  } catch (e) { next(e); }
+});
+
 // assembleText lives in src/transcript.js — see the note there on why.
 // Autopilot's "Hard limit: N characters" is only a prompt instruction — small/
 // free models routinely ignore it (observed: a 300-char cap produced a 2,000+
@@ -492,7 +602,9 @@ function enforceCharLimit(text, maxChars) {
   if (!maxChars || maxChars === 'as_required') return text;
   const limit = Math.round(Number(maxChars) * 1.1);
   if (text.length <= limit) return text;
-  const posMatch = /\n*POSITION:\s*(AGREE|DISAGREE)\s*[—-]\s*.*$/i.exec(text);
+  // The trailing verdict line survives truncation: POSITION for a discussion,
+  // QUESTION STATUS for a question discussion (the asker's turn).
+  const posMatch = /\n*(?:POSITION:\s*(?:AGREE|DISAGREE)|QUESTION STATUS:\s*(?:RESOLVED|OPEN))\s*[—-]\s*.*$/i.exec(text);
   const positionLine = posMatch ? posMatch[0].trim() : '';
   const body = posMatch ? text.slice(0, posMatch.index) : text;
   const bodyLimit = Math.max(0, limit - positionLine.length - 40);
@@ -574,6 +686,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   // and the disagreement topic (if scoped) so the model gets a plain sentence.
   let stanceText = null;
   let disagreementTopic = null;
+  let questionScope = null;
   if (mode === 'autopilot') {
     if (req.body.stance_index) {
       const entry = prompts.STANCE[String(req.body.stance_index)];
@@ -582,6 +695,18 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     if (req.body.disagreement_n) {
       const d = session.disagreements.find((x) => x.n === Number(req.body.disagreement_n));
       disagreementTopic = d ? d.topic : null;
+    }
+    if (req.body.question_id != null) {
+      const qRow = (session.questions || []).find((x) => String(x.id) === String(req.body.question_id));
+      if (qRow) {
+        const addressees = qRow.addressees.split(',').filter(Boolean);
+        questionScope = {
+          text: qRow.text,
+          askerLabel: agentLabel(qRow.asker),
+          addresseesLabel: addressees.map(agentLabel).join(' and '),
+          role: speaker === qRow.asker ? 'asker' : 'addressee',
+        };
+      }
     }
   }
 
@@ -594,7 +719,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
       disagreements: session.disagreements,
       model: session.model || config.MODEL,
-      max_chars: req.body.max_chars, stance: stanceText, disagreementTopic,
+      max_chars: req.body.max_chars, stance: questionScope ? null : stanceText, disagreementTopic, question: questionScope,
       report: isReport ? {
         kind: req.body.kind === 'final' ? 'final' : 'interim',
         depth: ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard',
@@ -655,16 +780,22 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       searches: u.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
     });
     const disagreements = await extractDisagreements(id, msg.id, text);
+    // A question that cannot be stored must not fail a turn that already has
+    // its answer saved: log it and carry on.
+    const newQuestions = await extractQuestions(id, msg.id, speaker, mode, text)
+      .catch((e) => { console.error(`[turn ${msg.id}] question extraction failed:`, e.message); return 0; });
     if (mode === 'decision') await db.setDecision(id, text);
     await db.touchSession(id);
-    const [message, sources, allDisagreements] = await Promise.all([
-      db.getMessage(msg.id), db.listSources(id), db.listDisagreements(id),
+    const [message, sources, allDisagreements, allQuestions] = await Promise.all([
+      db.getMessage(msg.id), db.listSources(id), db.listDisagreements(id), db.listQuestions(id),
     ]);
     send('done', {
       message,
       sources: sources.map((s) => ({ ...s, cited_by: JSON.parse(s.cited_by_json) })),
       disagreements: allDisagreements,
       new_disagreements: disagreements,
+      questions: allQuestions,
+      new_questions: newQuestions,
       searches,
     });
   } catch (err) {

@@ -610,6 +610,26 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 }
 
 /* ---------- meeting minutes / agent notes (Intelligence tabs) ---------- */
+/* ---------- Agent Questions tab ---------- */
+.qn-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.qn { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
+.qn-escalated { border-color: var(--estimate-fg); }
+.qn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11px; color: var(--muted); }
+.qn-head .agent-chip { margin-left: 0; }
+.qn-status { margin-left: auto; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.qn-status-open { background: var(--surface-2); color: var(--text-2); }
+.qn-status-answered, .qn-status-resolved { background: var(--verified-bg); color: var(--verified-fg); }
+.qn-status-escalated { background: var(--estimate-bg); color: var(--estimate-fg); }
+.qn-text { font-size: 13px; line-height: 1.5; margin: 6px 0 4px; }
+.qn-meta { font-size: 11px; color: var(--muted); }
+.qn-link { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; text-decoration: underline; }
+.qn-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.qn-answer { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.qn-answer textarea { width: 100%; font: inherit; font-size: 12.5px; }
+.qn-answer .check-inline { font-size: 11.5px; }
+.qn-footer { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.qd-question { font-weight: 600; margin: 0 0 6px; }
+
 .minutes-list { list-style: none; margin: 0; padding: 0; }
 .minutes-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 6px; }
 .minutes-head { display: flex; align-items: center; gap: 8px; }

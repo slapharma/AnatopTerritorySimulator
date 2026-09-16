@@ -70,3 +70,19 @@ Verified this session (each check was one that could fail):
 - DOCX and PDF endpoints return 200 with correct content types and attachment names.
 
 Not verified: any live model turn, web search capture from real API responses, PDF appearance in a viewer.
+
+## Agent Questions (2026-09-16)
+
+Decisions (Clifton): answered-check is an AI pass by the Moderator Assistant after each
+meeting; "discuss to resolution" loops asker and addressee(s) on the Autopilot engine;
+a question not resolved within the set number of loops is marked escalated to the
+moderator for offline review.
+
+- [ ] `src/questions.js`: parse `Questions for <X>:` blocks into {addressees, n, text}
+- [ ] `agent_questions` table in `sql/schema.sql` (+ RLS list); db list/add/update, tolerant of the table not existing yet
+- [ ] Extract questions after every agent turn; send the list back in the turn's `done` event
+- [ ] Routes: PATCH status, POST answer (moderator reply to the asker), POST scan (backfill), POST check (AI answered-check)
+- [ ] Autopilot scope `question`: fixed order addressees then asker, asker ends `QUESTION STATUS: RESOLVED|OPEN`; resolved → resolved, loop cap/cost cap → escalated
+- [ ] Intelligence tab "Agent Questions": filters, asker → addressee chips, status, asked-in / answered-in links, Answer, Discuss to resolution, mark/reopen/escalate
+- [ ] Run the answered-check whenever a meeting completes
+- [ ] Guide section; tests; review; hand over the schema command (the prod table must be created by hand)

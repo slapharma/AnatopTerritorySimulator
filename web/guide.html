@@ -111,8 +111,17 @@
   <h2>Disagreements</h2>
   <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the Intelligence panel's <strong>Disagreements</strong> tab as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised. Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
 
+  <h2>Agent Questions</h2>
+  <p>When an agent ends a response with a "Questions for …" block, each question in it is picked up automatically and listed in the Intelligence panel's <strong>Agent Questions</strong> tab — who asked whom, which meeting it was raised in (the message link opens it), and a status: <code>Open</code>, <code>Answered</code>, <code>Resolved</code> or <code>Escalated to moderator</code>. The tab's count is open-plus-escalated over the total; filter the list to Open, Escalated, Answered or All. For an evaluation run before this feature existed, <strong>Find questions in this evaluation</strong> (offered as <strong>Rescan transcript</strong> once some are found) reads the whole transcript for them.</p>
+  <p>After each meeting completes, the Moderator Assistant re-reads the transcript and marks any open question that a later message has already answered, noting who answered and linking to it — <strong>Check for answers now</strong> runs the same check on demand. It only looks at questions still <code>Open</code>, so anything you've settled by hand is left alone.</p>
+  <ul>
+    <li><strong>Answer…</strong> — write the answer yourself. It is posted into the transcript addressed to the asker, the question is marked <code>Answered</code>, and you can optionally ask the asker to respond.</li>
+    <li><strong>Discuss to resolution…</strong> (only for a question put to another agent) — each loop, the agent(s) asked answer and then the asker says whether that settles it. It ends <code>Resolved</code> once the asker is satisfied, or <code>Escalated to moderator</code> for offline review if it's still unsettled after the number of loops you set (default 3, up to 10) or the autopilot cost cap is hit; stopping the run, or a failed turn, leaves it <code>Open</code> instead. It runs on the Autopilot engine and appears in the transcript as a "Question discussion", with a loop header per round.</li>
+    <li><strong>Mark answered</strong>, <strong>Escalate</strong> and <strong>Reopen</strong> set the status by hand at any point.</li>
+  </ul>
+
   <h2>Intelligence</h2>
-  <p>Click <strong>Intelligence</strong> in the sidebar to pop out the right-hand panel: <strong>Sources</strong>, <strong>Disagreements</strong>, <strong>Decision</strong> (the recommendation, once one has been written), <strong>★ Favourites</strong>, <strong>Reports</strong>, <strong>Minutes</strong> (auto-written meeting minutes), <strong>Agent notes</strong> (the transcript sliced by agent, by meeting, by disagreement, or by resolution status) and <strong>Inputs</strong>. Close it with the ✕ or Esc.</p>
+  <p>Click <strong>Intelligence</strong> in the sidebar to pop out the right-hand panel: <strong>Sources</strong>, <strong>Disagreements</strong>, <strong>Agent Questions</strong>, <strong>Decision</strong> (the recommendation, once one has been written), <strong>★ Favourites</strong>, <strong>Reports</strong>, <strong>Minutes</strong> (auto-written meeting minutes), <strong>Agent notes</strong> (the transcript sliced by agent, by meeting, by disagreement, or by resolution status) and <strong>Inputs</strong>. Close it with the ✕ or Esc.</p>
 
   <h2>Favourites, Regenerate, Dive Deeper</h2>
   <ul>

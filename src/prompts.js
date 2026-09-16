@@ -348,13 +348,25 @@ function disagreementLogText(disagreements) {
   ].join('\n');
 }
 
-function turnUserMessage({ agentKey, mode, instruction, messages, disagreements, max_chars, stance, disagreementTopic, report, inputs }) {
+function turnUserMessage({ agentKey, mode, instruction, messages, disagreements, max_chars, stance, disagreementTopic, question, report, inputs }) {
   const r = rounds();
   let roundText = r[mode] || r.crosstalk;
   if (mode === 'custom') roundText = `${r.custom}\n\nCUSTOM INSTRUCTION:\n${instruction || '(none given)'}`;
   if (mode === 'decision') roundText = 'Write the DECISION OUTPUT now from the transcript above.';
   if (mode === 'dive_deeper') roundText = `${r.dive_deeper}\n\n${instruction || ''}`;
-  else if (mode === 'autopilot') {
+  else if (mode === 'autopilot' && question) {
+    // A question discussion (Intelligence > Agent Questions): whoever was asked
+    // answers, and the asker judges whether that settles it. No stance, no
+    // POSITION line; the asker's QUESTION STATUS line is what stops the loop.
+    const template = question.role === 'asker' ? r.autopilot_question_asker : r.autopilot_question_addressee;
+    roundText = template
+      // Function replacers: the question is model-written text, and a "$&" in
+      // it would otherwise be read as a replacement pattern.
+      .replace(/\{\{QUESTION\}\}/g, () => question.text)
+      .replace(/\{\{ASKER\}\}/g, () => question.askerLabel)
+      .replace(/\{\{ADDRESSEES\}\}/g, () => question.addresseesLabel);
+    if (max_chars && max_chars !== 'as_required') roundText += `\n\nHard limit: ${max_chars} characters.`;
+  } else if (mode === 'autopilot') {
     roundText = r.autopilot;
     if (disagreementTopic) roundText += `\n\nThis discussion is scoped to Disagreement — ${disagreementTopic}. Your POSITION line's sentence must name this topic.`;
     if (max_chars && max_chars !== 'as_required') roundText += `\n\nHard limit: ${max_chars} characters.`;
@@ -366,6 +378,7 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
     roundText = fill([sections.common, '', depthBody].join('\n'), inputs || {});
     roundText += `\n\n${reportMetaBlock(report.meta || {})}`;
   } else if (mode === 'meeting_minutes') roundText = `${r.meeting_minutes}\n\nMEETING: ${instruction || mode}`;
+  else if (mode === 'questions_check') roundText = `${r.questions_check}\n\nOPEN QUESTIONS:\n${instruction || '(none)'}`;
   else if (mode !== 'decision') roundText += COMPACT_SUFFIX;
   const who = agentKey === 'moderator' ? 'the MODERATOR ASSISTANT' : `the ${AGENTS[agentKey].label.toUpperCase()}`;
   const disText = disagreementLogText(disagreements);

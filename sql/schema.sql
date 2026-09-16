@@ -209,6 +209,34 @@ CREATE TABLE IF NOT EXISTS report_emails (
 );
 CREATE INDEX IF NOT EXISTS report_emails_report_id_idx ON report_emails (report_id);
 
+-- ------------------------------------------------------ agent_questions
+-- Agent Questions: one row per item in a "Questions for <X>:" block of an agent
+-- response (src/questions.js). addressees is a comma-separated list of agent
+-- keys and/or 'moderator'. n numbers the questions within their message, so
+-- (message_id, n) identifies one and re-extraction is idempotent. status is
+-- 'open', 'answered' (by the moderator, or found answered in the transcript),
+-- 'resolved' (a question discussion ended with the asker satisfied) or
+-- 'escalated' (a discussion hit its loop or cost limit unresolved).
+-- answer_message_id has no foreign key on purpose: deleting the answering
+-- message should not delete or reopen the question.
+CREATE TABLE IF NOT EXISTS agent_questions (
+  id                bigserial   PRIMARY KEY,
+  session_id        bigint      NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  message_id        bigint      NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  n                 integer     NOT NULL,
+  asker             text        NOT NULL,
+  addressees        text        NOT NULL,
+  round             text,
+  text              text        NOT NULL,
+  status            text        NOT NULL DEFAULT 'open',
+  resolution_note   text,
+  answer_message_id bigint,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (message_id, n)
+);
+CREATE INDEX IF NOT EXISTS agent_questions_session_id_idx ON agent_questions (session_id);
+
 -- ============================================================ ACCESS ======
 --
 -- The application connects as a dedicated login role, NOT as the table owner
@@ -248,7 +276,7 @@ DECLARE
   t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'agents', 'app_defaults', 'autopilot_runs', 'disagreements', 'knowledge_items',
+    'agent_questions', 'agents', 'app_defaults', 'autopilot_runs', 'disagreements', 'knowledge_items',
     'meeting_minutes', 'messages', 'report_emails', 'reports', 'sessions',
     'sources', 'users'
   ] LOOP

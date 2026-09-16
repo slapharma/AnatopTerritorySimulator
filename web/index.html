@@ -227,6 +227,7 @@
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
             <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
+            <button class="tab" data-tab="questions" role="tab" type="button">Agent Questions <span class="count" id="count-questions">0</span></button>
             <button class="tab" data-tab="decision" role="tab" type="button">Decision</button>
             <button class="tab" data-tab="favourites" role="tab" type="button">★ Favourites <span class="count" id="count-favourites">0</span></button>
             <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
@@ -236,6 +237,7 @@
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
+          <div class="tab-body" id="tab-questions" hidden></div>
           <div class="tab-body" id="tab-decision" hidden></div>
           <div class="tab-body" id="tab-favourites" hidden></div>
           <div class="tab-body" id="tab-reports" hidden></div>
@@ -351,6 +353,27 @@
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Cancel</button>
       <button value="start" class="btn btn-primary" type="submit" id="btn-autopilot-start">Start autopilot</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Agent Questions: discuss one question to resolution -->
+<dialog id="dlg-question-discuss">
+  <form method="dialog" class="dialog-form">
+    <h2>Discuss to resolution</h2>
+    <p class="qd-question" id="qd-question"></p>
+    <p class="muted" id="qd-summary"></p>
+    <label>Loops before escalating to you
+      <input type="range" id="qd-loops" min="1" max="10" step="1" value="3">
+      <span class="range-label" id="qd-loops-label">3</span>
+    </label>
+    <label>Response length
+      <input type="range" id="qd-length" min="0" max="4" step="1" value="2">
+      <span class="range-label" id="qd-length-label"></span>
+    </label>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Cancel</button>
+      <button value="start" class="btn btn-primary" type="submit">Start discussion</button>
     </div>
   </form>
 </dialog>

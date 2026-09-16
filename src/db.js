@@ -218,6 +218,63 @@ async function upsertSource(sessionId,{ url, title, kind, messageId, speaker }) 
 }
 
 // ---------- meeting minutes ----------
+// ---------- agent questions ----------
+// The table is created by hand from sql/schema.sql, so code can ship before it
+// exists. Until then reads return [] and writes are skipped, rather than
+// failing every session load and every turn. 42P01 is undefined_table.
+// 42501 (permission denied) is the same situation half-done: the table was
+// created without the grants at the end of schema.sql. Say so in the log.
+const missingTable = (e) => {
+  if (e && e.code === '42501') console.warn('[db] agent_questions: permission denied. Run the whole of sql/schema.sql, not just the CREATE TABLE.');
+  return Boolean(e && (e.code === '42P01' || e.code === '42501'));
+};
+async function listQuestions(sessionId) {
+  try {
+    return await q('SELECT * FROM agent_questions WHERE session_id = $1 ORDER BY message_id, n', [sessionId]);
+  } catch (e) {
+    if (missingTable(e)) return [];
+    throw e;
+  }
+}
+// items: [{ n, addressees: [...], text }] from src/questions.js. Re-running on
+// the same message adds nothing: (message_id, n) is unique.
+async function addQuestions(sessionId, messageId, { asker, round, items }) {
+  if (!items.length) return 0;
+  try {
+    let added = 0;
+    for (const it of items) {
+      const rows = await q(
+        `INSERT INTO agent_questions (session_id, message_id, n, asker, addressees, round, text)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (message_id, n) DO NOTHING RETURNING id`,
+        [sessionId, messageId, it.n, asker, it.addressees.join(','), round || null, it.text],
+      );
+      added += rows.length;
+    }
+    return added;
+  } catch (e) {
+    if (missingTable(e)) return 0;
+    throw e;
+  }
+}
+async function getQuestion(id, sessionId) {
+  try {
+    return await one('SELECT * FROM agent_questions WHERE id = $1 AND session_id = $2', [id, sessionId]);
+  } catch (e) {
+    if (missingTable(e)) return null;
+    throw e;
+  }
+}
+// onlyIfOpen: change the row only if it is still 'open', so a slow background
+// check cannot overwrite what the moderator decided while it ran. Returns the
+// updated row, or null when nothing matched.
+async function updateQuestion(id, sessionId, { status, resolution_note, answer_message_id }, { onlyIfOpen = false } = {}) {
+  return one(
+    `UPDATE agent_questions SET status = $1, resolution_note = $2, answer_message_id = $3, updated_at = now()
+     WHERE id = $4 AND session_id = $5${onlyIfOpen ? " AND status = 'open'" : ''} RETURNING *`,
+    [status, resolution_note ?? null, answer_message_id ?? null, id, sessionId],
+  );
+}
+
 async function listMeetingMinutes(sessionId) { return q('SELECT * FROM meeting_minutes WHERE session_id = $1 ORDER BY id', [sessionId]); }
 async function addMeetingMinutes(sessionId, { round, label, text, anchor_message_id }) {
   const approve_token = crypto.randomBytes(16).toString('hex');
@@ -265,8 +322,8 @@ async function upsertDisagreement(sessionId, messageId, topic, body, status) {
 async function fullSession(id) {
   const session = await getSession(id);
   if (!session) return null;
-  const [messages, sources, disagreements, autopilot_runs, reports, meeting_minutes] = await Promise.all([
-    listMessages(id), listSources(id), listDisagreements(id), listAutopilotRuns(id), listReports(id), listMeetingMinutes(id),
+  const [messages, sources, disagreements, autopilot_runs, reports, meeting_minutes, questions] = await Promise.all([
+    listMessages(id), listSources(id), listDisagreements(id), listAutopilotRuns(id), listReports(id), listMeetingMinutes(id), listQuestions(id),
   ]);
   return {
     ...session,
@@ -277,6 +334,7 @@ async function fullSession(id) {
     autopilot_runs,
     reports,
     meeting_minutes,
+    questions,
   };
 }
 
@@ -412,6 +470,7 @@ module.exports = {
   listSources, upsertSource,
   listDisagreements, setDisStatus, upsertDisagreement,
   listMeetingMinutes, addMeetingMinutes, setMinutesApproved, getMinutesByToken,
+  listQuestions, addQuestions, getQuestion, updateQuestion,
   createAutopilotRun, updateAutopilotRun, getAutopilotRun, listAutopilotRuns,
   addReport, listReports, getReport, deleteReport,
   addReportEmail, listReportEmails,

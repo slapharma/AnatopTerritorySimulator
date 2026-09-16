@@ -66,10 +66,21 @@
 
     // Where to go after signing in. Only a same-origin path is honoured: an
     // absolute URL here would turn the sign-in page into an open redirect.
+    // Resolve it the way the browser will rather than checking characters,
+    // because the URL parser treats `\` as `/` and drops tabs and newlines,
+    // so `/\evil.com` and `/<tab>/evil.com` both leave the site. Return the
+    // full resolved URL, not its path: dot segments collapse during parsing,
+    // so `/.//evil.com` has a same-origin href but a pathname of `//evil.com`,
+    // which the browser would read as another site.
     function safeNext() {
       var raw = new URLSearchParams(location.search).get('next') || '/';
-      if (raw.charAt(0) !== '/' || raw.charAt(1) === '/') return '/';
-      return raw;
+      try {
+        var u = new URL(raw, location.origin);
+        if (u.origin !== location.origin) return '/';
+        return u.href;
+      } catch (e) {
+        return '/';
+      }
     }
 
     function showError(msg) {

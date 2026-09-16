@@ -86,7 +86,10 @@ function cookieOptions(req) {
     sameSite: 'lax',
     secure: proto === 'https',
     path: '/',
-    maxAge: Math.floor(SESSION_MS / 1000),
+    // MILLISECONDS. Express's res.cookie converts this to a Max-Age in seconds
+    // itself; passing seconds here gave the cookie a 43-second life, so users
+    // were signed out about 40s after every sign-in.
+    maxAge: SESSION_MS,
   };
 }
 // express ships res.cookie(); reading is a four-line parse, so the cookie
@@ -211,7 +214,10 @@ async function authenticate(req, res, next) {
 
     if (await noAuthConfigured()) return next();
   } catch (e) {
-    console.error('auth error:', e.message); // fail closed on any DB/hash error
+    // Fail closed, but not as a 401: the caller may well be signed in, and a
+    // 401 would send them to the sign-in page for what is a server fault.
+    console.error('auth error:', e.message);
+    return res.status(503).json({ error: 'Could not check your sign-in right now. Try again in a moment.' });
   }
 
   // A browser navigating to a page gets the sign-in page; anything else gets

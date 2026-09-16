@@ -17,15 +17,15 @@
         <span>Anatop Territory Evaluation</span>
       </button>
       <button id="btn-new" class="btn btn-accent btn-block" type="button">New evaluation</button>
-      <button id="btn-warroom" class="btn btn-primary btn-block" type="button" title="Sources, disagreements, cost, meeting minutes, agent notes">Intelligence</button>
+      <button id="btn-warroom" class="btn btn-primary btn-block" type="button" title="The board pack: sources, disagreements, decision, minutes and agent notes">Intelligence</button>
     </div>
 
     <!-- Every control that advances or reports on the simulation, in one panel.
          Keeps id="toolbar" because the run-state disable in setRunning() targets
          it; hidden outside the session view, which the sidebar does not switch. -->
-    <nav class="sidebar-panel" id="toolbar" aria-label="Simulation process" hidden>
+    <nav class="sidebar-panel" id="toolbar" aria-label="Meeting agenda" hidden>
       <button type="button" class="side-section-head open" id="btn-toggle-process" aria-expanded="true" aria-controls="process-body">
-        <span>Simulation Process</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <span>Meeting Agenda</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="side-section-body" id="process-body">
       <!-- One box: the four numbered meetings, then the two ways to run a
@@ -33,14 +33,14 @@
            together and apart from Reports/Export, which only read the result. -->
       <div class="sim-run">
         <div class="meeting-steps">
-          <button class="meeting-btn" data-round="opening" type="button" title="Each agent answers its own questions independently"><span class="meeting-num">1</span>Baselines</button>
-          <button class="meeting-btn" data-round="round2" type="button" title="Each agent attacks at least two assumptions from the others, with evidence"><span class="meeting-num">2</span>Challenge</button>
-          <button class="meeting-btn" data-round="round3" type="button" title="Agents give base / upside / downside figures"><span class="meeting-num">3</span>Converge</button>
-          <button class="meeting-btn" data-round="crosstalk" type="button" title="One free round: every agent responds to the discussion so far"><span class="meeting-num">4</span>Cross-talk</button>
+          <button class="meeting-btn" data-round="opening" type="button" title="Opening positions: each panel member presents an independent assessment"><span class="meeting-num">1</span>Baselines</button>
+          <button class="meeting-btn" data-round="round2" type="button" title="Scrutiny: each panel member tests at least two of the others' assumptions, on the evidence"><span class="meeting-num">2</span>Challenge</button>
+          <button class="meeting-btn" data-round="round3" type="button" title="Consensus: the panel tables base, upside and downside figures"><span class="meeting-num">3</span>Converge</button>
+          <button class="meeting-btn" data-round="crosstalk" type="button" title="Open floor: every panel member responds to the debate so far"><span class="meeting-num">4</span>Cross-talk</button>
         </div>
         <div class="sim-run-extra">
-          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-autopilot" type="button" title="Run several cross-talk cycles automatically, with limits you set">Autopilot…</button>
-          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-custom" type="button" title="Write your own instruction for a meeting">Custom meeting…</button>
+          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-autopilot" type="button" title="Let the panel debate over several cycles unaided, within limits you set">Autopilot…</button>
+          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-custom" type="button" title="Table your own agenda item for the panel">Custom meeting…</button>
         </div>
       </div>
       <div class="menu">
@@ -63,9 +63,9 @@
 
     <div class="session-list-wrap">
       <button type="button" id="btn-toggle-sessions" class="side-section-head" aria-expanded="false" aria-controls="session-list">
-        <span id="session-toggle-label">All simulations</span><span class="count" id="session-toggle-count" hidden>0</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <span id="session-toggle-label">Evaluation Register</span><span class="count" id="session-toggle-count" hidden>0</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      <div id="session-list" class="session-list" aria-label="Saved sessions" hidden></div>
+      <div id="session-list" class="session-list" aria-label="Evaluation register" hidden></div>
     </div>
     <div class="sidebar-foot" id="sidebar-foot"></div>
   </aside>
@@ -74,7 +74,7 @@
     <!-- ============ DASHBOARD VIEW ============ -->
     <section id="view-dashboard" class="view">
       <header class="topbar">
-        <h1>Dashboard</h1>
+        <h1>Boardroom</h1>
         <div class="topbar-actions">
           <button id="btn-logout" class="btn" type="button" title="Sign out of this browser">Log out</button>
         </div>
@@ -83,43 +83,43 @@
         <div class="dashboard">
           <!-- Filled by renderDashboard(): KPI strip, the two big start/resume
                tiles, then the reference tiles. The saved evaluations are not
-               here any more — they are the sidebar's All simulations list.
+               here any more — they are the sidebar's Evaluation Register.
                Each block is its own container and each renderer addresses its
                own by id, so this order is set here and nowhere else. -->
           <!-- Onboarding: what the four steps of a run are, in order. Sits
                above the numbers; dismissed state is remembered per browser. -->
           <section class="dash-section dash-callout" id="process-callout">
             <div class="dash-section-head">
-              <h2>How an evaluation runs</h2>
-              <button type="button" class="dash-callout-close" id="btn-close-process" title="Hide this" aria-label="Hide how an evaluation runs">✕</button>
+              <h2>How the board reaches a decision</h2>
+              <button type="button" class="dash-callout-close" id="btn-close-process" title="Hide this" aria-label="Hide how the board reaches a decision">✕</button>
             </div>
             <ol class="process-flow">
               <li class="process-step">
                 <span class="process-num">1</span>
                 <span class="process-text">
-                  <span class="process-title">Start a new evaluation</span>
-                  <span class="process-sub">Choose the country and check the key inputs.</span>
+                  <span class="process-title">Table the market evaluation</span>
+                  <span class="process-sub">Name the market and confirm the briefing inputs.</span>
                 </span>
               </li>
               <li class="process-step">
                 <span class="process-num">2</span>
                 <span class="process-text">
-                  <span class="process-title">Activate the rounds of meetings</span>
-                  <span class="process-sub">Each round runs Ruth (Regulatory), Luca (Clinical) and Charlie (Commercial) in turn.</span>
+                  <span class="process-title">Convene the meetings</span>
+                  <span class="process-sub">Ruth (Regulatory), Luca (Clinical) and Charlie (Commercial) each take the floor in turn.</span>
                 </span>
               </li>
               <li class="process-step">
                 <span class="process-num">3</span>
                 <span class="process-text">
-                  <span class="process-title">Intervene and moderate</span>
-                  <span class="process-sub">Interact with the agents and steer the discussion at any stage.</span>
+                  <span class="process-title">Chair the discussion</span>
+                  <span class="process-sub">Put questions to the panel and steer the debate at any stage.</span>
                 </span>
               </li>
               <li class="process-step">
                 <span class="process-num">4</span>
                 <span class="process-text">
-                  <span class="process-title">Produce the final report</span>
-                  <span class="process-sub">A launch recommendation with the reasoning behind it.</span>
+                  <span class="process-title">Issue the board recommendation</span>
+                  <span class="process-sub">A go / no-go launch recommendation, with the rationale on record.</span>
                 </span>
               </li>
             </ol>
@@ -139,7 +139,7 @@
     <!-- ============ SETUP VIEW ============ -->
     <section id="view-setup" class="view" hidden>
       <header class="topbar">
-        <h1>New session</h1>
+        <h1>New evaluation briefing</h1>
         <div class="topbar-actions">
           <button id="btn-load-korea" class="btn" type="button">Restore Default Values</button>
           <button id="btn-copy-last" class="btn" type="button">Copy from last session</button>
@@ -147,23 +147,23 @@
       </header>
       <div class="scroll">
         <form id="setup-form" class="setup-form" autocomplete="off">
-          <p class="lede">Every field below is Section 0 of the spec. Blank fields are allowed: they are passed to the agents as <code>INPUT MISSING</code>, and the agents must say what they assumed instead.</p>
+          <p class="lede">These inputs are the briefing pack the panel works from. Blank fields are allowed: they are passed to the agents as <code>INPUT MISSING</code>, and the agents must say what they assumed instead.</p>
           <div id="setup-fields" class="fields"></div>
 
           <section class="run-settings" id="run-settings">
-            <h2>Run settings</h2>
+            <h2>Meeting settings</h2>
             <div class="fields">
               <div class="field">
                 <div class="field-label-row"><label for="setup-model">Model</label></div>
                 <select id="setup-model" class="model-select"></select>
-                <span class="hint" id="setup-model-hint">Every agent turn in this session runs on this model. Fixed once the session starts.</span>
+                <span class="hint" id="setup-model-hint">The panel starts on this model. You can switch it from the evaluation header between meetings; each switch is minuted in the transcript.</span>
               </div>
             </div>
           </section>
 
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-lg">Start session and run Baselines</button>
-            <span class="muted">Runs Ruth (Regulatory), Luca (Clinical) and Charlie (Commercial) in turn, each with live web search.</span>
+            <button type="submit" class="btn btn-primary btn-lg">Convene the panel and run Baselines</button>
+            <span class="muted">Ruth (Regulatory), Luca (Clinical) and Charlie (Commercial) each present an opening position, backed by live web research.</span>
           </div>
         </form>
       </div>
@@ -177,9 +177,10 @@
           <div id="session-sub" class="muted"></div>
         </div>
         <div class="topbar-actions">
+          <select id="session-model" class="model-select" aria-label="Model" title="Model for turns from here on. Each switch is noted in the transcript."></select>
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
-          <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this session">Delete</button>
+          <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this evaluation">Delete</button>
         </div>
       </header>
 
@@ -191,13 +192,13 @@
             <label class="composer-to">
               <span>To</span>
               <select id="composer-to">
-                <option value="all">All agents</option>
+                <option value="all">Whole panel</option>
                 <option value="regulatory">Regulatory</option>
                 <option value="clinical">Clinical</option>
                 <option value="commercial">Commercial</option>
               </select>
             </label>
-            <textarea id="composer-text" rows="2" placeholder="Speak as the moderator… (Ctrl+Enter to send)"></textarea>
+            <textarea id="composer-text" rows="2" placeholder="Address the panel as moderator… (Ctrl+Enter to send)"></textarea>
             <button type="submit" class="btn btn-primary" id="btn-send">Send</button>
           </form>
         </div>
@@ -256,7 +257,7 @@
 <dialog id="dlg-custom">
   <form method="dialog" class="dialog-form">
     <h2>Custom meeting</h2>
-    <p class="muted">Your instruction replaces the built-in round text. The evidence rules still apply.</p>
+    <p class="muted">Table your own agenda item. It replaces the standard meeting brief; the evidence rules still apply.</p>
     <label>Instruction<textarea id="custom-instruction" rows="5" placeholder="e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only."></textarea></label>
     <fieldset class="agent-picks">
       <legend>Who responds, in order</legend>
@@ -266,7 +267,7 @@
     </fieldset>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Cancel</button>
-      <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Run meeting</button>
+      <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Convene meeting</button>
     </div>
   </form>
 </dialog>
@@ -308,9 +309,9 @@
 <dialog id="dlg-autopilot" class="dlg-wide">
   <form method="dialog" class="dialog-form">
     <h2>Autopilot</h2>
-    <p class="muted" id="autopilot-subtitle">Let the agents talk it out. Set the limits, then watch.</p>
+    <p class="muted" id="autopilot-subtitle">Let the panel debate the point unaided. Set the terms of reference, then observe.</p>
     <fieldset class="agent-picks">
-      <legend>Agents</legend>
+      <legend>Panel members</legend>
       <label><input type="checkbox" value="regulatory" checked> Regulatory</label>
       <label><input type="checkbox" value="clinical" checked> Clinical</label>
       <label><input type="checkbox" value="commercial" checked> Commercial</label>

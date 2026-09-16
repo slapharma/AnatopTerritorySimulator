@@ -351,12 +351,17 @@ app.get('/api/sessions/:id', async (req, res, next) => {
 app.patch('/api/sessions/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
+    const existing = await db.getSession(id);
+    if (!existing) return res.status(404).json({ error: 'Session not found' });
     if (typeof req.body.title === 'string' && req.body.title.trim()) await db.renameSession(id, req.body.title.trim());
     if (typeof req.body.model === 'string') {
       const refusal = modelRefusal(req.body.model, req.user);
       if (refusal) return res.status(refusal.status).json({ error: refusal.error });
-      await db.setModel(id, req.body.model);
+      // The model can change mid-evaluation, so the switch is written into the
+      // transcript: without it one session would span two models with nothing
+      // on the page or in the export saying where the change happened.
+      const name = (m) => (config.MODEL_OPTIONS.find((o) => o.id === m) || { label: m }).label.replace(/\s*\(.*$/, '');
+      await db.switchModel(id, req.body.model, (from, to) => `Model changed from ${name(from)} to ${name(to)}. Turns from here on run on ${name(to)}.`);
     }
     if (req.body.inputs && typeof req.body.inputs === 'object') {
       const inputs = {};

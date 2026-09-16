@@ -179,7 +179,27 @@ async function withSessionLock(sessionId, fn) {
   }
 }
 
-async function upsertSource(sessionId, { url, title, kind, messageId, speaker }) {
+// Switches a session's model and writes the transcript note in one transaction,
+// under the session lock, so the note can never be missing for a switch that
+// happened or present for one that did not, and "from" is read inside the lock.
+// describe(previous, next) builds the note text. Returns the note row, or null
+// when the session is missing or already on that model.
+async function switchModel(sessionId, model, describe) {
+  return withSessionLock(sessionId, async (client) => {
+    const cur = (await client.query('SELECT model FROM sessions WHERE id = $1', [sessionId])).rows[0];
+    if (!cur) return null;
+    const previous = cur.model || config.MODEL;
+    if (previous === model) return null;
+    await client.query('UPDATE sessions SET model = $1, updated_at = now() WHERE id = $2', [model, sessionId]);
+    const { seq } = (await client.query('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages WHERE session_id = $1', [sessionId])).rows[0];
+    return (await client.query(
+      `INSERT INTO messages (session_id, seq, role, speaker, text) VALUES ($1, $2, 'system', 'model', $3) RETURNING *`,
+      [sessionId, seq, describe(previous, model)],
+    )).rows[0];
+  });
+}
+
+async function upsertSource(sessionId,{ url, title, kind, messageId, speaker }) {
   return withSessionLock(sessionId, async (client) => {
     const existing = (await client.query('SELECT * FROM sources WHERE session_id = $1 AND url = $2', [sessionId, url])).rows[0];
     if (existing) {
@@ -387,7 +407,7 @@ async function deleteKnowledgeItem(id) { await q('DELETE FROM knowledge_items WH
 module.exports = {
   pool,
   getDefaults, setDefaultField, replaceDefaults,
-  listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, updateInputs, deleteSession, createSession,
+  listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, switchModel, updateInputs, deleteSession, createSession,
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, beginAgentTurn, setFavourite,
   listSources, upsertSource,
   listDisagreements, setDisStatus, upsertDisagreement,

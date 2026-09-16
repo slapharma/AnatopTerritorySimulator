@@ -7,10 +7,20 @@
   const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, navPanel: null, intelCut: 'agent' };
 
   // ---------------- API ----------------
+  // A 401 from our own API means the session has ended, and no error message
+  // can fix that, so go to the sign-in page and come back here afterwards.
+  // The returned promise never settles: the page is navigating away, and
+  // letting the caller carry on would only flash a "Not signed in" error.
+  function signInAgainIf401(r) {
+    if (r.status !== 401) return null;
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+    return new Promise(() => {});
+  }
   const api = {
-    async get(url) { const r = await fetch(url); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.json(); },
+    async get(url) { const r = await fetch(url); await signInAgainIf401(r); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.json(); },
     async send(method, url, body) {
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      await signInAgainIf401(r);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
       return r.json();
     },
@@ -21,7 +31,7 @@
   // are UI-only pseudo-speakers with no manifest entry; everything else — label,
   // order and colour — comes from prompts/agents/index.json, so adding an agent
   // needs no edit here. The literals below are only the pre-config fallback.
-  const AGENT_LABEL = { moderator: 'Moderator Assistant', user: 'Moderator (you)', autopilot: 'Autopilot' };
+  const AGENT_LABEL = { moderator: 'Moderator Assistant', user: 'Moderator (you)', autopilot: 'Autopilot', model: 'Model change' };
   const AGENT_COLOUR = {};
   // Enabled agent keys in manifest order. Populated by applyAgentRoster().
   const ALL = [];
@@ -551,10 +561,10 @@
     const messages = list.reduce((n, s) => n + Number(s.message_count || 0), 0);
     const cost = list.reduce((n, s) => n + Number(s.cost_usd || 0), 0);
     const stats = [
-      { icon: 'folder', label: 'Evaluations', value: list.length, sub: `${list.length - decided} still open` },
-      { icon: 'globe', label: 'Countries', value: list.length ? countries.size : 0, sub: 'markets assessed' },
-      { icon: 'check', label: 'Decisions ready', value: decided, sub: list.length ? `${Math.round((decided / list.length) * 100)}% of evaluations` : 'none yet', tone: decided ? 'accent' : '' },
-      { icon: 'chat', label: 'Agent responses', value: messages.toLocaleString(), sub: 'across all sessions' },
+      { icon: 'folder', label: 'Evaluations tabled', value: list.length, sub: `${list.length - decided} awaiting decision` },
+      { icon: 'globe', label: 'Countries', value: list.length ? countries.size : 0, sub: 'markets under review' },
+      { icon: 'check', label: 'Board decisions', value: decided, sub: list.length ? `${Math.round((decided / list.length) * 100)}% of evaluations` : 'none yet', tone: decided ? 'accent' : '' },
+      { icon: 'chat', label: 'Contributions on record', value: messages.toLocaleString(), sub: 'across all evaluations' },
     ];
     if (isAdminUser()) stats.push({ icon: 'sliders', label: 'API spend', value: `$${cost.toFixed(2)}`, sub: 'all sessions, estimated' });
     $('#dash-stats').innerHTML = stats.map((s) => `
@@ -578,8 +588,8 @@
       <button type="button" class="action-tile action-tile-start" id="tile-new">
         <span class="action-icon">${icon('plus')}</span>
         <span class="action-text">
-          <span class="action-title">Start a new evaluation</span>
-          <span class="action-sub">Fill in the launch inputs, then run the Baselines meeting with all three agents.</span>
+          <span class="action-title">Table a new market evaluation</span>
+          <span class="action-sub">Set the briefing inputs, then convene the full panel for its opening Baselines meeting.</span>
         </span>
       </button>`];
     if (latest) {
@@ -587,7 +597,7 @@
       <button type="button" class="action-tile" data-open="${latest.id}">
         <span class="action-icon">${icon('play')}</span>
         <span class="action-text">
-          <span class="action-title">Resume ${escapeHtml(latest.title)}</span>
+          <span class="action-title">Reconvene ${escapeHtml(latest.title)}</span>
           <span class="action-sub">${escapeHtml(latest.country || 'Country: INPUT MISSING')} · ${latest.message_count} responses · ${fmtRelative(latest.updated_at)}</span>
         </span>
       </button>`);
@@ -604,8 +614,8 @@
   // needs its own handler.
   function renderDashResources() {
     const cards = [
-      { nav: 'guide', title: 'User Guide', sub: 'How a session runs, what each meeting does, and how to read the output.', icon: 'book' },
-      { nav: 'agents', title: 'Agent Profiles', sub: 'The Regulatory, Clinical and Commercial briefs, and how to edit them.', icon: 'users' },
+      { nav: 'guide', title: 'User Guide', sub: 'How the meetings run, what each one is for, and how to read the board’s output.', icon: 'book' },
+      { nav: 'agents', title: 'Agent Profiles', sub: 'The Regulatory, Clinical and Commercial panel briefs, and how to edit them.', icon: 'users' },
     ];
     if (state.me && state.me.is_admin) cards.push({ nav: 'admin', title: 'Admin', sub: 'Models, prompts, knowledgebase, users and cost settings.', icon: 'sliders' });
     $('#dash-resources').innerHTML = cards.map((c) => `
@@ -634,10 +644,8 @@
   function renderSession() {
     const s = state.session;
     $('#session-title').textContent = s.title;
-    // The model is no longer changeable here, so the header states which one the
-    // session is running on rather than offering a control that would rewrite
-    // history halfway through an evaluation.
-    $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)} · ${modelLabelShort(s.model || state.config.model)}`;
+    $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)}`;
+    renderSessionModelSelect();
     $('#link-docx').href = `/api/sessions/${s.id}/export.docx`;
     $('#link-pdf').href = `/api/sessions/${s.id}/export.pdf`;
     updateActiveClock(0);
@@ -661,19 +669,23 @@
     if (el) el.textContent = `⏱ ${fmtElapsed(state.sessionActiveMs + extraMs)}`;
   }
 
-  // The model is chosen once, on the New Evaluation form, and then holds for
-  // every turn of that session. Filling the picker is part of showing the form.
+  // The model is first chosen on the New Evaluation form and can be switched
+  // from the session header later; the server writes each switch into the
+  // transcript, so the record shows which turns ran on which model.
   function renderSetupModelSelect() {
-    const sel = $('#setup-model');
-    const current = state.config.model;
+    fillModelSelect($('#setup-model'), state.config.model);
+  }
+  function renderSessionModelSelect() {
+    fillModelSelect($('#session-model'), state.session.model || state.config.model);
+  }
+  function fillModelSelect(sel, current) {
     const isAdmin = Boolean(state.me && state.me.is_admin);
     // Paid models cost real spend with no per-user budget anywhere — offering
-    // them to a non-admin would just earn a 403 from the server when the
-    // session is created, so don't show them as choices in the first place.
-    // The configured default always stays selectable even if it is paid, so
-    // the picker never misrepresents what an unchanged form would run on.
+    // them to a non-admin would just earn a 403 from the server, so don't show
+    // them as choices in the first place. The current model always stays
+    // selectable even if it is paid, so the picker never misrepresents state.
     const opts = state.config.model_options.filter((o) => o.free !== false || o.id === current || isAdmin);
-    const known = opts.some((o) => o.id === current) ? opts : [{ id: current, label: `${current} (configured default)` }, ...opts];
+    const known = opts.some((o) => o.id === current) ? opts : [{ id: current, label: current === state.config.model ? `${current} (configured default)` : current }, ...opts];
     sel.innerHTML = known.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === current ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
     sel.value = current;
   }
@@ -1127,6 +1139,9 @@
   function setRunning(on) {
     state.running = on;
     $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (!['btn-stop', 'btn-export', 'btn-toggle-process'].includes(b.id)) b.disabled = on; });
+    // A turn reads the model when it starts, so a switch mid-meeting would split
+    // one meeting across two models. Switching waits until the meeting is over.
+    $('#session-model').disabled = on;
     $('#btn-stop').hidden = !on;
     if (!on) state.stopRequested = false;
   }
@@ -1190,6 +1205,7 @@
       };
       try {
         const r = await fetch(`/api/sessions/${state.session.id}/turn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(turn) });
+        await signInAgainIf401(r);
         if (!r.ok) { const j = await r.json().catch(() => ({})); return finish(false, j.error || r.statusText); }
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -1417,8 +1433,8 @@
     dlg.dataset.scope = scope;
     dlg.dataset.disagreementN = disagreementN || '';
     $('#autopilot-subtitle').textContent = scope === 'disagreement'
-      ? `Let the agents talk it out on Disagreement #${disagreementN} — ${disagreementTopic}. Set the limits, then watch.`
-      : 'Let the agents talk it out. Set the limits, then watch.';
+      ? `Let the panel debate Disagreement #${disagreementN} — ${disagreementTopic} — unaided. Set the terms of reference, then observe.`
+      : 'Let the panel debate the point unaided. Set the terms of reference, then observe.';
     $('#autopilot-auto-resolve-row').hidden = scope !== 'disagreement';
     $$('#dlg-autopilot .agent-picks input').forEach((c) => { c.checked = true; });
     $('#autopilot-length').value = 1;
@@ -1568,6 +1584,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ speaker: 'moderator', mode: 'report', kind, depth }),
       });
+      await signInAgainIf401(r);
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
       const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = ''; let done = false; let failed = null; let payload = null;
       while (!done) {
@@ -1834,6 +1851,25 @@
     $('#session-title').addEventListener('click', async () => {
       const name = prompt('Session title', state.session.title);
       if (name && name.trim() && name !== state.session.title) { state.session = await api.send('PATCH', `/api/sessions/${state.session.id}`, { title: name.trim() }); renderSession(); loadSessions(); }
+    });
+    $('#session-model').addEventListener('change', async (e) => {
+      const model = e.target.value;
+      const id = state.session.id;
+      // Hold the meeting controls until the switch is saved: a meeting started
+      // mid-save could run its first turn on the old model, and the re-render
+      // below would wipe its streaming cards.
+      setRunning(true);
+      try {
+        state.session = await api.send('PATCH', `/api/sessions/${id}`, { model });
+        toast(`Model switched to ${modelLabelShort(model)}. Turns from here on use it.`);
+      } catch (err) {
+        toast(`Could not switch model: ${err.message}`);
+        // Show what the server holds rather than assuming the switch did not land.
+        try { state.session = await api.get(`/api/sessions/${id}`); } catch { /* keep what we had */ }
+      } finally {
+        setRunning(false);
+        renderSession();
+      }
     });
     $('#btn-delete').addEventListener('click', async () => {
       if (!confirm(`Delete "${state.session.title}"? This cannot be undone.`)) return;

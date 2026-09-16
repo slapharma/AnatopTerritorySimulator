@@ -19,9 +19,10 @@ module.exports = {
   FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
-  // Offered in the New Evaluation form's model picker. The model is chosen once,
-  // when the session is created, and stored on the session (sessions.model);
-  // leaving the picker alone uses MODEL above. Paid options are here for running
+  // Offered in the New Evaluation form's model picker and the session header's.
+  // The choice is stored on the session (sessions.model) and can be switched
+  // between meetings, each switch noted in the transcript; leaving the picker
+  // alone uses MODEL above. Paid options are here for running
   // without free-tier rate limits — they cost real money per OpenRouter's
   // reported usage.cost, shown in the Cost tab as normal.
   // `free: false` gates a model to admins only (src/app.js modelRefusal)

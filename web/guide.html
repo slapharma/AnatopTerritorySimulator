@@ -43,41 +43,41 @@
   <a class="back" href="/">← Back to the app</a>
   <img src="/sla-logo.png" alt="SLA Pharma" style="width:110px;display:block;margin-bottom:16px">
   <h1>Anatop Territory Evaluation — User Guide</h1>
-  <p class="lede">A working reference for colleagues new to the tool. It covers what the app does, how to run a session, and what everything on screen means.</p>
+  <p class="lede">A briefing for colleagues new to the tool. It covers what the panel does, how to convene an evaluation, and what everything on screen means.</p>
 
   <h2>What this is</h2>
-  <p>A simulated cross-functional launch working group for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents — <strong>Ruth</strong> (Regulatory), <strong>Luca</strong> (Clinical) and <strong>Charlie</strong> (Commercial) — each play a specialist role, research the country live on the web, argue their case with evidence, and challenge each other's assumptions over several rounds. A fourth AI role (<strong>Moderator Assistant</strong>) synthesises the whole discussion into a structured decision document at the end.</p>
+  <p>A simulated cross-functional launch board for evaluating whether — and how — to launch a pharmaceutical product in a specific country. Three AI agents — <strong>Ruth</strong> (Regulatory), <strong>Luca</strong> (Clinical) and <strong>Charlie</strong> (Commercial) — each play a specialist role, research the country live on the web, make their case on the evidence, and challenge each other's assumptions over a series of meetings. A fourth AI role (<strong>Moderator Assistant</strong>) acts as board secretary, synthesising the whole discussion into a structured decision paper at the end.</p>
   <p>It is not a source of truth on its own — it is a fast, structured first pass that surfaces what's known, what's estimated, what's genuinely unresolved, and where the agents disagree, each claim tagged and sourced so you can verify it yourself.</p>
 
-  <h2>The dashboard</h2>
-  <p>The dashboard is what you land on. It carries a summary of every evaluation run so far, the two things you are most likely to want to do next (start a new one, or pick up the most recent), and links to this guide, the agent profiles and — for admins — the admin page. The saved evaluations themselves live in <strong>All simulations</strong> in the sidebar, collapsed until you open it.</p>
-  <p>Above those sits a short <strong>How an evaluation runs</strong> panel explaining the four steps. Once you know them it is just taking up room, so it has an ✕ to dismiss it. That choice is remembered in this browser only — it does not follow you to another machine, and clearing site data brings it back.</p>
+  <h2>The Boardroom</h2>
+  <p>The Boardroom is the dashboard you land on. It carries a summary of every evaluation run so far, the two things you are most likely to want to do next (start a new one, or pick up the most recent), and links to this guide, the agent profiles and — for admins — the admin page. The saved evaluations themselves live in the <strong>Evaluation Register</strong> in the sidebar, collapsed until you open it.</p>
+  <p>Above those sits a short <strong>How the board reaches a decision</strong> panel explaining the four steps. Once you know them it is just taking up room, so it has an ✕ to dismiss it. That choice is remembered in this browser only — it does not follow you to another machine, and clearing site data brings it back.</p>
   <p class="restore-row">
     <button type="button" class="btn btn-sm" id="btn-restore-process">Show the four-step panel again</button>
     <span class="muted" id="restore-note"></span>
   </p>
 
-  <h2>Starting a session</h2>
+  <h2>Convening an evaluation</h2>
   <ol>
     <li>Click <strong>New evaluation</strong> in the sidebar.</li>
     <li>Fill in what you know. Every field is optional — anything left blank is passed to the agents as <code>INPUT MISSING</code>, and they are required to say what they assumed instead rather than silently guessing.</li>
     <li><strong>Restore Default Values</strong> pre-fills the form with the saved default example (a real product, useful for a demo or a quick test). Any field you've saved as a default (see below) is included.</li>
     <li><strong>Copy from last session</strong> pre-fills the form with whatever you entered last time.</li>
-    <li>Click <strong>Start session and run Baselines</strong>. This runs all three agents in turn, each with live web search.</li>
+    <li>Click <strong>Convene the panel and run Baselines</strong>. Each of the three agents presents an opening position in turn, with live web research.</li>
   </ol>
   <p>Note: Regulator and Reimbursement Bodies are not asked for — they follow from the Country you pick, and the agents identify them themselves as their first research step.</p>
 
   <h3>Saving your own defaults</h3>
-  <p>Hover any field in the New Session form and a small <strong>Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
+  <p>Hover any field in the New evaluation briefing form and a small <strong>Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
 
-  <h2>The meetings</h2>
+  <h2>The meeting agenda</h2>
   <table>
     <tr><th>Meeting</th><th>What happens</th></tr>
-    <tr><td>Baselines</td><td>Each agent answers its own questions independently, with no visibility of what the others will say.</td></tr>
-    <tr><td>Challenge</td><td>Each agent attacks at least two assumptions made by the others, backed by evidence — concede, rebut, or log a formal disagreement.</td></tr>
-    <tr><td>Converge</td><td>Agents give base / upside / downside figures for timelines, cost, and revenue, working from the whole discussion so far.</td></tr>
-    <tr><td>Cross-talk</td><td>One free-form meeting: every agent reacts to the discussion so far, only where something genuinely changed their view.</td></tr>
-    <tr><td>Custom meeting…</td><td>Write your own instruction and pick which agents respond to it.</td></tr>
+    <tr><td>Baselines</td><td>Opening positions. Each agent presents an independent assessment, with no visibility of what the others will say.</td></tr>
+    <tr><td>Challenge</td><td>Scrutiny. Each agent tests at least two assumptions made by the others, backed by evidence — concede, rebut, or log a formal disagreement.</td></tr>
+    <tr><td>Converge</td><td>Consensus. The panel tables base / upside / downside figures for timelines, cost, and revenue, working from the whole discussion so far.</td></tr>
+    <tr><td>Cross-talk</td><td>Open floor. Every agent reacts to the debate so far, only where something genuinely changed their view.</td></tr>
+    <tr><td>Custom meeting…</td><td>Table your own agenda item and pick which agents respond to it.</td></tr>
   </table>
   <p>You can also type directly into the message box at the bottom as the moderator — address it to one agent or all of them, by name (“Ruth, what would the deficiency letter say?”) — and they'll reply.</p>
   <p>After each of the four standard meetings finishes, the Moderator Assistant automatically writes up meeting minutes — a summary per agent plus collated action points — into the <strong>Intelligence</strong> panel's <strong>Minutes</strong> tab, and emails them to you with links to view the session, jump to that meeting's transcript, or approve moving to the next one.</p>
@@ -124,13 +124,13 @@
   <h2>Reading the transcript</h2>
   <p>Agent responses are laid out in three columns — Ruth (Regulatory), Luca (Clinical), Charlie (Commercial) — always in that order, so a column position means the same agent everywhere on the page. An agent that did not speak in a round leaves its column empty rather than shifting the others along. Responses are grouped by meeting: each round is one aligned row across the three columns, under a divider naming it.</p>
 
-  <h2>Choosing the model</h2>
-  <p>Each evaluation can run on a different underlying AI model. You pick it once, under <strong>Run settings</strong> at the bottom of the New evaluation form, and it holds for every turn of that session — the session header shows which model is in use. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) and only an administrator can start a session on one. Claude Sonnet 5 is the strongest of them and by far the most expensive, so reach for it when a run has to stand up rather than for routine testing.</p>
+  <h2>Choosing and switching the model</h2>
+  <p>Each evaluation can run on a different underlying AI model. You pick the starting model under <strong>Meeting settings</strong> at the bottom of the New evaluation briefing form. You can switch it later from the model picker in the evaluation header, between meetings (it is locked while a meeting is running). A switch applies to turns from then on; earlier responses keep the model they were written on, and a <strong>Model change</strong> note is added to the transcript (shown as <em>System (model)</em> in exports) so the record shows where it happened. Free models have no per-token cost but can be slower or rate-limited; paid models cost real money (broken down on the Admin page) and only an administrator can choose one. Claude Sonnet 5 is the strongest of them and by far the most expensive, so reach for it when a run has to stand up rather than for routine testing.</p>
 
   <h2>Cost and timing</h2>
   <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The $ figure in the topbar is the API cost reported for the open session. The full breakdown — tokens, cache reads and writes, web searches, and a per-session table across every evaluation — is the <strong>Cost</strong> section of the <strong>Admin</strong> page. Cost is shown to admins only.</p>
 
-  <h2>Writing the decision output</h2>
+  <h2>The board recommendation</h2>
   <p>Once you've run at least one round, <strong>Reports → Final report</strong> in the sidebar triggers the Moderator Assistant to read the entire transcript and produce a fixed eleven-section decision document — the recommendation, the regulatory pathway, whether local clinical data is needed, how we would enter the market, the reconciled numbers, where the agents disagreed, the top risks, what would change the decision, what is still unresolved, an evidence table of every sourced claim, and the next five actions. It doesn't re-run the analysis or vote — it only synthesises what the three agents already established, keeping their tags and disagreements intact.</p>
   <p>The result lands in three places: as a Moderator Assistant message in the transcript, in the <strong>Decision</strong> tab of the Intelligence panel, and in <strong>Reports</strong>, from where it can be exported or emailed. An <strong>Interim report</strong> works the same way at any earlier point, but does not write a decision.</p>
 

@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "import-knowledgebase": "node scripts/import-knowledgebase.js"
+    "import-knowledgebase": "node scripts/import-knowledgebase.js",
+    "test": "node --test test/*.test.js"
   },
   "license": "UNLICENSED",
   "private": true,

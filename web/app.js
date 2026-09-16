@@ -206,7 +206,7 @@
       deck.className = 'slides';
       const label = document.createElement('div');
       label.className = 'slides-label';
-      label.textContent = 'Slides';
+      label.textContent = 'Summary slides';
       deck.appendChild(label);
       head.parentNode.insertBefore(deck, head);
       // Everything up to the end of the message, or to the next heading at the
@@ -711,6 +711,7 @@
   function agentGridBlock(msgs) {
     const frag = document.createDocumentFragment();
     const grid = document.createElement('div'); grid.className = 'agent-grid';
+    if (msgs.length) grid.dataset.mode = msgs[0].mode;
     for (const key of ALL) {
       const col = document.createElement('div');
       col.className = `agent-col agent-col-${key}`;
@@ -1282,6 +1283,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       el.dataset.speaker = speaker;
       el.innerHTML = `<div class="msg-head"><span class="msg-who">${escapeHtml(AGENT_LABEL[speaker])}</span><span class="msg-mode">${escapeHtml(MODE_LABEL[mode] || mode)}</span><span class="msg-meta">now</span></div><div class="msg-status"><span class="spinner"></span><span class="txt">Thinking…</span><span class="turn-timer">0:00</span></div><div class="msg-searches"></div><div class="msg-body"></div>`;
       appendTarget.appendChild(el);
+      // In a column the new card can sit well above the bottom of the transcript
+      // (a resumed agent whose column is shorter than the others), so bring it
+      // into view rather than leaving it streaming off-screen.
+      if (container) el.scrollIntoView({ block: 'nearest' });
       const body = $('.msg-body', el); const statusEl = $('.msg-status .txt', el); const searchesEl = $('.msg-searches', el);
       const turnTimerEl = $('.msg-status .turn-timer', el);
       const turnStart = Date.now();
@@ -1388,6 +1393,27 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     return null;
   }
 
+  // The columns a live meeting's turns stream into, keyed by agent. Reuses the
+  // transcript's last grid when it is this meeting's and nothing follows it
+  // (resuming, or retrying one agent), so answers line up with the ones already
+  // there; otherwise starts a new grid. fresh: always start a new one.
+  function meetingColumns(t, mode, { fresh = false } = {}) {
+    const last = t.lastElementChild;
+    if (!fresh && last && last.classList.contains('agent-grid') && last.dataset.mode === mode) {
+      const cols = {};
+      for (const a of ALL) cols[a] = last.querySelector(`:scope > .agent-col[data-speaker="${a}"]`);
+      if (ALL.every((a) => cols[a])) return cols;
+    }
+    const grid = document.createElement('div'); grid.className = 'agent-grid'; grid.dataset.mode = mode;
+    const cols = {};
+    for (const a of ALL) {
+      const col = document.createElement('div'); col.className = `agent-col agent-col-${a}`; col.dataset.speaker = a;
+      grid.appendChild(col); cols[a] = col;
+    }
+    t.appendChild(grid);
+    return cols;
+  }
+
   async function runSequence(turns) {
     if (state.running) { toast('A turn is already running'); return; }
     setRunning(true);
@@ -1401,17 +1427,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       const gridEligible = turns.length === 3 && GRID_MODES.includes(turns[0].mode) &&
         turns.every((x) => x.mode === turns[0].mode) && new Set(turns.map((x) => x.speaker)).size === 3 &&
         turns.every((x) => ALL.includes(x.speaker));
-      let cols = null;
-      if (gridEligible) {
-        const grid = document.createElement('div'); grid.className = 'agent-grid';
-        cols = {};
-        for (const a of ALL) {
-          const col = document.createElement('div'); col.className = `agent-col agent-col-${a}`; col.dataset.speaker = a;
-          grid.appendChild(col); cols[a] = col;
-        }
-        t.appendChild(grid);
-        t.scrollTop = t.scrollHeight;
-      }
+      // Any turns of one standard meeting go in their agents' columns, not just
+      // a full trio: a resumed meeting or a Retry asks one or two agents, and
+      // their answers belong under their own heads beside the others'.
+      const columned = GRID_MODES.includes(turns[0].mode) &&
+        turns.every((x) => x.mode === turns[0].mode && ALL.includes(x.speaker));
+      const cols = columned ? meetingColumns(t, turns[0].mode) : null;
+      if (cols) t.scrollTop = t.scrollHeight;
       let allOk = true;
       for (const turn of turns) {
         if (state.stopRequested) { toast('Stopped'); allOk = false; break; }
@@ -1436,14 +1458,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     try {
       const t = $('#transcript');
       $('.empty', t)?.remove();
-      const grid = document.createElement('div'); grid.className = 'agent-grid';
-      const cols = {};
-      for (const a of ALL) {
-        const col = document.createElement('div'); col.className = `agent-col agent-col-${a}`; col.dataset.speaker = a;
-        grid.appendChild(col);
-        cols[a] = col;
-      }
-      t.appendChild(grid);
+      const cols = meetingColumns(t, 'opening', { fresh: true });
       t.scrollTop = t.scrollHeight;
       await Promise.allSettled(ALL.map((a) => runTurn({ speaker: a, mode: 'opening' }, cols[a])));
       // Refresh from the server once all three have settled — each turn's own

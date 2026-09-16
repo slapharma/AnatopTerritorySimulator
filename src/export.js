@@ -75,7 +75,7 @@ function docxBlocks(md) {
   const H = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
   for (const b of tagSlides(parseBlocks(md))) {
     if (b.type === 'slides-label') out.push(new Paragraph({
-      children: [new TextRun({ text: 'S L I D E S', font: FONT, size: 15, bold: true, color: COLOURS.muted })],
+      children: [new TextRun({ text: 'S U M M A R Y   S L I D E S', font: FONT, size: 15, bold: true, color: COLOURS.muted })],
       border: { top: { style: BorderStyle.SINGLE, size: 6, color: 'E2E8F0' } },
       spacing: { before: 280, after: 120 },
     }));
@@ -304,7 +304,7 @@ function pdfBlocks(md) {
   const flushList = () => { if (list) { out.push(list.ordered ? { ol: list.items, margin: [0, 0, 0, 6] } : { ul: list.items, margin: [0, 0, 0, 6] }); list = null; } };
   for (const b of tagSlides(parseBlocks(md))) {
     if (b.type !== 'bullet') flushList();
-    if (b.type === 'slides-label') out.push({ text: 'S L I D E S', bold: true, fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 14, 0, 5] });
+    if (b.type === 'slides-label') out.push({ text: 'S U M M A R Y   S L I D E S', bold: true, fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 14, 0, 5] });
     else if (b.type === 'slide-title') out.push({ text: [...(b.n ? [{ text: `${b.n}. `, bold: true, color: '#' + COLOURS.link }] : []), ...pdfRuns(b.runs, { bold: true })], fontSize: 10, margin: [0, 6, 0, 2] });
     else if (b.type === 'heading') out.push({ text: pdfRuns(b.runs), style: `h${Math.min(b.level, 4)}` });
     else if (b.type === 'para') out.push({ text: pdfRuns(b.runs), margin: [0, 0, 0, 6] });

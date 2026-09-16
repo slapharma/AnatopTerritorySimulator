@@ -150,6 +150,7 @@ app.get('/api/config', (req, res) => {
     autopilot_char_stops: config.AUTOPILOT_CHAR_STOPS,
     autopilot: config.AUTOPILOT,
     report_depth: config.REPORT_DEPTH,
+    turn_timeout_ms: config.TURN_TIMEOUT_MS,
     email_configured: Boolean(process.env.RESEND_API_KEY),
   });
 });
@@ -509,8 +510,11 @@ const VALID_TURN_MODES = new Set(['opening', 'round2', 'round3', 'crosstalk', 'r
 // its prerequisite has an answer from every agent produces nonsense (e.g.
 // "attack two assumptions from the others" with nothing yet said).
 const ROUND_SEQUENCE = ['opening', 'round2', 'round3', 'crosstalk'];
+// Completed = finished without error. An unfinished row (text NULL, error
+// NULL) is a turn still running or orphaned by a dropped connection, not an
+// answer the next meeting can build on.
 function agentsWithCompletedRound(messages, mode) {
-  return new Set(messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error).map((m) => m.speaker));
+  return new Set(messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error && m.text != null).map((m) => m.speaker));
 }
 
 app.post('/api/sessions/:id/turn', async (req, res) => {
@@ -631,6 +635,14 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       return res.end();
     }
 
+    // The row can be gone by now: Resume in the app clears a turn it believes
+    // is stuck. Saving sources or disagreements against a deleted message would
+    // leave them pointing at nothing, so discard this result instead.
+    if (!(await db.getMessage(msg.id))) {
+      console.warn(`[turn ${msg.id}] ${speaker}/${mode} finished after its row was cleared; result discarded`);
+      send('error', { message_id: msg.id, message: 'This turn was cleared before it finished, so its answer was discarded.', code: 'CLEARED' });
+      return;
+    }
     let text = await assembleText(id, msg.id, speaker, result.text, result.trace);
     if (mode === 'autopilot') text = enforceCharLimit(text, req.body.max_chars);
     const u = result.usage;

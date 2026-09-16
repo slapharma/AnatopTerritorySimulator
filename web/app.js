@@ -11,8 +11,13 @@
   // can fix that, so go to the sign-in page and come back here afterwards.
   // The returned promise never settles: the page is navigating away, and
   // letting the caller carry on would only flash a "Not signed in" error.
+  // signingInAgain lets this redirect past the leave-page prompt
+  // (warnIfMeetingRunning): with the session gone nothing more can run, and a
+  // "Stay" here would leave a page stuck on a promise that never settles.
+  let signingInAgain = false;
   function signInAgainIf401(r) {
     if (r.status !== 401) return null;
+    signingInAgain = true;
     location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
     return new Promise(() => {});
   }
@@ -1042,9 +1047,107 @@
   // Marks each Simulation Process step as "ran" once at least one message exists for its mode.
   function renderMeetingNav() {
     const s = state.session;
+    if (!s) return;
     $$('#toolbar [data-round]').forEach((b) => {
-      b.classList.toggle('ran', s.messages.some((m) => m.mode === b.dataset.round));
+      const mode = b.dataset.round;
+      const started = s.messages.some((m) => m.mode === mode);
+      const complete = started && !turnsForRound(mode, ALL).length;
+      b.classList.toggle('ran', complete);
+      b.classList.toggle('partial', started && !complete);
     });
+    const stalled = stalledMeeting();
+    const resume = $('#btn-resume-meeting');
+    resume.hidden = !stalled;
+    if (stalled) {
+      const label = MODE_LABEL[stalled.mode] || stalled.mode;
+      resume.textContent = `↻ Resume ${label}`;
+      resume.title = `${label} stopped before every agent answered. Still to answer: ${stalled.pending.map((k) => AGENT_LABEL[k] || k).join(', ')}.`;
+    }
+  }
+
+  // The latest standard meeting that has been started but not answered by every
+  // agent, as { mode, pending }, or null. Only the latest one: an earlier gap
+  // is caught by the round-order check before a later meeting can start.
+  // Matches the server's stale-turn sweep (TURN_TIMEOUT_MS + 2 min, see
+  // STALE_TURN_MS in src/db.js): an unfinished row younger than this may still
+  // be running.
+  const resumeStaleMs = () => ((state.config && state.config.turn_timeout_ms) || 750000) + 120000;
+  function stalledMeeting() {
+    const s = state.session;
+    if (!s) return null;
+    for (const mode of [...GRID_MODES].reverse()) {
+      if (!s.messages.some((m) => m.mode === mode && m.role === 'agent')) continue;
+      const pending = turnsForRound(mode, ALL);
+      return pending.length ? { mode, pending } : null;
+    }
+    return null;
+  }
+
+  // Unsticks a meeting that stopped partway: clears the pending agents'
+  // cut-off or failed rows for that meeting (a cut-off row also blocks that
+  // agent's next turn on the server for ~14 minutes), then asks the agents
+  // who have not answered, in order.
+  async function resumeStalledMeeting() {
+    if (state.running) return;
+    const id = state.session.id;
+    // Hold the controls (this button included) through the reload and the
+    // confirms, so a double-click or a meeting started meanwhile cannot run
+    // alongside it. Released before runSequence, which takes them itself.
+    setRunning(true);
+    let go = false;
+    try {
+      // Work from the server's copy: a turn that failed on this page, or one
+      // started from another tab, is not in the local message list, and a row
+      // missing here would be left behind to block that agent with a 409.
+      let fresh;
+      try {
+        fresh = await api.get(`/api/sessions/${id}`);
+      } catch (err) {
+        return toast(`Could not reload the evaluation: ${err.message}`);
+      }
+      if (!state.session || state.session.id !== id) return; // user opened another evaluation meanwhile
+      state.session.messages = fresh.messages;
+      renderTranscript();
+      go = await confirmAndClearStalled(id);
+    } finally {
+      setRunning(false);
+    }
+    if (go) await runSequence(go);
+  }
+
+  // Returns the turns to run, or false. Assumes the caller holds setRunning.
+  async function confirmAndClearStalled(id) {
+    const stalled = stalledMeeting();
+    if (!stalled) { toast('Every agent has answered this meeting. Nothing to resume.'); return false; }
+    const { mode, pending } = stalled;
+    const label = MODE_LABEL[mode] || mode;
+    const unmet = unmetPriorRound(mode);
+    if (unmet) { toast(`Run ${MODE_LABEL[unmet] || unmet} for all ${ALL.length} agents before resuming ${label}.`); return false; }
+    const who = pending.map((k) => AGENT_LABEL[k] || k).join(', ');
+    if (!confirm(`Resume ${label}?
+
+${who} will be asked, in order. Any of their turns in this meeting that were cut off or failed are cleared first.`)) return false;
+    const stuck = state.session.messages.filter((m) => m.mode === mode && m.role === 'agent' && pending.includes(m.speaker) && (m.error || m.text == null));
+    // An unfinished row this young may still be streaming somewhere (another
+    // tab, or a server turn that outlived its page). Clearing it discards that
+    // work, so say so and ask again rather than deciding silently.
+    const recent = stuck.filter((m) => !m.error && Date.now() - new Date(m.created_at).getTime() < resumeStaleMs());
+    if (recent.length) {
+      const names = recent.map((m) => `${AGENT_LABEL[m.speaker] || m.speaker} (started ${fmtRelative(m.created_at)})`).join(', ');
+      if (!confirm(`${names} may still be running, in another tab or on the server.
+
+Clear it and ask again anyway? Any answer still on its way will be discarded.`)) return false;
+    }
+    try {
+      for (const m of stuck) await api.send('DELETE', `/api/sessions/${id}/messages/${m.id}`);
+    } catch (err) {
+      toast(`Could not clear the stuck turn: ${err.message}`);
+      return false;
+    }
+    if (!state.session || state.session.id !== id) return false;
+    state.session.messages = state.session.messages.filter((m) => !stuck.includes(m));
+    renderTranscript();
+    return pending.map((speaker) => ({ speaker, mode }));
   }
 
   function renderMinutes() {
@@ -1150,7 +1253,18 @@
     // one meeting across two models. Switching waits until the meeting is over.
     $('#session-model').disabled = on;
     $('#btn-stop').hidden = !on;
-    if (!on) state.stopRequested = false;
+    if (!on) { state.stopRequested = false; renderMeetingNav(); }
+  }
+
+  // Meetings and autopilot are driven from this page, one request per turn,
+  // and on Vercel a turn can die with the connection that started it. Reloading
+  // or navigating away mid-meeting therefore strands the current turn and
+  // never asks the remaining agents, so ask the browser to confirm first.
+  function warnIfMeetingRunning(e) {
+    if (!state.running || signingInAgain) return undefined;
+    e.preventDefault();
+    e.returnValue = ''; // older Chromium/Safari still need this to show the prompt
+    return '';
   }
 
   // ---------------- running turns ----------------
@@ -1252,11 +1366,26 @@
     });
   }
 
-  // Agents in `agents` that don't already have a successful (non-error) response
-  // for this round — what re-clicking the round button should actually run.
+  // Agents in `agents` that don't already have a finished answer for this
+  // round — what re-clicking the round button should actually run. A row with
+  // no error but text still null is not an answer: it is a turn in flight, or
+  // one orphaned when the page that drove it was left (see messageElement).
+  function agentsAnswered(mode) {
+    return new Set(state.session.messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error && m.text != null).map((m) => m.speaker));
+  }
   function turnsForRound(mode, agents) {
-    const done = new Set(state.session.messages.filter((m) => m.mode === mode && m.role === 'agent' && !m.error).map((m) => m.speaker));
+    const done = agentsAnswered(mode);
     return agents.filter((a) => !done.has(a));
+  }
+  // The first earlier standard meeting that not every agent has answered, or
+  // null. Mirrors the server's round-order check (src/app.js).
+  function unmetPriorRound(mode) {
+    const seqIdx = GRID_MODES.indexOf(mode);
+    for (let i = 0; i < seqIdx; i++) {
+      const done = agentsAnswered(GRID_MODES[i]);
+      if (ALL.some((a) => !done.has(a))) return GRID_MODES[i];
+    }
+    return null;
   }
 
   async function runSequence(turns) {
@@ -1721,12 +1850,8 @@
       // Mirrors the server's round-order check (src/app.js) so a premature
       // click gets one clear toast instead of three separate "Turn failed"
       // messages, one per agent.
-      const seqIdx = GRID_MODES.indexOf(mode);
-      for (let i = 0; i < seqIdx; i++) {
-        const prior = GRID_MODES[i];
-        const done = new Set(state.session.messages.filter((m) => m.mode === prior && m.role === 'agent' && !m.error).map((m) => m.speaker));
-        if (ALL.some((a) => !done.has(a))) return toast(`Run ${MODE_LABEL[prior] || prior} for all ${ALL.length} agents before starting ${MODE_LABEL[mode] || mode}.`);
-      }
+      const prior = unmetPriorRound(mode);
+      if (prior) return toast(`Run ${MODE_LABEL[prior] || prior} for all ${ALL.length} agents before starting ${MODE_LABEL[mode] || mode}.`);
       const pending = turnsForRound(mode, ALL);
       if (pending.length === ALL.length) return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
       if (!pending.length) {
@@ -1739,6 +1864,7 @@
       toast(`Resuming ${MODE_LABEL[mode] || mode}: ${pending.length} agent(s) haven't answered yet.`);
       return runSequence(pending.map((a) => ({ speaker: a, mode })));
     }));
+    $('#btn-resume-meeting').addEventListener('click', resumeStalledMeeting);
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
 
     // Reports ▾
@@ -1942,6 +2068,7 @@
     };
     try { if (localStorage.getItem(PROCESS_HIDDEN) === '1') $('#process-callout').hidden = true; } catch { /* ignore */ }
     $('#btn-close-process').addEventListener('click', () => setProcessHidden(true));
+    addEventListener('beforeunload', warnIfMeetingRunning);
     // Escape pressed with focus inside the frame: the keydown never reaches
     // this document, so the framed page forwards it.
     addEventListener('message', (e) => {

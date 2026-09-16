@@ -74,6 +74,11 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .sim-run-extra { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; margin-top: 2px; border-top: 1px solid var(--border); }
 .sim-run .btn-quiet { background: none; border-color: transparent; color: var(--text-2); min-height: 32px; }
 .sim-run .btn-quiet:hover { background: var(--surface); color: var(--text); }
+/* A meeting some agents have answered and others have not. */
+.meeting-btn.partial { color: var(--estimate-fg); }
+.meeting-btn.partial .meeting-num { background: var(--estimate-bg); border-color: var(--estimate-fg); color: var(--estimate-fg); }
+.sim-run .btn-resume { justify-content: flex-start; min-height: 32px; margin-top: 2px; background: var(--estimate-bg); border-color: var(--estimate-fg); color: var(--estimate-fg); font-weight: 600; white-space: normal; text-align: left; }
+.sim-run .btn-resume:hover:not(:disabled) { filter: brightness(.97); }
 .sidebar-panel .meeting-steps { flex-direction: column; align-items: stretch; gap: 2px; padding: 0; background: none; border-radius: 0; }
 .sidebar-panel .meeting-btn { justify-content: flex-start; border-radius: 8px; min-height: 32px; }
 .sidebar-panel .menu { display: block; }

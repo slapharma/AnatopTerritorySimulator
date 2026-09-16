@@ -37,6 +37,9 @@
           <button class="meeting-btn" data-round="round3" type="button" title="Consensus: the panel tables base, upside and downside figures"><span class="meeting-num">3</span>Converge</button>
           <button class="meeting-btn" data-round="crosstalk" type="button" title="Open floor: every panel member responds to the debate so far"><span class="meeting-num">4</span>Cross-talk</button>
         </div>
+        <!-- Shown only when the latest meeting stopped before every agent
+             answered (a reload mid-meeting, a failed or cut-off turn). -->
+        <button class="btn btn-sm btn-block btn-resume" id="btn-resume-meeting" type="button" hidden></button>
         <div class="sim-run-extra">
           <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-autopilot" type="button" title="Let the panel debate over several cycles unaided, within limits you set">Autopilot…</button>
           <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-custom" type="button" title="Table your own agenda item for the panel">Custom meeting…</button>

@@ -723,12 +723,19 @@
   // The heads live inside the transcript as a sticky row, not above it: that
   // way they share the scroll container's box and padding, so they stay aligned
   // with the columns whether or not a scrollbar is taking width.
+  // Headshots cropped from the dashboard hero photo (web/avatars/<key>.jpg).
+  // Only the three founding agents have one; any agent added to the roster
+  // later keeps the plain coloured dot.
+  const AGENT_AVATARS = new Set(['regulatory', 'clinical', 'commercial']);
   function columnHeadsRow() {
     const row = document.createElement('div');
     row.className = 'agent-columns-heads';
     row.id = 'agent-columns-heads';
     row.innerHTML = ALL
-      .map((key) => `<div class="agent-head agent-head-${key}" data-speaker="${key}"${speakerStyle(key)}>${escapeHtml(AGENT_LABEL[key])}</div>`)
+      .map((key) => {
+        const avatar = AGENT_AVATARS.has(key) ? `<img class="agent-avatar" src="/avatars/${key}.jpg" alt="" width="36" height="36">` : '';
+        return `<div class="agent-head agent-head-${key}${avatar ? ' has-avatar' : ''}" data-speaker="${key}"${speakerStyle(key)}>${avatar}${escapeHtml(AGENT_LABEL[key])}</div>`;
+      })
       .join('');
     return row;
   }

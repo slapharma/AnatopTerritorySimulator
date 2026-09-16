@@ -245,6 +245,9 @@ body.non-admin .msg-cost { display: none; }
   border: 1px solid var(--border); border-top: 7px solid var(--moderator);
 }
 .agent-head::before { content: ''; flex: none; width: 12px; height: 12px; border-radius: 999px; background: currentColor; }
+/* Headshot replaces the dot; the ring picks up the agent's colour. */
+.agent-head.has-avatar::before { display: none; }
+.agent-avatar { flex: none; width: 36px; height: 36px; border-radius: 999px; object-fit: cover; box-shadow: 0 0 0 2px currentColor; background: var(--surface); }
 .agent-head-regulatory { background: var(--regulatory-soft); border-color: #BFDBFE; border-top-color: var(--regulatory); color: var(--regulatory); }
 .agent-head-clinical { background: var(--clinical-soft); border-color: #99F6E4; border-top-color: var(--clinical); color: var(--clinical); }
 .agent-head-commercial { background: var(--commercial-soft); border-color: #DDD6FE; border-top-color: var(--commercial); color: var(--commercial); }

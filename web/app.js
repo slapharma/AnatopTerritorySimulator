@@ -1242,7 +1242,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $$('.intel-cuts .chip', box).forEach((c) => c.addEventListener('click', () => { state.intelCut = c.dataset.cut; renderIntelligence(); }));
     renderIntelligenceBody($('#intel-body', box));
     $$('.intel-open', box).forEach((b) => b.addEventListener('click', () => {
-      const m = state.session.messages.find((x) => x.id === Number(b.dataset.msg));
+      // Compare as strings: messages.id is bigserial, which node-pg returns as "123".
+      const m = state.session.messages.find((x) => String(x.id) === b.dataset.msg);
       if (m) openMessageModal(m, m.role === 'user' ? 'user' : m.speaker);
     }));
   }
@@ -1862,8 +1863,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     // Deep link from a meeting-minutes email (?session=<id>); otherwise land on
     // the dashboard rather than silently reopening whatever session was last used.
     const params = new URLSearchParams(location.search);
-    const linkedId = Number(params.get('session'));
-    if (linkedId && state.sessions.some((s) => s.id === linkedId)) {
+    // Compare as strings: sessions.id is bigserial, which node-pg returns as "123".
+    const linkedId = params.get('session');
+    if (linkedId && state.sessions.some((s) => String(s.id) === linkedId)) {
       await openSession(linkedId);
       if (params.get('approved')) toast(`Meeting approved: ${MODE_LABEL[params.get('approved')] || params.get('approved')}`);
     } else {

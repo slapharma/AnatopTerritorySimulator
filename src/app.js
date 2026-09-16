@@ -755,7 +755,10 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
     if (!session) return res.status(404).json({ error: 'Session not found' });
     const round = String(req.body.round || '').slice(0, 200);
     const label = String(req.body.label || round).slice(0, 200);
-    const anchorMessageId = Number.isInteger(req.body.anchor_message_id) ? req.body.anchor_message_id : null;
+    // The browser sends the id as node-pg gave it: messages.id is bigserial, so a string ("123").
+    const rawAnchor = req.body.anchor_message_id;
+    const anchorNum = typeof rawAnchor === 'string' && /^\d+$/.test(rawAnchor) ? Number(rawAnchor) : rawAnchor;
+    const anchorMessageId = Number.isSafeInteger(anchorNum) ? anchorNum : null;
     const result = await runTurn({
       inputs: session.inputs, agentKey: 'moderator', mode: 'meeting_minutes', instruction: label,
       messages: session.messages, model: session.model || config.MODEL, onEvent: () => {},

@@ -525,6 +525,7 @@
     check: '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
     chat: '<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 2"/>',
+    layers: '<path d="M12 3 2.5 8 12 13l9.5-5z"/><path d="M2.5 12.5 12 17.5l9.5-5M2.5 16.5 12 21.5l9.5-5"/>',
     folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.5h8.8A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>',
   };
   const icon = (name, cls = '') =>
@@ -561,7 +562,6 @@
   function renderDashboard() {
     renderDashStats();
     renderDashActions();
-    renderDashResources();
   }
 
   // KPI strip. Cost is admin-only for the same reason the session header's cost
@@ -622,23 +622,36 @@
     if (resume) resume.addEventListener('click', () => openSession(Number(resume.dataset.open)));
   }
 
-  // Big tiles for the same three pages the sidebar links to. They open in the
-  // left slide-over through the shared .navlink delegation, so nothing here
-  // needs its own handler.
-  function renderDashResources() {
-    const cards = [
-      { nav: 'guide', title: 'User Guide', sub: 'How the meetings run, what each one is for, and how to read the board’s output.', icon: 'book' },
-      { nav: 'agents', title: 'Agent Profiles', sub: 'The Regulatory, Clinical and Commercial panel briefs, and how to edit them.', icon: 'users' },
+  // Header power buttons, filled into every view's .power-nav. User Guide,
+  // Agents and Admin open the left slide-over through the shared [data-nav]
+  // delegation; Intelligence only goes in the session header
+  // (data-intelligence), since the panel it opens lives in that view.
+  function renderPowerNav() {
+    const links = [
+      { nav: 'guide', title: 'User Guide', label: 'User Guide', icon: 'book' },
+      { nav: 'agents', title: 'Agent Profiles', label: 'Agents', icon: 'users' },
     ];
-    if (state.me && state.me.is_admin) cards.push({ nav: 'admin', title: 'Admin', sub: 'Models, prompts, knowledgebase, users and cost settings.', icon: 'sliders' });
-    $('#dash-resources').innerHTML = cards.map((c) => `
-      <button type="button" class="resource-card navlink" data-nav="${c.nav}" data-nav-title="${escapeHtml(c.title)}">
-        <span class="resource-icon">${icon(c.icon)}</span>
-        <span class="resource-text">
-          <span class="resource-title">${escapeHtml(c.title)}</span>
-          <span class="resource-sub">${escapeHtml(c.sub)}</span>
-        </span>
-      </button>`).join('');
+    if (state.me && state.me.is_admin) links.push({ nav: 'admin', title: 'Admin', label: 'Admin', icon: 'sliders' });
+    const linkHtml = links.map((l) => `
+      <button type="button" class="btn power-btn" data-nav="${l.nav}" data-nav-title="${escapeHtml(l.title)}" title="${escapeHtml(l.title)}" aria-pressed="false">${icon(l.icon)}<span>${escapeHtml(l.label)}</span></button>`).join('');
+    const intelHtml = `
+      <button type="button" class="btn btn-primary power-btn" id="btn-warroom" aria-pressed="false" title="The board pack: sources, disagreements, decision, minutes and agent notes">${icon('layers')}<span>Intelligence</span></button>`;
+    $$('.power-nav').forEach((nav) => { nav.innerHTML = (nav.hasAttribute('data-intelligence') ? intelHtml : '') + linkHtml; });
+    syncPowerNav();
+  }
+
+  // Pressed state mirrors whichever drawer is open, so the header shows it.
+  function syncPowerNav() {
+    $$('.power-btn[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === state.navPanel)));
+    const intel = $('#btn-warroom');
+    if (intel) intel.setAttribute('aria-pressed', String(state.warRoomOpen));
+  }
+
+  // Intelligence: floating pop-out panel toggle.
+  function setWarRoom(open) {
+    state.warRoomOpen = open;
+    $('#war-room').classList.toggle('open', open);
+    syncPowerNav();
   }
 
   // ---------------- session view ----------------
@@ -2079,8 +2092,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         renderDecisionTab();
       }
       renderReports();
-      state.warRoomOpen = true;
-      $('#war-room').classList.add('open');
+      setWarRoom(true);
       $$('.tab').find((tt) => tt.dataset.tab === 'reports').click();
       toast(`${KIND_LABEL[kind]} generated.`);
     } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); }
@@ -2101,6 +2113,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     // false, no auth configured at all) is treated as admin, same as every
     // server-side admin gate in this app (auth.js noAuthConfigured()).
     document.body.classList.toggle('non-admin', Boolean(me.authenticated) && !me.is_admin);
+    renderPowerNav();
     // These three open in the left slide-over, not a new tab: reading the guide
     // or editing an agent mid-meeting shouldn't take you out of the session.
     const links = [
@@ -2374,11 +2387,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       state.activeTab = tab.dataset.tab;
     }));
 
-    // Intelligence: floating pop-out panel toggle.
-    function setWarRoom(open) {
-      state.warRoomOpen = open;
-      $('#war-room').classList.toggle('open', open);
-    }
+    // #btn-warroom is rendered into the session header by renderPowerNav().
     $('#btn-warroom').addEventListener('click', () => setWarRoom(!state.warRoomOpen));
     $('#btn-warroom-close').addEventListener('click', () => setWarRoom(false));
 
@@ -2394,6 +2403,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         // Drop the frame so an admin edit isn't left half-typed behind a
         // closed panel, and so the next open shows fresh server state.
         $('#nav-frame').removeAttribute('src');
+        syncPowerNav();
         return;
       }
       const url = `/${page}.html`;
@@ -2403,11 +2413,12 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       $('#nav-frame').src = url;
       panel.classList.add('open');
       panel.setAttribute('aria-hidden', 'false');
+      syncPowerNav();
     }
-    // Delegated from the document: .navlink is used by both the sidebar foot
-    // and the dashboard's Reference tiles, and the latter are re-rendered.
+    // Delegated from the document: [data-nav] is on both the sidebar foot
+    // links and the header power buttons (rendered after load).
     document.addEventListener('click', (e) => {
-      const btn = e.target.closest('.navlink');
+      const btn = e.target.closest('[data-nav]');
       if (!btn) return;
       setNavPanel(btn.dataset.nav === state.navPanel ? null : btn.dataset.nav, btn.dataset.navTitle);
     });

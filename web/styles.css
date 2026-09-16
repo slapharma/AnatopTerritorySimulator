@@ -610,8 +610,22 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 }
 
 /* ---------- meeting minutes / agent notes (Intelligence tabs) ---------- */
-.minutes-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
-.minutes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.minutes-list { list-style: none; margin: 0; padding: 0; }
+.minutes-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 6px; }
+.minutes-head { display: flex; align-items: center; gap: 8px; }
+.minutes-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: none; background: none; padding: 0; cursor: pointer; font: inherit; text-align: left; color: var(--text); }
+.minutes-toggle::after { content: '▸'; margin-left: auto; color: var(--muted); }
+.minutes-card.open .minutes-toggle::after { content: '▾'; }
+.minutes-num { flex: none; width: 20px; height: 20px; border-radius: 999px; background: var(--surface-2); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.minutes-date { font-size: 11px; white-space: nowrap; }
+.minutes-detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.intel-open { border: none; background: none; padding: 0; font: inherit; color: var(--text); cursor: pointer; text-align: left; }
+.intel-open:hover { color: var(--primary); text-decoration: underline; }
+.dis-raised { font-size: 11px; color: var(--muted); margin: 2px 0 6px; }
+.agent-chip { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--speaker, var(--text-2)); background: color-mix(in srgb, var(--speaker, #64748B) 12%, white); }
+.dis-raised .agent-chip { margin-left: 2px; }
+.inputs-model { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.inputs-model .model-select { width: 100%; }
 .minutes-head .label { font-weight: 700; font-size: 12.5px; }
 .minutes-head .spacer { flex: 1; }
 .minutes-approved { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--verified-bg); color: var(--verified-fg); }

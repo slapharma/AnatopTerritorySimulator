@@ -1,16 +1,25 @@
 'use strict';
 // web/app.js is a browser IIFE, so (as in the other web/app.js vm tests)
-// evaluate meetingColumns() + runSequence() together in a vm context, with
-// runTurn/setRunning/toast/generateMeetingMinutes/loadSessions stubbed the
-// way the app itself calls them, and a minimal fake DOM in place of #transcript.
+// evaluate turnsForRound/agentsAnswered + meetingColumns() + runSequence()
+// together in a vm context, with runTurn/setRunning/toast/
+// generateMeetingMinutes/loadSessions stubbed the way the app itself calls
+// them, and a minimal fake DOM in place of #transcript.
 //
-// Bug: runSequence only ever built columns for a full 3-agent trio
+// Bug 1: runSequence only ever built columns for a full 3-agent trio
 // (gridEligible), so a resumed meeting's 2 remaining agents, or a single
 // Retry, fell through to `cols = null` and runTurn(turn, undefined) — the
 // turn rendered full-width below the grid instead of in its agent's column.
 // The fix widens the check to "every turn is the same standard-meeting mode,
 // spoken by a real agent" (`columned`), regardless of count, and reuses the
 // existing grid via meetingColumns() instead of always creating one.
+//
+// Bug 2: minutes were only ever generated for a fresh full-trio run
+// (gridEligible), so a meeting finished by a resume or a single Retry never
+// got minutes at all. The fix generates minutes once every agent has now
+// answered the meeting (turnsForRound(mode, ALL) is empty), provided either
+// it was a full trio run (which always refreshes minutes) or the round has
+// no minutes yet — so a resume/retry that completes a meeting gets minutes
+// exactly once, and a full trio re-run still refreshes them.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -54,19 +63,31 @@ class FakeElement {
   }
 }
 
+let seq = 0;
+const row = (speaker, mode, extra = {}) => ({ id: ++seq, seq, role: 'agent', speaker, mode, text: 'answer', error: null, ...extra });
+
 // runTurnResult: 'ok' (default), or a function (turn, container) => boolean/throws,
 // for tests that need a turn to fail.
-function loadHelpers({ running = false, runTurnResult = 'ok' } = {}) {
+// messages: rows already sitting in state.session.messages before the run
+// (an agent's already-finished answer from an earlier turn) — this is what
+// turnsForRound reads to decide whether the meeting is now complete.
+// meetingMinutes: state.session.meeting_minutes before the run.
+function loadHelpers({ running = false, runTurnResult = 'ok', messages = [], meetingMinutes = [] } = {}) {
   const src = fs.readFileSync(WEB_APP_JS, 'utf8');
-  const start = src.indexOf("  // The columns a live meeting's turns stream into, keyed by agent.");
+  const start = src.indexOf('  // Agents in `agents` that don');
   const end = src.indexOf('  // Round 1 specifically');
-  assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did meetingColumns/runSequence move?');
+  assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did agentsAnswered/turnsForRound/runSequence move?');
+  // The minutes rule lives in its own helper, shared with parallel Baselines
+  // and the inline Retry; generateMeetingMinutes itself stays stubbed below.
+  const minutesStart = src.indexOf('  // Minutes for a standard meeting once every agent');
+  const minutesEnd = src.indexOf('  async function generateMeetingMinutes(');
+  assert.ok(minutesStart >= 0 && minutesEnd > minutesStart, 'markers not found in web/app.js — did writeMinutesIfComplete move?');
 
   const t = new FakeElement('div');
   const calls = { runTurn: [], setRunning: [], toast: [], generateMeetingMinutes: [], loadSessions: 0 };
   const ctx = {
-    ALL, GRID_MODES,
-    state: { running, stopRequested: false },
+    ALL, GRID_MODES, Set,
+    state: { running, stopRequested: false, session: { messages: messages.slice(), meeting_minutes: meetingMinutes.slice() } },
     document: {
       createElement: (tag) => new FakeElement(tag),
       querySelector: (sel) => (sel === '#transcript' ? t : null),
@@ -75,15 +96,18 @@ function loadHelpers({ running = false, runTurnResult = 'ok' } = {}) {
     toast: (msg) => calls.toast.push(msg),
     runTurn: async (turn, container) => {
       calls.runTurn.push({ turn, container });
-      if (typeof runTurnResult === 'function') return runTurnResult(turn, container);
-      return true;
+      const ok = typeof runTurnResult === 'function' ? runTurnResult(turn, container) : true;
+      // Mirror what a real successful turn leaves behind: a finished answer
+      // in state.session.messages, which is what turnsForRound looks at.
+      if (ok) ctx.state.session.messages.push(row(turn.speaker, turn.mode));
+      return ok;
     },
     generateMeetingMinutes: (mode) => calls.generateMeetingMinutes.push(mode),
     loadSessions: () => { calls.loadSessions += 1; },
   };
   ctx.$ = (sel, root = ctx.document) => root.querySelector(sel);
   vm.createContext(ctx);
-  vm.runInContext(`${src.slice(start, end)}\nthis.runSequence = runSequence; this.meetingColumns = meetingColumns;`, ctx);
+  vm.runInContext(`${src.slice(start, end)}\n${src.slice(minutesStart, minutesEnd)}\nthis.runSequence = runSequence; this.meetingColumns = meetingColumns;`, ctx);
   ctx.calls = calls;
   ctx.t = t;
   return ctx;
@@ -111,9 +135,17 @@ describe('web/app.js runSequence column assignment', () => {
     assert.deepEqual(ctx.calls.generateMeetingMinutes, ['round2']);
   });
 
-  it('a 2-agent resume reuses the existing grid and gives each turn its own column', async () => {
-    const ctx = loadHelpers();
-    // Simulate the grid left over from Ruth's already-finished round2 turn.
+  it('a full-trio re-run generates minutes again even when minutes already exist for that round', async () => {
+    const ctx = loadHelpers({ meetingMinutes: [{ id: 1, round: 'round2' }] });
+    const turns = ALL.map((a) => ({ speaker: a, mode: 'round2' }));
+
+    await ctx.runSequence(turns);
+
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, ['round2']);
+  });
+
+  it('a 2-agent resume that completes the meeting generates minutes when none exist yet', async () => {
+    const ctx = loadHelpers({ messages: [row('regulatory', 'round2')] }); // Ruth's already-finished round2 turn
     const existingCols = ctx.meetingColumns(ctx.t, 'round2');
     const turns = [
       { speaker: 'clinical', mode: 'round2' },
@@ -127,7 +159,32 @@ describe('web/app.js runSequence column assignment', () => {
     assert.equal(ctx.calls.runTurn[0].container, existingCols.clinical);
     assert.equal(ctx.calls.runTurn[1].container, existingCols.commercial);
     for (const call of ctx.calls.runTurn) assert.notEqual(call.container, undefined);
-    // Not a full trio in this call, so no fresh set of minutes is generated.
+    // Not a full trio in this call, but it's what finished the meeting, and
+    // round2 had no minutes yet — so minutes are generated.
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, ['round2']);
+  });
+
+  it('a 2-agent resume that completes the meeting generates no minutes when they already exist', async () => {
+    const ctx = loadHelpers({
+      messages: [row('regulatory', 'round2')],
+      meetingMinutes: [{ id: 1, round: 'round2' }],
+    });
+    const turns = [
+      { speaker: 'clinical', mode: 'round2' },
+      { speaker: 'commercial', mode: 'round2' },
+    ];
+
+    await ctx.runSequence(turns);
+
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
+  });
+
+  it('a resume that leaves an agent still pending generates no minutes', async () => {
+    const ctx = loadHelpers({ messages: [row('regulatory', 'round2')] }); // Ruth already answered
+    const turns = [{ speaker: 'clinical', mode: 'round2' }]; // Charlie (commercial) still hasn't
+
+    await ctx.runSequence(turns);
+
     assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
   });
 
@@ -140,9 +197,21 @@ describe('web/app.js runSequence column assignment', () => {
     assert.equal(ctx.calls.runTurn.length, 1);
     assert.notEqual(ctx.calls.runTurn[0].container, undefined);
     assert.equal(ctx.calls.runTurn[0].container.dataset.speaker, 'clinical');
+    // Only one of three agents has now answered — no minutes yet.
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
   });
 
-  it('a custom-mode sequence gets no container (renders full-width, not in a column)', async () => {
+  it('a failed turn generates no minutes even though it was columned', async () => {
+    const ctx = loadHelpers({ runTurnResult: (turn) => turn.speaker !== 'commercial' });
+    const turns = ALL.map((a) => ({ speaker: a, mode: 'round2' }));
+
+    await ctx.runSequence(turns);
+
+    assert.equal(ctx.calls.runTurn.length, 3, 'the loop still reaches the failing turn');
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
+  });
+
+  it('a custom-mode sequence gets no container (renders full-width, not in a column) and no minutes', async () => {
     const ctx = loadHelpers();
     const turns = [{ speaker: 'clinical', mode: 'custom', instruction: 'focus on pricing' }];
 
@@ -151,9 +220,10 @@ describe('web/app.js runSequence column assignment', () => {
     assert.equal(ctx.t.children.length, 0, 'no grid built for a custom turn');
     assert.equal(ctx.calls.runTurn.length, 1);
     assert.equal(ctx.calls.runTurn[0].container, undefined);
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
   });
 
-  it('a mixed-mode sequence (e.g. reply) gets no container', async () => {
+  it('a mixed-mode sequence (e.g. reply) gets no container and no minutes', async () => {
     const ctx = loadHelpers();
     const turns = [
       { speaker: 'clinical', mode: 'reply' },
@@ -164,6 +234,7 @@ describe('web/app.js runSequence column assignment', () => {
 
     assert.equal(ctx.t.children.length, 0);
     for (const call of ctx.calls.runTurn) assert.equal(call.container, undefined);
+    assert.deepEqual(ctx.calls.generateMeetingMinutes, []);
   });
 
   it('starts a fresh grid instead of reusing one for a different standard mode', async () => {

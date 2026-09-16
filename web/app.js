@@ -969,8 +969,8 @@
     const rows = [];
     let current = null;
     for (const line of lines) {
-      const m = line.match(/^(Position A|Position B|What evidence would settle it|Status)\s*(?:\([^)]*\))?\s*[:\-—]\s*(.*)$/i);
-      if (m) { current = { label: m[1], text: m[2] }; rows.push(current); }
+      const m = line.match(/^(Position A|Position B|What evidence would settle it|Status)\s*(?:\(([^)]*)\))?\s*[:\-—]\s*(.*)$/i);
+      if (m) { current = { label: m[1], agent: /^Position/i.test(m[1]) ? (m[2] || '').trim() : '', text: m[3] }; rows.push(current); }
       else if (current) { current.text += ' ' + line; }
       else if (!/^⚠/.test(line)) { rows.push({ label: '', text: line }); }
     }
@@ -986,7 +986,7 @@
     box.innerHTML = '';
     for (const d of s.disagreements) {
       const el = document.createElement('div'); el.className = 'dis'; el.id = `dis-${d.n}`;
-      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div><div class="body">${disRowsHtml(d)}</div>`;
+      el.innerHTML = `<div class="topic">#${d.n} ${escapeHtml(d.topic)}<button type="button" class="status ${d.status}" title="Click to toggle">${d.status.toUpperCase()}</button></div>${disRaisedHtml(d)}<div class="body">${disRowsHtml(d)}</div>`;
       $('.status', el).addEventListener('click', async (e) => {
         e.stopPropagation();
         const next = d.status === 'resolved' ? 'unresolved' : 'resolved';
@@ -1001,9 +1001,37 @@
   function disRowsHtml(d) {
     const rows = parseDisagreementBody(d.body);
     return (rows.length ? rows : [{ label: '', text: d.body }])
-      .map((r) => `<div class="dis-row${/status/i.test(r.label) ? ' dis-status-row' : ''}">${r.label ? `<span class="dis-label">${escapeHtml(r.label)}</span>` : ''}<span class="dis-text">${escapeHtml(r.text)}</span></div>`)
+      .map((r) => {
+        const agent = r.agent ? agentKeyFromText(r.agent) : null;
+        const who = agent ? agentChipHtml(agent) : (r.agent ? `<span class="agent-chip">${escapeHtml(r.agent)}</span>` : '');
+        return `<div class="dis-row${/status/i.test(r.label) ? ' dis-status-row' : ''}">${r.label ? `<span class="dis-label">${escapeHtml(r.label)}${who}</span>` : ''}<span class="dis-text">${escapeHtml(r.text)}</span></div>`;
+      })
       .join('');
   }
+
+  // The agent a free-text mention names ("Luca", "Clinical", "Luca (Clinical)"),
+  // or null. Positions are written by the model, so match loosely, as whole
+  // words, on the roster's name, function and key.
+  const escapeRegExp = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function agentKeyFromText(text) {
+    const t = String(text || '').toLowerCase();
+    for (const key of ALL) {
+      const a = ((state.config && state.config.agents) || {})[key] || {};
+      const names = [a.name, a.short, a.function, key].filter(Boolean).map((x) => escapeRegExp(String(x).toLowerCase()));
+      if (names.some((n) => new RegExp('\\b' + n + '\\b').test(t))) return key;
+    }
+    return null;
+  }
+  function agentChipHtml(key) {
+    const colour = AGENT_COLOUR[key];
+    return `<span class="agent-chip"${colour ? ` style="--speaker:${escapeHtml(colour)}"` : ''}>${escapeHtml(AGENT_LABEL[key] || key)}</span>`;
+  }
+  // Who raised a disagreement: the speaker of the message it was logged from.
+  function disRaisedBy(d) {
+    const m = d.message_id && state.session.messages.find((x) => x.id === d.message_id);
+    return m && ALL.includes(m.speaker) ? m.speaker : null;
+  }
+  const disRaisedHtml = (d) => { const k = disRaisedBy(d); return k ? `<div class="dis-raised">Raised by ${agentChipHtml(k)}</div>` : ''; };
 
   // Clicking a disagreement card opens the full detail, with the option to ask
   // any subset of agents to weigh in on it directly (posts as a custom round).
@@ -1019,7 +1047,7 @@
       renderDisagreements();
       $('#dlg-disagreement').close();
     };
-    $('#dis-modal-body').innerHTML = disRowsHtml(d);
+    $('#dis-modal-body').innerHTML = `${disRaisedHtml(d)}${disRowsHtml(d)}`;
     const back = $('#dis-modal-back');
     if (d.message_id) { back.href = `#msg-${d.message_id}`; back.hidden = false; back.onclick = () => $('#dlg-disagreement').close(); }
     else back.hidden = true;
@@ -1157,18 +1185,34 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#count-minutes').textContent = list.length;
     const box = $('#tab-minutes');
     if (!list.length) { box.innerHTML = '<div class="empty">No meeting minutes yet. They\'re written automatically once a meeting (Baselines/Challenge/Converge/Cross-talk) finishes.</div>'; return; }
-    box.innerHTML = list.map((mm) => `
-      <div class="minutes-card" data-id="${mm.id}">
+    // One line per meeting, in the order they were held; a line opens to the
+    // full minutes, and open lines stay open across re-renders.
+    state.openMinutes = state.openMinutes || new Set();
+    const isOpen = (mm) => state.openMinutes.has(mm.id);
+    box.innerHTML = `<ol class="minutes-list">${list.map((mm, i) => `
+      <li class="minutes-card${isOpen(mm) ? ' open' : ''}" data-id="${mm.id}">
         <div class="minutes-head">
-          <span class="label">${escapeHtml(mm.label)}</span>
-          <span class="spacer"></span>
-          <span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending approval'}</span>
+          <button type="button" class="minutes-toggle" aria-expanded="${isOpen(mm)}"><span class="minutes-num">${i + 1}</span><span class="label">${escapeHtml(mm.label)}</span><span class="muted minutes-date">${escapeHtml(fmtTime(mm.created_at))}</span></button>
+          <span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending'}</span>
           ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}
         </div>
-        <div class="minutes-body"></div>
-        ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ view meeting</a>` : ''}
-      </div>`).join('');
+        <div class="minutes-detail"${isOpen(mm) ? '' : ' hidden'}>
+          <div class="minutes-body"></div>
+          ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ view meeting</a>` : ''}
+        </div>
+      </li>`).join('')}</ol>`;
     $$('#tab-minutes .minutes-card').forEach((el, i) => { $('.minutes-body', el).replaceChildren(renderMarkdown(list[i].text)); });
+    $$('#tab-minutes .minutes-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.minutes-card');
+        const id = Number(card.dataset.id);
+        const open = !state.openMinutes.has(id);
+        if (open) state.openMinutes.add(id); else state.openMinutes.delete(id);
+        card.classList.toggle('open', open);
+        btn.setAttribute('aria-expanded', String(open));
+        $('.minutes-detail', card).hidden = !open;
+      });
+    });
     $$('#tab-minutes .minutes-approve').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const card = btn.closest('.minutes-card');
@@ -1197,26 +1241,34 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       <div id="intel-body"></div>`;
     $$('.intel-cuts .chip', box).forEach((c) => c.addEventListener('click', () => { state.intelCut = c.dataset.cut; renderIntelligence(); }));
     renderIntelligenceBody($('#intel-body', box));
+    $$('.intel-open', box).forEach((b) => b.addEventListener('click', () => {
+      const m = state.session.messages.find((x) => x.id === Number(b.dataset.msg));
+      if (m) openMessageModal(m, m.role === 'user' ? 'user' : m.speaker);
+    }));
   }
 
   function intelRow(href, title, meta) {
     return `<div class="intel-row"><a href="${href}">${escapeHtml(title)}</a><span class="muted">${escapeHtml(meta || '')}</span></div>`;
+  }
+  // A response row: opens the full response in the message modal.
+  function intelMsgRow(m, title) {
+    return `<div class="intel-row"><button type="button" class="intel-open" data-msg="${m.id}">${escapeHtml(title)}</button><span class="muted">${escapeHtml(fmtTime(m.created_at))}</span></div>`;
   }
 
   function renderIntelligenceBody(body) {
     const s = state.session;
     if (state.intelCut === 'agent') {
       const groups = [...ALL, 'moderator', 'user'].map((sp) => ({
-        key: sp, label: AGENT_LABEL[sp], rows: s.messages.filter((m) => (m.role === 'user' ? 'user' : m.speaker) === sp && !m.error),
+        key: sp, label: AGENT_LABEL[sp], rows: s.messages.filter((m) => (m.role === 'user' ? 'user' : m.speaker) === sp && !m.error && m.text != null),
       })).filter((g) => g.rows.length);
-      body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelRow(`#msg-${m.id}`, `#${m.seq} · ${MODE_LABEL[m.mode] || m.mode || ''}`, fmtTime(m.created_at))).join('')}</div>`).join('')
+      body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelMsgRow(m, `#${m.seq} · ${MODE_LABEL[m.mode] || m.mode || ''}`)).join('')}</div>`).join('')
         : '<div class="empty">No messages yet.</div>';
     } else if (state.intelCut === 'meeting') {
       const modes = [...new Set(s.messages.filter((m) => m.mode).map((m) => m.mode))];
       body.innerHTML = modes.length ? modes.map((mode) => {
-        const rows = s.messages.filter((m) => m.mode === mode && !m.error);
+        const rows = s.messages.filter((m) => m.mode === mode && !m.error && m.text != null);
         const mm = (s.meeting_minutes || []).find((x) => x.round === mode);
-        return `<div class="intel-group"><h4>${escapeHtml(MODE_LABEL[mode] || mode)}${mm ? ' · minutes ✓' : ''}</h4>${rows.map((m) => intelRow(`#msg-${m.id}`, `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker]} #${m.seq}`, fmtTime(m.created_at))).join('')}</div>`;
+        return `<div class="intel-group"><h4>${escapeHtml(MODE_LABEL[mode] || mode)}${mm ? ' · minutes ✓' : ''}</h4>${rows.map((m) => intelMsgRow(m, `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker] || m.speaker} #${m.seq}`)).join('')}</div>`;
       }).join('') : '<div class="empty">No meetings run yet.</div>';
     } else if (state.intelCut === 'disagreement') {
       body.innerHTML = s.disagreements.length ? s.disagreements.map((d) => intelRow(`#dis-${d.n}`, `#${d.n} ${d.topic}`, d.status.toUpperCase())).join('')
@@ -1234,6 +1286,16 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   // Sends { round, label, anchor_message_id } to the moderator; the response is
   // pushed into state.session.meeting_minutes and the Minutes tab re-rendered.
   // Fire-and-forget from the caller's point of view — failures just toast.
+  // Minutes for a standard meeting once every agent has answered it. A full
+  // run of the meeting always gets fresh minutes; a resume or retry that
+  // completes it gets them only if the meeting has none yet. Every path that
+  // can complete a meeting calls this: runSequence, parallel Baselines and the
+  // inline Retry on a failed turn.
+  function writeMinutesIfComplete(mode, fullRun) {
+    if (!GRID_MODES.includes(mode) || turnsForRound(mode, ALL).length) return;
+    if (fullRun || !(state.session.meeting_minutes || []).some((x) => x.round === mode)) generateMeetingMinutes(mode);
+  }
+
   async function generateMeetingMinutes(mode) {
     const anchor = state.session.messages.find((m) => m.mode === mode);
     try {
@@ -1322,7 +1384,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
             if (messageId) { await api.send('DELETE', `/api/sessions/${state.session.id}/messages/${messageId}`); state.session.messages = state.session.messages.filter((x) => x.id !== messageId); }
             el.remove();
             setRunning(true);
-            try { await runTurn(turn, container); } finally { setRunning(false); loadSessions(); }
+            try {
+              if (await runTurn(turn, container)) writeMinutesIfComplete(turn.mode, false);
+            } finally { setRunning(false); loadSessions(); }
           });
           err.appendChild(retry);
           el.appendChild(err);
@@ -1442,7 +1506,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       }
       // Meeting minutes only for the four standard meetings run as a full trio —
       // not for custom rounds, replies, or dive-deeper follow-ups.
-      if (allOk && gridEligible && turns[0].mode !== 'custom') generateMeetingMinutes(turns[0].mode);
+      if (allOk && columned) writeMinutesIfComplete(turns[0].mode, gridEligible);
     } finally {
       setRunning(false);
       loadSessions();
@@ -1467,7 +1531,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       // the final render is consistent instead of racing on SSE arrival order.
       state.session = await api.get(`/api/sessions/${state.session.id}`);
       renderSession();
-      if (!state.stopRequested) generateMeetingMinutes('opening');
+      if (!state.stopRequested) writeMinutesIfComplete('opening', true);
     } finally {
       setRunning(false);
       loadSessions();
@@ -2016,7 +2080,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         try { state.session = await api.get(`/api/sessions/${id}`); } catch { /* keep what we had */ }
       } finally {
         setRunning(false);
-        renderSession();
+        // Not renderSession(): that refills the Inputs form, which sits right
+        // below this picker, and would throw away edits not yet saved.
+        renderTranscript(); renderSessionModelSelect(); renderMeetingNav(); renderIntelligence();
       }
     });
     $('#btn-delete').addEventListener('click', async () => {

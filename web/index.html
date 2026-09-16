@@ -194,7 +194,6 @@
           <div id="session-sub" class="muted" hidden></div>
         </div>
         <div class="topbar-actions">
-          <select id="session-model" class="model-select" aria-label="Model" title="Model for turns from here on. Each switch is noted in the transcript."></select>
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this evaluation">Delete</button>
@@ -243,6 +242,11 @@
           <div class="tab-body" id="tab-minutes" hidden></div>
           <div class="tab-body" id="tab-intelligence" hidden></div>
           <div class="tab-body" id="tab-inputs" hidden>
+            <div class="field inputs-model">
+              <div class="field-label-row"><label for="session-model">Model</label></div>
+              <select id="session-model" class="model-select"></select>
+              <span class="hint">Used for turns from here on. Each switch is noted in the transcript. Locked while a meeting is running.</span>
+            </div>
             <p id="inputs-summary-label" class="inputs-tab-label"></p>
             <form id="session-inputs-form">
               <div class="fields"></div>

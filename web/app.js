@@ -2114,16 +2114,16 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     // server-side admin gate in this app (auth.js noAuthConfigured()).
     document.body.classList.toggle('non-admin', Boolean(me.authenticated) && !me.is_admin);
     renderPowerNav();
-    // These three open in the left slide-over, not a new tab: reading the guide
-    // or editing an agent mid-meeting shouldn't take you out of the session.
-    const links = [
-      '<button type="button" class="navlink" data-nav="agents" data-nav-title="Agent Profiles">Agents</button>',
-      me.is_admin ? '<button type="button" class="navlink" data-nav="admin" data-nav-title="Admin">Admin</button>' : '',
-    ].filter(Boolean).join(' · ');
     // "Default" since the New Evaluation form can start a session on any of the
     // offered models — this is only what an untouched picker will run on.
-    const modelLine = document.body.classList.contains('non-admin') ? '' : `<br>Default model <code>${escapeHtml(state.config.model)}</code>`;
-    $('#sidebar-foot').innerHTML = `${links}${modelLine}${state.config.has_api_key ? '' : '<br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>'}`;
+    // Agents / Admin links used to lead this foot; they are header power
+    // buttons now. Hidden when empty so a bare bordered strip isn't left behind.
+    const footLines = [
+      document.body.classList.contains('non-admin') ? '' : `Default model <code>${escapeHtml(state.config.model)}</code>`,
+      state.config.has_api_key ? '' : '<strong style="color:#B91C1C">No API key: add it to .env and restart</strong>',
+    ].filter(Boolean);
+    $('#sidebar-foot').innerHTML = footLines.join('<br>');
+    $('#sidebar-foot').hidden = !footLines.length;
     await loadSessions();
     // Deep link from a meeting-minutes email (?session=<id>); otherwise land on
     // the dashboard rather than silently reopening whatever session was last used.
@@ -2415,8 +2415,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       panel.setAttribute('aria-hidden', 'false');
       syncPowerNav();
     }
-    // Delegated from the document: [data-nav] is on both the sidebar foot
-    // links and the header power buttons (rendered after load).
+    // Delegated from the document: [data-nav] is on the header power buttons,
+    // which are rendered after load.
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-nav]');
       if (!btn) return;

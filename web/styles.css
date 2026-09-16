@@ -35,9 +35,8 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .app.sidebar-collapsed .sidebar { display: none; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-/* One gap value drives the whole head, so the brand, New session and
-   Intelligence are evenly spaced instead of the two buttons sitting flush
-   against each other. */
+/* One gap value drives the whole head, so the brand and New evaluation are
+   evenly spaced. Intelligence moved to the session header's power buttons. */
 .sidebar-head { position: relative; padding: 16px 14px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .sidebar-collapse-btn { position: absolute; top: 14px; right: 10px; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 11px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); }
 .sidebar-collapse-btn:hover { background: var(--surface-2); color: var(--text); }
@@ -108,6 +107,18 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .topbar h1 { font-size: 17px; margin: 0; font-weight: 700; }
 #session-title { cursor: text; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+/* Header power buttons: Intelligence (session view only), User Guide, Agents,
+   Admin. Filled by renderPowerNav(); pressed while their drawer is open. */
+.power-nav { display: flex; align-items: center; gap: 6px; }
+.btn.power-btn { min-height: 40px; padding: 8px 14px; }
+.power-btn .icon { width: 17px; height: 17px; flex: none; }
+.power-btn[aria-pressed="true"]:not(.btn-primary) { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-hover); }
+.power-btn.btn-primary[aria-pressed="true"] { background: var(--primary-hover); border-color: var(--primary-hover); box-shadow: inset 0 2px 4px rgba(15, 23, 42, .2); }
+@media (max-width: 1240px) {
+  /* Icon-only when the header gets tight; the label stays for screen readers. */
+  .btn.power-btn { padding: 8px 10px; }
+  .power-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 /* Run-time and $·£ cost meter are admin-operational detail — noise for
    anyone here to read a decision, not to manage spend. The model picker is
    no longer here: it moved to the New Evaluation form. */
@@ -527,22 +538,18 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 
 /* The two big things you come here to do. */
 .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
-/* Reference tiles are the same component as the action tiles, in a grid that
-   fits three rather than two. The selectors are grouped, not copied, so the
-   two cannot drift the next time either is adjusted. */
-.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
-.action-tile, .resource-card { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 116px; text-align: left; padding: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: background .18s, border-color .18s, box-shadow .18s; }
-.action-tile:hover, .resource-card:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .16); }
-.action-tile:focus-visible, .resource-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.action-tile { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 116px; text-align: left; padding: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); cursor: pointer; font: inherit; color: inherit; text-decoration: none; transition: background .18s, border-color .18s, box-shadow .18s; }
+.action-tile:hover { border-color: var(--primary); box-shadow: 0 2px 12px rgba(8, 145, 178, .16); }
+.action-tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .action-tile-start { background: var(--accent); border-color: var(--accent); color: #fff; }
 .action-tile-start:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .action-tile-start:focus-visible { outline-color: var(--text); }
-.action-icon, .resource-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
-.action-icon .icon, .resource-icon .icon { width: 25px; height: 25px; }
+.action-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 14px; background: var(--primary-soft); color: var(--primary-hover); flex: none; }
+.action-icon .icon { width: 25px; height: 25px; }
 .action-tile-start .action-icon { background: rgba(255, 255, 255, .18); color: #fff; }
-.action-text, .resource-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.action-title, .resource-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
-.action-sub, .resource-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.action-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.action-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.action-sub { font-size: 13px; color: var(--muted); line-height: 1.5; }
 .action-tile-start .action-sub { color: rgba(255, 255, 255, .88); }
 
 
@@ -593,9 +600,9 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .process-step::after, .process-step:nth-child(2n)::after { content: ''; top: auto; bottom: -18px; right: auto; left: 50%; transform: translateX(-50%) rotate(135deg); }
   .process-step:last-child::after { content: none; }
   .dash-callout { padding: 18px 16px 20px; }
-  .action-tile, .resource-card { min-height: 0; padding: 18px; gap: 14px; }
-  .action-icon, .resource-icon { width: 42px; height: 42px; }
-  .action-title, .resource-title { font-size: 15px; }
+  .action-tile { min-height: 0; padding: 18px; gap: 14px; }
+  .action-icon { width: 42px; height: 42px; }
+  .action-title { font-size: 15px; }
   /* Two-up rather than a stack: six full-width KPI cards would push the two
      action tiles a whole screen below the fold on a phone. */
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -606,7 +613,7 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
   .stat-label { font-size: 9.5px; letter-spacing: .05em; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .action-tile, .resource-card { transition: none; }
+  .action-tile { transition: none; }
 }
 
 /* ---------- meeting minutes / agent notes (Intelligence tabs) ---------- */

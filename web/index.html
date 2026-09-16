@@ -16,7 +16,6 @@
         <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
       </button>
       <button id="btn-new" class="btn btn-accent btn-block" type="button">New evaluation</button>
-      <button id="btn-warroom" class="btn btn-primary btn-block" type="button" title="The board pack: sources, disagreements, decision, minutes and agent notes">Intelligence</button>
     </div>
 
     <!-- Every control that advances or reports on the simulation, in one panel.
@@ -78,13 +77,15 @@
       <header class="topbar">
         <h1>Anatop: Territory Commercial Evaluation</h1>
         <div class="topbar-actions">
+          <nav class="power-nav" aria-label="Reference"></nav>
           <button id="btn-logout" class="btn" type="button" title="Sign out of this browser">Log out</button>
         </div>
       </header>
       <div class="scroll">
         <div class="dashboard">
-          <!-- Filled by renderDashboard(): KPI strip, the two big start/resume
-               tiles, then the reference tiles. The saved evaluations are not
+          <!-- Filled by renderDashboard(): KPI strip, then the two big start/resume
+               tiles. User Guide, Agents and Admin are power buttons in every
+               view's header (renderPowerNav()), not tiles here. The saved evaluations are not
                here any more — they are the sidebar's Evaluation Register.
                Each block is its own container and each renderer addresses its
                own by id, so this order is set here and nowhere else. -->
@@ -144,11 +145,6 @@
 
           <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
           <div id="dash-actions" class="action-grid"></div>
-
-          <section class="dash-section">
-            <div class="dash-section-head"><h2>Reference</h2></div>
-            <div id="dash-resources" class="resource-grid"></div>
-          </section>
         </div>
       </div>
     </section>
@@ -158,6 +154,7 @@
       <header class="topbar">
         <h1>New evaluation briefing</h1>
         <div class="topbar-actions">
+          <nav class="power-nav" aria-label="Reference"></nav>
           <button id="btn-load-korea" class="btn" type="button">Restore Default Values</button>
           <button id="btn-copy-last" class="btn" type="button">Copy from last session</button>
         </div>
@@ -196,6 +193,7 @@
         <div class="topbar-actions">
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
+          <nav class="power-nav" aria-label="Board pack and reference" data-intelligence></nav>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this evaluation">Delete</button>
         </div>
       </header>

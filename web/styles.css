@@ -401,8 +401,6 @@ body.non-admin .msg-cost { display: none; }
 .panel-openfull { text-decoration: none; color: var(--muted); font-size: 14px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }
 .panel-openfull:hover { background: var(--surface-2); color: var(--text); }
 .panel-frame { flex: 1; width: 100%; border: none; background: var(--bg); min-height: 0; }
-.navlink { border: none; background: none; padding: 0; font: inherit; color: var(--primary); cursor: pointer; text-decoration: underline; }
-.navlink:hover { color: var(--primary-hover); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .panel-title { font-weight: 700; font-size: 13.5px; }
 .panel-close { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 15px; min-width: 32px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }

@@ -86,6 +86,21 @@
                here any more — they are the sidebar's Evaluation Register.
                Each block is its own container and each renderer addresses its
                own by id, so this order is set here and nowhere else. -->
+          <!-- Hero: the three agents at the table with the moderator's back to
+               the camera. Static, so renderDashboard() never touches it. On a
+               wide screen the heading sits on the empty wall at top left; once
+               the hero is under 1100px wide it stacks above the photo, because
+               the text wraps down onto the moderator's head. -->
+          <section class="dash-hero" aria-labelledby="dash-hero-title">
+            <div class="dash-hero-text">
+              <h2 id="dash-hero-title">Your launch working group</h2>
+              <p>Ruth, Luca and Charlie test every territory before you commit to it.</p>
+            </div>
+            <picture class="dash-hero-media">
+              <source type="image/webp" srcset="/hero-boardroom-1200.webp 1200w, /hero-boardroom.webp 2400w" sizes="(max-width: 1228px) 100vw, 1180px">
+              <img src="/hero-boardroom.jpg" srcset="/hero-boardroom-1200.jpg 1200w, /hero-boardroom.jpg 2400w" sizes="(max-width: 1228px) 100vw, 1180px" width="2400" height="1340" alt="Ruth (Regulatory), Luca (Clinical) and Charlie (Commercial) seated behind name cards at an SLA Pharma boardroom table, facing the moderator, who is seen from behind.">
+            </picture>
+          </section>
           <!-- Onboarding: what the four steps of a run are, in order. Sits
                above the numbers; dismissed state is remembered per browser. -->
           <section class="dash-section dash-callout" id="process-callout">

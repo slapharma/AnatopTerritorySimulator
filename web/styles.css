@@ -486,6 +486,24 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 
 /* ---------- dashboard ---------- */
 .dashboard { max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px; display: flex; flex-direction: column; gap: 40px; }
+/* Hero photo. Cropped to a banner with object-fit rather than shown at 16:9,
+   which would push everything else below the fold. object-position keeps the
+   logo and all three faces in frame; the heading is laid over the blank wall
+   at top left, which is light enough for body text colour without a scrim.
+   The switch to stacked is a container query, not a media query: the sidebar
+   takes 268px, so the viewport width says nothing about how much wall is free. */
+.dash-hero { position: relative; overflow: hidden; container-type: inline-size; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.dash-hero-media, .dash-hero-media img { display: block; width: 100%; }
+.dash-hero-media img { height: 440px; object-fit: cover; object-position: 50% 16%; }
+.dash-hero-text { position: absolute; top: 24px; left: 26px; max-width: 31%; }
+.dash-hero-text h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -.01em; color: var(--text); }
+.dash-hero-text p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+@container (max-width: 1100px) {
+  .dash-hero-text { position: static; max-width: none; padding: 18px 20px 16px; }
+  .dash-hero-text h2 { font-size: 21px; }
+  .dash-hero-media img { height: auto; aspect-ratio: 16 / 9; max-height: 440px; }
+}
+
 .icon { width: 18px; height: 18px; flex: none; }
 .icon-sm { width: 14px; height: 14px; }
 

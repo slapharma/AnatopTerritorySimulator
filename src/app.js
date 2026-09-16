@@ -498,20 +498,57 @@ async function extractQuestions(sessionId, messageId, speaker, mode, text) {
   return db.addQuestions(sessionId, messageId, { asker: speaker, round: mode, items });
 }
 
+// Writes the minutes entry for one action on a question (see
+// questions.questionMinutes). The action itself has already been saved, so a
+// failure here is logged and never fails the request.
+async function recordQuestionMinutes(sessionId, messages, fields) {
+  try {
+    const entry = questions.questionMinutes({ ...fields, messages, label: agentLabel });
+    await db.addMeetingMinutes(sessionId, { round: questions.MINUTES_ROUND, ...entry });
+  } catch (e) {
+    console.error(`[questions] minutes entry for question ${fields.question && fields.question.id} failed:`, e.message);
+  }
+}
+
 app.patch('/api/sessions/:id/questions/:qid', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const qRow = await questionFor(req.params.qid, id);
     if (!qRow) return res.status(404).json({ error: 'Question not found' });
-    const status = String(req.body.status || '');
+    // discussion: the discuss-to-resolution run this change closes. A run that
+    // decided nothing (stopped or failed) sends it with no status, and then only
+    // its minutes entry is written: the question keeps whatever status the
+    // server holds, which may have changed while the run was going.
+    const d = req.body.discussion && typeof req.body.discussion === 'object' ? req.body.discussion : null;
+    const discussion = d && /^\d+$/.test(String(d.run_id))
+      ? { run_id: String(d.run_id), outcome: String(d.outcome || '').slice(0, 40), cycles: Math.max(0, Math.min(100, Number(d.cycles) || 0)) }
+      : null;
+    // Read before the update: nothing promises qRow is not the object the update changes.
+    const from = qRow.status;
+    const statusGiven = req.body.status != null && req.body.status !== '';
+    if (!statusGiven && !discussion) return res.status(400).json({ error: 'Unknown status ' });
+    const status = statusGiven ? String(req.body.status) : from;
     if (!questions.STATUSES.includes(status)) return res.status(400).json({ error: `Unknown status ${status}` });
     const note = req.body.resolution_note === undefined ? qRow.resolution_note : String(req.body.resolution_note || '').slice(0, 500) || null;
     // Reopening clears the record of what answered it; any other change keeps it
     // unless a new answer message is given.
-    const answer = status === 'open' ? null
+    const answer = !statusGiven ? qRow.answer_message_id : status === 'open' ? null
       : (req.body.answer_message_id != null && /^\d+$/.test(String(req.body.answer_message_id)) ? String(req.body.answer_message_id) : qRow.answer_message_id);
-    await db.updateQuestion(qRow.id, id, { status, resolution_note: status === 'open' ? null : note, answer_message_id: answer });
-    res.json(await db.listQuestions(id));
+    const resolutionNote = !statusGiven ? qRow.resolution_note : status === 'open' ? null : note;
+    if (statusGiven) await db.updateQuestion(qRow.id, id, { status, resolution_note: resolutionNote, answer_message_id: answer });
+    if (discussion || status !== from) {
+      const messages = await db.listMessages(id);
+      const answerMessage = answer ? messages.find((m) => String(m.id) === String(answer)) : null;
+      await recordQuestionMinutes(id, messages, {
+        question: qRow, action: discussion ? 'discussion' : 'status', from, to: status,
+        // With no status change the row's old note is not something this did.
+        note: statusGiven ? resolutionNote : null, discussion,
+        // Only an answer this change names: a status click keeps an older answer
+        // on the row, and the entry should not claim it happened now.
+        answerMessage: req.body.answer_message_id != null ? answerMessage : null,
+      });
+    }
+    res.json({ questions: await db.listQuestions(id), meeting_minutes: await db.listMeetingMinutes(id) });
   } catch (e) { next(e); }
 });
 
@@ -532,8 +569,15 @@ app.post('/api/sessions/:id/questions/:qid/answer', async (req, res, next) => {
       role: 'user', speaker: 'user', mode: 'reply', addressed_to: to,
       text: `**Answer to ${agentLabel(qRow.asker)}'s question:** "${quoted}"\n\n${answer}`,
     });
+    const from = qRow.status;
     await db.updateQuestion(qRow.id, id, { status: 'answered', resolution_note: 'Answered by the moderator', answer_message_id: msg.id });
-    res.json({ message: msg, questions: await db.listQuestions(id), respondents: to === 'all' ? [] : [to] });
+    await recordQuestionMinutes(id, [...(await db.listMessages(id)).filter((m) => String(m.id) !== String(msg.id)), msg], {
+      question: qRow, action: 'answer', from, to: 'answered', answerMessage: msg,
+    });
+    res.json({
+      message: msg, questions: await db.listQuestions(id), meeting_minutes: await db.listMeetingMinutes(id),
+      respondents: to === 'all' ? [] : [to],
+    });
   } catch (e) { next(e); }
 });
 
@@ -562,7 +606,7 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
     const session = await db.fullSession(id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
     const open = (session.questions || []).filter((x) => x.status === 'open');
-    if (!open.length) return res.json({ updated: 0, questions: session.questions || [] });
+    if (!open.length) return res.json({ updated: 0, questions: session.questions || [], meeting_minutes: session.meeting_minutes || [] });
     const seqOf = new Map(session.messages.map((m) => [String(m.id), m.seq]));
     const list = open.map((x) => `- id ${x.id} · asked by ${agentLabel(x.asker)} in message [${seqOf.get(String(x.message_id)) ?? '?'}] to ${x.addressees.split(',').map(agentLabel).join(' and ')}: ${x.text.replace(/\s+/g, ' ')}`).join('\n');
     const result = await runTurn({
@@ -590,7 +634,12 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
       const row = await db.updateQuestion(qRow.id, id, {
         status: 'answered', resolution_note: a.note || `Answered in #${answerMsg.seq}`, answer_message_id: answerMsg.id,
       }, { onlyIfOpen: true });
-      if (row) updated++; else skipped.noLongerOpen++;
+      if (row) {
+        updated++;
+        await recordQuestionMinutes(id, session.messages, {
+          question: qRow, action: 'check', from: 'open', to: 'answered', note: row.resolution_note, answerMessage: answerMsg,
+        });
+      } else skipped.noLongerOpen++;
     }
     const raw = String(result.text || '');
     // listed counts the reply's entries before malformed ones (non-numeric ids)
@@ -599,7 +648,10 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
     const readable = listed >= 0;
     console.log(`[questions/check] session ${id} model=${result.model || '?'} open=${open.length} reply_chars=${raw.length} readable=${readable} listed=${listed} claims=${claims.length} updated=${updated} skipped=${JSON.stringify(skipped)} cost_usd=${Number(result.cost_usd || 0).toFixed(4)}`
       + (readable && listed === claims.length ? '' : ` reply_start=${JSON.stringify(raw.slice(0, 200))}`));
-    res.json({ updated, questions: await db.listQuestions(id) });
+    res.json({
+      updated, questions: await db.listQuestions(id),
+      meeting_minutes: updated ? await db.listMeetingMinutes(id) : session.meeting_minutes || [],
+    });
   } catch (e) { next(e); }
 });
 

@@ -49,16 +49,37 @@ class FakeElement {
 
   get innerHTML() { return this._html; }
 
-  set innerHTML(v) { this._html = v; this.children = []; }
-
   // Real querySelector would find real nodes parsed out of innerHTML; these
-  // fakes never parse it, so return a fresh throwaway element instead of null
-  // — renderQuestions unconditionally wires listeners onto what it finds, and
-  // a null here would fail on .addEventListener before a test's assertion
-  // ever runs. Tests read the DOM through .innerHTML, not by re-querying it.
-  querySelector() { return new FakeElement('div'); }
+  // fakes never parse it that deeply. The one exception is `.qn` question
+  // cards: setting innerHTML pulls their data-qid out with a regex, in
+  // rendered order, so a test can find "the card for question 7" the same
+  // way renderQuestions/wireQuestionCards do (by dataset.qid), and so the
+  // per-box answer-draft round trip (capture on redraw, restore into the new
+  // card) has something real to read and write.
+  set innerHTML(v) {
+    this._html = v; this.children = [];
+    this._qnCards = [...v.matchAll(/class="qn qn-\S+" data-qid="([^"]*)"/g)].map((m) => {
+      const el = new FakeElement('div');
+      el.dataset.qid = m[1];
+      return el;
+    });
+  }
 
-  querySelectorAll() { return []; }
+  // A selector is answered by a stable, memoized child element — the same
+  // fake node every time the same selector string is asked for on this
+  // element — so state a caller sets on it (e.g. .hidden, .value) is still
+  // there for a later caller that queries it again, as it would be on a real
+  // DOM node. A compound selector ("A B") composes two lookups, so "A B" from
+  // this element and "B" from this.querySelector("A") resolve to the same node.
+  querySelector(sel) {
+    const parts = String(sel).trim().split(/\s+/);
+    if (parts.length > 1) return this.querySelector(parts[0]).querySelector(parts.slice(1).join(' '));
+    this._subEls = this._subEls || {};
+    if (!(sel in this._subEls)) this._subEls[sel] = new FakeElement('div');
+    return this._subEls[sel];
+  }
+
+  querySelectorAll(sel) { return sel === '.qn' ? (this._qnCards || []) : []; }
 
   addEventListener() {}
 
@@ -75,8 +96,11 @@ function loadQuestionsHelpers({ questions = [], messages = [], questionFilter } 
   const end = src.indexOf('  async function generateMeetingMinutes(');
   assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did the agent questions section move?');
 
-  const calls = { apiSend: [], toasts: [], runSequence: [] };
-  const elements = { '#tab-questions': new FakeElement('div'), '#count-questions': new FakeElement('span') };
+  const calls = { apiSend: [], toasts: [], runSequence: [], renderMinutes: 0 };
+  const elements = {
+    '#tab-questions': new FakeElement('div'), '#count-questions': new FakeElement('span'),
+    '#tab-escalations': new FakeElement('div'), '#count-escalations': new FakeElement('span'),
+  };
 
   const ctx = {
     ALL, AGENT_LABEL, MODE_LABEL, QUESTION_STATUS_LABEL, LENGTH_LABELS,
@@ -87,13 +111,14 @@ function loadQuestionsHelpers({ questions = [], messages = [], questionFilter } 
     $$: (sel, root) => (root ? root.querySelectorAll(sel) : []),
     toast: (msg) => calls.toasts.push(msg),
     openMessageModal: () => {},
+    renderMinutes: () => { calls.renderMinutes++; },
     messageElement: () => new FakeElement('div'),
     runSequence: async (turns) => calls.runSequence.push(turns),
     api: {
       send: async (method, url, body) => {
         calls.apiSend.push({ method, url, body });
         if (/\/check$/.test(url)) return { updated: 0, questions: ctx.state.session.questions };
-        if (method === 'PATCH' && /\/questions\/[^/]+$/.test(url)) return ctx.state.session.questions;
+        if (method === 'PATCH' && /\/questions\/[^/]+$/.test(url)) return { questions: ctx.state.session.questions, meeting_minutes: [] };
         if (/\/answer$/.test(url)) return { message: {}, questions: ctx.state.session.questions, respondents: [] };
         return {};
       },
@@ -102,6 +127,8 @@ function loadQuestionsHelpers({ questions = [], messages = [], questionFilter } 
   vm.createContext(ctx);
   vm.runInContext(`${src.slice(start, end)}
 this.renderQuestions = renderQuestions;
+this.renderEscalations = renderEscalations;
+this.applyQuestionResponse = applyQuestionResponse;
 this.questionCardHtml = questionCardHtml;
 this.settleQuestionAfterDiscussion = settleQuestionAfterDiscussion;
 this.setQuestionStatus = setQuestionStatus;
@@ -178,6 +205,165 @@ describe('web/app.js renderQuestions', () => {
   });
 });
 
+describe('web/app.js renderEscalations', () => {
+  it('the count badge is amber and shows the escalated count when there is at least one', () => {
+    const questions = [
+      { id: '1', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Open one', round: 'opening', message_id: '10' },
+      { id: '2', status: 'escalated', asker: 'clinical', addressees: 'commercial', text: 'Escalated one', round: 'opening', message_id: '11' },
+      { id: '3', status: 'escalated', asker: 'commercial', addressees: 'regulatory', text: 'Escalated two', round: 'opening', message_id: '12' },
+    ];
+    const ctx = loadQuestionsHelpers({ questions });
+
+    ctx.renderQuestions();
+
+    const count = ctx.elements['#count-escalations'];
+    assert.equal(count.textContent, 2);
+    assert.equal(count.className, 'count count-alert');
+  });
+
+  it('the count badge is plain (no alert class) when nothing is escalated', () => {
+    const questions = [{ id: '1', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Open one', round: 'opening', message_id: '10' }];
+    const ctx = loadQuestionsHelpers({ questions });
+
+    ctx.renderQuestions();
+
+    const count = ctx.elements['#count-escalations'];
+    assert.equal(count.textContent, 0);
+    assert.equal(count.className, 'count');
+  });
+
+  it('lists only escalated questions, regardless of the Agent Questions tab\'s own filter', () => {
+    const questions = [
+      { id: '1', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Open one', round: 'opening', message_id: '10' },
+      { id: '2', status: 'escalated', asker: 'clinical', addressees: 'commercial', text: 'Escalated one', round: 'opening', message_id: '11' },
+      { id: '3', status: 'answered', asker: 'commercial', addressees: 'regulatory', text: 'Answered one', round: 'opening', message_id: '12' },
+    ];
+    const ctx = loadQuestionsHelpers({ questions, questionFilter: 'open' }); // the other tab is on a different filter entirely
+
+    ctx.renderQuestions();
+
+    const html = ctx.elements['#tab-escalations'].innerHTML;
+    assert.match(html, /Escalated one/);
+    assert.doesNotMatch(html, /Open one/);
+    assert.doesNotMatch(html, /Answered one/);
+  });
+
+  it('shows an empty-state message and no question cards when nothing is escalated', () => {
+    const questions = [{ id: '1', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Open one', round: 'opening', message_id: '10' }];
+    const ctx = loadQuestionsHelpers({ questions });
+
+    ctx.renderQuestions();
+
+    const html = ctx.elements['#tab-escalations'].innerHTML;
+    assert.match(html, /Nothing is escalated\./);
+    assert.doesNotMatch(html, /Open one/);
+  });
+});
+
+describe('web/app.js applyQuestionResponse', () => {
+  it('merges meeting_minutes by id, keeping a row that was added locally while the request was in flight', () => {
+    const ctx = loadQuestionsHelpers({ questions: [] });
+    ctx.state.session.meeting_minutes = [{ id: 1, text: 'existing minutes' }];
+    // Simulates generateMeetingMinutes() (or another in-flight question action)
+    // pushing a fresh row onto state directly, before this response comes back.
+    ctx.state.session.meeting_minutes.push({ id: 3, text: 'added locally while the request was out' });
+
+    ctx.applyQuestionResponse({
+      questions: [],
+      meeting_minutes: [{ id: 1, text: 'existing minutes' }, { id: 2, text: 'from this question action' }],
+    });
+
+    // meeting_minutes is a vm-realm array; JSON round-trip it into a plain,
+    // host-realm value before deepEqual (a raw cross-realm array/object
+    // compare fails deepStrictEqual even on matching content).
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(ctx.state.session.meeting_minutes)).map((m) => m.id),
+      [1, 2, 3],
+      'the id-3 row added locally must survive a response that does not mention it',
+    );
+    assert.equal(ctx.calls.renderMinutes, 1);
+  });
+
+  it('overwrites a row by id when the response carries a newer version of it', () => {
+    const ctx = loadQuestionsHelpers({ questions: [] });
+    ctx.state.session.meeting_minutes = [{ id: 1, text: 'stale text' }];
+
+    ctx.applyQuestionResponse({ questions: [], meeting_minutes: [{ id: 1, text: 'fresh text' }] });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.state.session.meeting_minutes)), [{ id: 1, text: 'fresh text' }]);
+  });
+
+  it('does not touch meeting_minutes, or call renderMinutes, when the response carries none', () => {
+    const ctx = loadQuestionsHelpers({ questions: [] });
+    ctx.state.session.meeting_minutes = [{ id: 1, text: 'existing' }];
+
+    ctx.applyQuestionResponse({ questions: [] });
+
+    assert.deepEqual(ctx.state.session.meeting_minutes, [{ id: 1, text: 'existing' }]);
+    assert.equal(ctx.calls.renderMinutes, 0);
+  });
+
+  it('replaces state.session.questions with the response\'s list', () => {
+    const ctx = loadQuestionsHelpers({ questions: [{ id: '1', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Q', round: 'opening', message_id: '10' }] });
+
+    ctx.applyQuestionResponse({ questions: [{ id: '1', status: 'answered', asker: 'regulatory', addressees: 'clinical', text: 'Q', round: 'opening', message_id: '10' }] });
+
+    assert.equal(ctx.state.session.questions[0].status, 'answered');
+  });
+});
+
+describe('web/app.js renderQuestions — per-box answer drafts', () => {
+  it('keeps a draft typed in the Questions tab separate from one typed in the Escalations tab for the same question', () => {
+    const questions = [
+      { id: '7', status: 'escalated', asker: 'regulatory', addressees: 'clinical', text: 'Q', round: 'opening', message_id: '10' },
+    ];
+    const ctx = loadQuestionsHelpers({ questions, questionFilter: 'all' }); // 'all' so the card also appears in #tab-questions
+
+    ctx.renderQuestions(); // first render — creates the cards
+
+    const qCard = ctx.elements['#tab-questions'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    const eCard = ctx.elements['#tab-escalations'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    assert.ok(qCard && eCard, 'the escalated question renders a card in both boxes');
+
+    qCard.querySelector('.qn-answer').hidden = false;
+    qCard.querySelector('.qn-answer').querySelector('textarea').value = 'Draft written in the Questions tab';
+    eCard.querySelector('.qn-answer').hidden = false;
+    eCard.querySelector('.qn-answer').querySelector('textarea').value = 'A different draft written in Escalations';
+
+    ctx.renderQuestions(); // redraw — must capture both drafts, keyed by box, and restore each into its own new card
+
+    assert.equal(ctx.state.questionDrafts['questions:7'], 'Draft written in the Questions tab');
+    assert.equal(ctx.state.questionDrafts['escalations:7'], 'A different draft written in Escalations');
+
+    const qCard2 = ctx.elements['#tab-questions'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    const eCard2 = ctx.elements['#tab-escalations'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    assert.equal(qCard2.querySelector('.qn-answer').hidden, false);
+    assert.equal(qCard2.querySelector('.qn-answer').querySelector('textarea').value, 'Draft written in the Questions tab');
+    assert.equal(eCard2.querySelector('.qn-answer').hidden, false);
+    assert.equal(eCard2.querySelector('.qn-answer').querySelector('textarea').value, 'A different draft written in Escalations');
+  });
+
+  it('drops the draft for a box once its panel is closed, so a later redraw does not reopen it', () => {
+    const questions = [{ id: '7', status: 'open', asker: 'regulatory', addressees: 'clinical', text: 'Q', round: 'opening', message_id: '10' }];
+    const ctx = loadQuestionsHelpers({ questions, questionFilter: 'open' });
+
+    ctx.renderQuestions();
+    const card = ctx.elements['#tab-questions'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    card.querySelector('.qn-answer').hidden = false;
+    card.querySelector('.qn-answer').querySelector('textarea').value = 'about to close it again';
+
+    ctx.renderQuestions(); // captured while open
+    assert.equal(ctx.state.questionDrafts['questions:7'], 'about to close it again');
+
+    // Close the panel on the (new) card, then redraw again.
+    const card2 = ctx.elements['#tab-questions'].querySelectorAll('.qn').find((c) => c.dataset.qid === '7');
+    card2.querySelector('.qn-answer').hidden = true;
+    ctx.renderQuestions();
+
+    assert.equal('questions:7' in ctx.state.questionDrafts, false);
+  });
+});
+
 describe('web/app.js questionCardHtml — the Discuss action', () => {
   it('shows Discuss when the asker is a panel agent and another panel agent was addressed', () => {
     const ctx = loadQuestionsHelpers({});
@@ -247,12 +433,18 @@ describe('web/app.js settleQuestionAfterDiscussion', () => {
   }
 
   for (const outcome of ['failed', 'stopped_by_moderator']) {
-    it(`leaves the question untouched when the discussion stopped on ${outcome}`, async () => {
+    it(`sends no status but still reports the run when the discussion stopped on ${outcome}`, async () => {
       const ctx = loadQuestionsHelpers({ questions: [baseQuestion] });
 
-      await ctx.settleQuestionAfterDiscussion({ question_id: '5' }, outcome, 1, null);
+      await ctx.settleQuestionAfterDiscussion({ question_id: '5' }, outcome, 1, null, 900);
 
-      assert.equal(ctx.calls.apiSend.length, 0);
+      assert.equal(ctx.calls.apiSend.length, 1);
+      const patch = ctx.calls.apiSend[0];
+      assert.equal(patch.method, 'PATCH');
+      // A status from client state could be stale and overwrite a change made during the run.
+      assert.equal(patch.body.status, undefined);
+      assert.equal(patch.body.resolution_note, undefined);
+      assert.deepEqual({ ...patch.body.discussion }, { run_id: 900, outcome, cycles: 1 });
       assert.equal(ctx.calls.toasts.length, 0);
     });
   }

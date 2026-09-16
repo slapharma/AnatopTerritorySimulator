@@ -4,7 +4,10 @@
 // (key/name/short/function/label per agent).
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable } = require('../src/questions');
+const {
+  parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable,
+  questionMinutes, MINUTES_ROUND,
+} = require('../src/questions');
 
 describe('isAnsweredCheckReadable', () => {
   // The check's log line relies on this to tell "none answered" (readable,
@@ -296,5 +299,244 @@ describe('parseAnsweredCheck', () => {
   it('returns [] for empty/undefined text', () => {
     assert.deepEqual(parseAnsweredCheck(''), []);
     assert.deepEqual(parseAnsweredCheck(undefined), []);
+  });
+});
+
+// questionMinutes builds the minutes entry text/label/anchor for one action on
+// one question. It is pure: no db, so `messages` and `label` (name lookup) are
+// passed in exactly as src/app.js's recordQuestionMinutes supplies them.
+describe('questionMinutes', () => {
+  const NAME = { regulatory: 'Ruth', clinical: 'Luca', commercial: 'Charlie', moderator: 'the Moderator' };
+  const label = (k) => NAME[k] || k;
+  const baseQuestion = (over = {}) => ({
+    id: '1', message_id: '10', n: 1, asker: 'clinical', addressees: 'commercial',
+    round: 'opening', text: 'What is the PAMI timeline?', ...over,
+  });
+  const ap = (run_id, cycle) => JSON.stringify({ autopilot: { run_id, cycle } });
+
+  it('MINUTES_ROUND is "question"', () => {
+    assert.equal(MINUTES_ROUND, 'question');
+  });
+
+  it('action "answer": labels who answered, refs the answer message, and shows the status transition', () => {
+    const question = baseQuestion();
+    const asked = { id: '10', seq: 3 };
+    const answerMessage = { id: '55', seq: 7 };
+    const entry = questionMinutes({ question, action: 'answer', from: 'open', to: 'answered', answerMessage, messages: [asked, answerMessage], label });
+
+    assert.equal(entry.label, 'Question answered by the moderator · Luca → Charlie');
+    assert.match(entry.text, /The moderator answered it in message #7\./);
+    assert.match(entry.text, /Asked in Baselines, message #3\./);
+    assert.match(entry.text, /\*\*Status:\*\* Open → Answered/);
+    assert.equal(entry.anchor_message_id, 55);
+  });
+
+  it('action "check": labels it found-answered by the Moderator Assistant', () => {
+    const answerMessage = { id: '9', seq: 4 };
+    const entry = questionMinutes({ question: baseQuestion(), action: 'check', from: 'open', to: 'answered', answerMessage, messages: [answerMessage], label });
+
+    assert.match(entry.label, /^Question found answered ·/);
+    assert.match(entry.text, /The Moderator Assistant found it answered in message #4\./);
+  });
+
+  it('action "status" to "open": reopened wording, no answer ref required', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'answered', to: 'open', messages: [], label });
+
+    assert.match(entry.label, /^Question reopened ·/);
+    assert.match(entry.text, /The moderator reopened it\./);
+    assert.match(entry.text, /\*\*Status:\*\* Answered → Open/);
+  });
+
+  it('action "status" to "escalated": escalated wording', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.match(entry.label, /^Question escalated ·/);
+    assert.match(entry.text, /The moderator escalated it for offline review\./);
+  });
+
+  it('action "status" to "resolved": "marked resolved" wording', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'escalated', to: 'resolved', messages: [], label });
+
+    assert.match(entry.label, /^Question marked resolved ·/);
+    assert.match(entry.text, /The moderator marked it resolved\./);
+  });
+
+  it('says "no one named" and "unaddressed" when the question has no addressees', () => {
+    const entry = questionMinutes({ question: baseQuestion({ addressees: '' }), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.match(entry.text, /Luca asked no one named:/);
+    assert.match(entry.label, /Luca → unaddressed/);
+  });
+
+  it('names "moderator" in the addressee list using the given label function', () => {
+    const entry = questionMinutes({ question: baseQuestion({ addressees: 'commercial,moderator' }), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.match(entry.text, /Luca asked Charlie and the Moderator:/);
+  });
+
+  it('caps the label at 200 characters', () => {
+    const longLabel = (k) => `${k}-name`.repeat(40);
+    const entry = questionMinutes({ question: baseQuestion(), action: 'answer', from: 'open', to: 'answered', answerMessage: null, messages: [], label: longLabel });
+
+    assert.equal(entry.label.length, 200);
+  });
+
+  it('includes a given note, one-lined', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'open', to: 'escalated', note: 'Needs   offline   review\nplease', messages: [], label });
+
+    assert.match(entry.text, /\*\*Note:\*\* Needs offline review please/);
+  });
+
+  it('omits the note line when none is given', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.doesNotMatch(entry.text, /\*\*Note:\*\*/);
+  });
+
+  it('falls back to "the transcript" when the question has no round at all', () => {
+    const entry = questionMinutes({ question: baseQuestion({ round: null }), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.match(entry.text, /Asked in the transcript\./);
+  });
+
+  it('shows the raw round value when it is not one of the known rounds', () => {
+    const entry = questionMinutes({ question: baseQuestion({ round: 'made_up_round' }), action: 'status', from: 'open', to: 'escalated', messages: [], label });
+
+    assert.match(entry.text, /Asked in made_up_round\./);
+  });
+
+  it('anchors to the original question message when no answer message is given', () => {
+    const question = baseQuestion({ message_id: '10' });
+    const asked = { id: '10', seq: 4 };
+    const entry = questionMinutes({ question, action: 'status', from: 'answered', to: 'open', messages: [asked], label });
+
+    assert.equal(entry.anchor_message_id, 10);
+  });
+
+  it('leaves anchor_message_id null when the anchor message id is not purely numeric', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'answer', from: 'open', to: 'answered', answerMessage: { id: 'not-a-number', seq: 9 }, messages: [], label });
+
+    assert.equal(entry.anchor_message_id, null);
+  });
+
+  it('marks the status "(unchanged)" when from and to are equal', () => {
+    const entry = questionMinutes({ question: baseQuestion(), action: 'status', from: 'open', to: 'open', messages: [], label });
+
+    assert.match(entry.text, /\*\*Status:\*\* Open \(unchanged\)/);
+  });
+
+  describe('action "discussion"', () => {
+    it('falls back to "stopped" for an outcome not in OUTCOME_LABEL, and pluralises "loop(s)" correctly', () => {
+      const entry = questionMinutes({
+        question: baseQuestion(), action: 'discussion', from: 'open', to: 'escalated',
+        discussion: { run_id: 'r1', outcome: 'weird_outcome', cycles: 1 }, messages: [], label,
+      });
+
+      assert.match(entry.text, /Discussed to resolution over 1 loop: stopped\./);
+      // from !== to: the verb names the status it landed on, not the outcome.
+      assert.match(entry.label, /discussed: escalated to moderator/);
+    });
+
+    it('names the outcome directly in the verb when the status did not change', () => {
+      const entry = questionMinutes({
+        question: baseQuestion(), action: 'discussion', from: 'open', to: 'open',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 3 }, messages: [], label,
+      });
+
+      assert.match(entry.label, /discussed: resolved by the asker/);
+      assert.match(entry.text, /Discussed to resolution over 3 loops: resolved by the asker\./);
+      assert.match(entry.text, /\*\*Status:\*\* Open \(unchanged\)/);
+    });
+
+    it('treats a non-numeric cycles count as 0', () => {
+      const entry = questionMinutes({
+        question: baseQuestion(), action: 'discussion', from: 'open', to: 'open',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 'abc' }, messages: [], label,
+      });
+
+      assert.match(entry.text, /Discussed to resolution over 0 loops: resolved by the asker\./);
+    });
+
+    it('lists contributions per loop in order, only for the matching run, excluding system notes and marking failed turns', () => {
+      const question = baseQuestion({ asker: 'clinical', addressees: 'commercial', message_id: '1' });
+      const messages = [
+        { id: '1', seq: 1, role: 'agent', speaker: 'clinical', text: 'the question itself' },
+        { id: '2', seq: 2, role: 'agent', speaker: 'commercial', text: 'loop1 addressee', content_json: ap('r1', 1) },
+        { id: '3', seq: 3, role: 'system', speaker: 'autopilot', text: 'a system note', content_json: ap('r1', 1) },
+        { id: '4', seq: 4, role: 'agent', speaker: 'clinical', text: 'loop1 asker, still open', content_json: ap('r1', 1) },
+        { id: '5', seq: 5, role: 'agent', speaker: 'commercial', text: 'loop2 addressee', content_json: ap('r1', 2), error: 'boom' },
+        { id: '6', seq: 6, role: 'agent', speaker: 'clinical', text: 'loop2 asker, resolved', content_json: ap('r1', 2) },
+        { id: '7', seq: 7, role: 'agent', speaker: 'commercial', text: 'a different run entirely', content_json: ap('r2', 1) },
+      ];
+      const entry = questionMinutes({
+        question, action: 'discussion', from: 'open', to: 'resolved',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 2 }, messages, label,
+      });
+
+      assert.match(entry.text, /\*\*Contributions:\*\*/);
+      assert.match(entry.text, /- Loop 1: Charlie #2, Luca #4/);
+      assert.match(entry.text, /- Loop 2: Charlie #5 \(failed\), Luca #6/);
+      assert.doesNotMatch(entry.text, /#3/, 'the system note (id 3) must not appear');
+      assert.doesNotMatch(entry.text, /#7/, 'a message from a different run must not appear');
+      // No answer message given and the run is non-empty: anchors to the run's last message.
+      assert.equal(entry.anchor_message_id, 6);
+    });
+
+    it('excludes messages from another run_id from the loop count entirely', () => {
+      const question = baseQuestion({ asker: 'clinical', addressees: 'commercial' });
+      const messages = [
+        { id: '1', seq: 1, role: 'agent', speaker: 'commercial', text: 'other run', content_json: ap('r2', 1) },
+      ];
+      const entry = questionMinutes({
+        question, action: 'discussion', from: 'open', to: 'escalated',
+        discussion: { run_id: 'r1', outcome: 'cycle_cap', cycles: 1 }, messages, label,
+      });
+
+      assert.doesNotMatch(entry.text, /\*\*Contributions:\*\*/);
+    });
+
+    it('takes the verdict from the last QUESTION STATUS line in the asker\'s final turn, even when an earlier one is quoted in the body', () => {
+      const question = baseQuestion({ asker: 'clinical', addressees: 'commercial' });
+      const messages = [
+        {
+          id: '1', seq: 1, role: 'agent', speaker: 'clinical',
+          text: 'Earlier I said QUESTION STATUS: OPEN — not yet.\n\nBut now: QUESTION STATUS: RESOLVED — got the answer.',
+          content_json: ap('r1', 1),
+        },
+      ];
+      const entry = questionMinutes({
+        question, action: 'discussion', from: 'open', to: 'resolved',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 1 }, messages, label,
+      });
+
+      assert.match(entry.text, /\*\*Luca's verdict:\*\* RESOLVED — got the answer\./);
+    });
+
+    it('omits the verdict line when the asker\'s final turn has no QUESTION STATUS line', () => {
+      const question = baseQuestion({ asker: 'clinical', addressees: 'commercial' });
+      const messages = [
+        { id: '1', seq: 1, role: 'agent', speaker: 'clinical', text: 'Sounds good to me.', content_json: ap('r1', 1) },
+      ];
+      const entry = questionMinutes({
+        question, action: 'discussion', from: 'open', to: 'resolved',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 1 }, messages, label,
+      });
+
+      assert.doesNotMatch(entry.text, /verdict/);
+    });
+
+    it('anchors to the answer message over the run\'s last message when both are given', () => {
+      const question = baseQuestion({ asker: 'clinical', addressees: 'commercial' });
+      const messages = [
+        { id: '1', seq: 1, role: 'agent', speaker: 'commercial', text: 'in the run', content_json: ap('r1', 1) },
+      ];
+      const answerMessage = { id: '42', seq: 9 };
+      const entry = questionMinutes({
+        question, action: 'discussion', from: 'open', to: 'answered',
+        discussion: { run_id: 'r1', outcome: 'resolved', cycles: 1 }, answerMessage, messages, label,
+      });
+
+      assert.equal(entry.anchor_message_id, 42);
+    });
   });
 });

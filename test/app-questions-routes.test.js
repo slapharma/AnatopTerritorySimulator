@@ -18,7 +18,7 @@ const SESSION_ID = 39;
 const USER_ID = 1;
 
 // Mutable per-test state the fake db closes over; reset in beforeEach.
-let messages, questions, nextMsgId, nextQId, addQuestionsCalls, updateQuestionCalls, runTurnCalls, runTurnImpl;
+let messages, questions, nextMsgId, nextQId, addQuestionsCalls, updateQuestionCalls, minutesCalls, runTurnCalls, runTurnImpl;
 
 function addMsg(fields) {
   const m = { id: String(++nextMsgId), seq: messages.length + 1, created_at: new Date().toISOString(), cost_usd: 0, error: null, content_json: null, ...fields };
@@ -65,6 +65,10 @@ describe('Agent Questions routes', () => {
         }
         return added;
       },
+      listMessages: async () => messages.slice(),
+      addMeetingMinutes: async (sid, fields) => { minutesCalls.push({ sid, fields }); return { id: minutesCalls.length, session_id: sid, ...fields }; },
+      // Returns the stored object itself and updateQuestion below changes it in
+      // place, so a route that reads the old status after updating gets the new one.
       getQuestion: async (id, sid) => questions.find((q) => String(q.id) === String(id) && String(q.session_id) === String(sid)) || null,
       updateQuestion: async (id, sid, fields) => {
         updateQuestionCalls.push({ id: String(id), sid, fields });
@@ -91,6 +95,7 @@ describe('Agent Questions routes', () => {
     questions = [];
     addQuestionsCalls = [];
     updateQuestionCalls = [];
+    minutesCalls = [];
     runTurnCalls = [];
     runTurnImpl = async () => ({ text: 'default stub answer', trace: [], usage: { input_tokens: 1, output_tokens: 1, searches: 0 }, model: 'stub', stop_reason: 'stop', cost_usd: 0.01 });
   });
@@ -142,6 +147,73 @@ describe('Agent Questions routes', () => {
       assert.equal(updateQuestionCalls[0].fields.resolution_note, 'Answered earlier');
       assert.equal(updateQuestionCalls[0].fields.answer_message_id, '55');
     });
+
+    it('writes a minutes entry for a status change, from the status the question had before the update', async () => {
+      const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, { status: 'open' });
+      assert.equal(res.status, 200, await res.text());
+      assert.equal(minutesCalls.length, 1, 'a reopen is an action on the question and gets a minutes entry');
+      assert.equal(minutesCalls[0].fields.round, 'question');
+      assert.match(minutesCalls[0].fields.text, /\*\*Status:\*\* Answered → Open/);
+    });
+
+    it('writes no minutes entry when the status is unchanged and no discussion is closed', async () => {
+      const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, { status: 'answered' });
+      assert.equal(res.status, 200, await res.text());
+      assert.equal(minutesCalls.length, 0);
+    });
+
+    describe('discussion', () => {
+      it('writes a "discussion" minutes entry, even when the status is left unchanged, for a valid run_id', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, {
+          status: 'answered', discussion: { run_id: '900', outcome: 'stopped_by_moderator', cycles: 2 },
+        });
+        assert.equal(res.status, 200, await res.text());
+        assert.equal(minutesCalls.length, 1, 'a discussion is an action on the question even when the status did not change');
+        assert.match(minutesCalls[0].fields.text, /Discussed to resolution over 2 loops: stopped by the moderator\./);
+      });
+
+      it('with no status, leaves the question as the server holds it and writes only the discussion entry', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, {
+          discussion: { run_id: '900', outcome: 'failed', cycles: 1 },
+        });
+        assert.equal(res.status, 200, await res.text());
+        assert.equal(updateQuestionCalls.length, 0, 'a run that decided nothing must not rewrite the status');
+        assert.equal(questions[0].answer_message_id, '55', 'the existing answer link survives');
+        assert.equal(minutesCalls.length, 1);
+        assert.match(minutesCalls[0].fields.text, /\*\*Status:\*\* Answered \(unchanged\)/);
+        assert.doesNotMatch(minutesCalls[0].fields.text, /\*\*Note:\*\*/);
+      });
+
+      it('rejects a PATCH with neither a status nor a valid discussion', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, { discussion: { run_id: 'x' } });
+        assert.equal(res.status, 400);
+        assert.equal(minutesCalls.length, 0);
+      });
+
+      it('ignores a discussion whose run_id is not purely digits, writing no entry when the status is also unchanged', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, {
+          status: 'answered', discussion: { run_id: 'not-numeric', outcome: 'resolved', cycles: 2 },
+        });
+        assert.equal(res.status, 200, await res.text());
+        assert.equal(minutesCalls.length, 0, 'the malformed run_id makes discussion null, and the status did not change either');
+      });
+
+      it('clamps cycles above 100 down to 100', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, {
+          status: 'answered', discussion: { run_id: '900', outcome: 'resolved', cycles: 500 },
+        });
+        assert.equal(res.status, 200, await res.text());
+        assert.match(minutesCalls[0].fields.text, /Discussed to resolution over 100 loops:/);
+      });
+
+      it('clamps a negative cycles count up to 0', async () => {
+        const res = await api('PATCH', `/api/sessions/${SESSION_ID}/questions/500`, {
+          status: 'answered', discussion: { run_id: '900', outcome: 'resolved', cycles: -5 },
+        });
+        assert.equal(res.status, 200, await res.text());
+        assert.match(minutesCalls[0].fields.text, /Discussed to resolution over 0 loops:/);
+      });
+    });
   });
 
   // ---------------- POST /api/sessions/:id/questions/:qid/answer ----------------
@@ -181,6 +253,14 @@ describe('Agent Questions routes', () => {
       assert.equal(updateQuestionCalls[0].fields.answer_message_id, body.message.id);
 
       assert.deepEqual(body.respondents, ['clinical']);
+    });
+
+    it('writes a minutes entry from the status the question had before it was answered', async () => {
+      questions[0].status = 'escalated';
+      const res = await api('POST', `/api/sessions/${SESSION_ID}/questions/500/answer`, { text: 'An answer.' });
+      assert.equal(res.status, 200, await res.text());
+      assert.equal(minutesCalls.length, 1);
+      assert.match(minutesCalls[0].fields.text, /\*\*Status:\*\* Escalated to moderator → Answered/);
     });
 
     it('addresses the reply to "all" and returns no respondents when the asker is not a panel agent', async () => {
@@ -301,6 +381,35 @@ describe('Agent Questions routes', () => {
 
       assert.equal(body.updated, 0);
       assert.equal(questions[0].status, 'open');
+    });
+
+    it('writes one minutes entry per question it marks answered, and none for a claim it skips', async () => {
+      addMsg({ role: 'agent', speaker: 'clinical', mode: 'opening', text: 'asked 1' }); // seq 1
+      addMsg({ role: 'agent', speaker: 'clinical', mode: 'opening', text: 'asked 2' }); // seq 2
+      addMsg({ role: 'agent', speaker: 'commercial', mode: 'round2', text: 'answers both' }); // seq 3
+      questions.push(
+        { id: '1', session_id: SESSION_ID, message_id: '101', n: 1, asker: 'clinical', addressees: 'commercial', round: 'opening', text: 'Q1?', status: 'open', resolution_note: null, answer_message_id: null },
+        { id: '2', session_id: SESSION_ID, message_id: '102', n: 1, asker: 'clinical', addressees: 'commercial', round: 'opening', text: 'Q2?', status: 'open', resolution_note: null, answer_message_id: null },
+      );
+      runTurnImpl = async () => ({
+        text: JSON.stringify({
+          answered: [
+            { id: '1', seq: 3, note: 'answered in #3' }, // valid: seq 3 is after both questions
+            { id: '2', seq: 2, note: 'points at its own question message, not an answer' }, // invalid: seq not after id 2's own seq(2)
+          ],
+        }),
+        trace: [], usage: { input_tokens: 1, output_tokens: 1, searches: 0 }, model: 'stub', stop_reason: 'stop', cost_usd: 0.01,
+      });
+
+      const res = await api('POST', `/api/sessions/${SESSION_ID}/questions/check`, {});
+      const body = await res.json();
+      assert.equal(res.status, 200, JSON.stringify(body));
+
+      assert.equal(body.updated, 1);
+      assert.equal(questions[1].status, 'open', 'the skipped claim (id 2) left untouched');
+      assert.equal(minutesCalls.length, 1, 'one entry for the question actually marked answered, none for the skipped claim');
+      assert.equal(minutesCalls[0].fields.round, 'question');
+      assert.match(minutesCalls[0].fields.text, /The Moderator Assistant found it answered in message #3\./);
     });
   });
 

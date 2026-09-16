@@ -120,4 +120,105 @@ function answeredListLength(text) {
 
 const STATUSES = ['open', 'answered', 'resolved', 'escalated'];
 
-module.exports = { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable, answeredListLength, STATUSES };
+// ---------- minutes entries ----------
+// Every action on a question leaves a record in the session's minutes. The
+// entry is built from data, not written by a model: it is instant, free, and
+// says exactly what happened.
+const STATUS_LABEL = { open: 'Open', answered: 'Answered', resolved: 'Resolved', escalated: 'Escalated to moderator' };
+const ROUND_LABEL = {
+  opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk', reply: 'Reply',
+  custom: 'Custom meeting', autopilot: 'Autopilot', dive_deeper: 'Dive Deeper', decision: 'Decision output',
+};
+const OUTCOME_LABEL = {
+  resolved: 'resolved by the asker', cycle_cap: 'loop limit reached', safety_cap: 'safety loop cap reached',
+  cost_cap: 'cost limit reached', failed: 'a turn failed', stopped_by_moderator: 'stopped by the moderator',
+};
+const MINUTES_ROUND = 'question';
+
+function autopilotOf(m) {
+  if (!m || !m.content_json) return null;
+  try { return JSON.parse(m.content_json).autopilot || null; } catch { return null; }
+}
+const oneLine = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+// action: 'answer' (the moderator answered it), 'check' (the answered-check
+// found it answered), 'status' (marked answered / escalated / reopened by hand)
+// or 'discussion' (a discuss-to-resolution run ended; discussion is
+// { run_id, outcome, cycles }). from/to are statuses. label maps an agent key to
+// a display name. Returns { label, text, anchor_message_id }.
+function questionMinutes({ question, action, from, to, note, answerMessage, discussion, messages = [], label }) {
+  const name = (k) => label(k);
+  const byId = new Map(messages.map((m) => [String(m.id), m]));
+  const asked = byId.get(String(question.message_id));
+  const addressees = String(question.addressees || '').split(',').filter(Boolean);
+  const pair = `${name(question.asker)} → ${addressees.map(name).join(', ') || 'unaddressed'}`;
+  const ref = (m) => (m ? ` in message #${m.seq}` : '');
+
+  let verb;
+  let happened;
+  const extra = [];
+  let anchor = answerMessage || asked || null;
+  if (action === 'answer') {
+    verb = 'answered by the moderator';
+    happened = `The moderator answered it${ref(answerMessage)}.`;
+  } else if (action === 'check') {
+    verb = 'found answered';
+    happened = `The Moderator Assistant found it answered${ref(answerMessage)}.`;
+  } else if (action === 'discussion') {
+    const d = discussion || {};
+    const outcome = OUTCOME_LABEL[d.outcome] || 'stopped';
+    verb = `discussed: ${from === to ? outcome : STATUS_LABEL[to].toLowerCase()}`;
+    const cycles = Number.isFinite(Number(d.cycles)) ? Number(d.cycles) : 0;
+    happened = `Discussed to resolution over ${cycles} loop${cycles === 1 ? '' : 's'}: ${outcome}.`;
+    const run = messages.filter((m) => {
+      const ap = autopilotOf(m);
+      return ap && d.run_id != null && String(ap.run_id) === String(d.run_id) && m.role !== 'system';
+    });
+    const loops = new Map();
+    for (const m of run) {
+      const cycle = autopilotOf(m).cycle || 1;
+      if (!loops.has(cycle)) loops.set(cycle, []);
+      loops.get(cycle).push(`${name(m.speaker)} #${m.seq}${m.error ? ' (failed)' : ''}`);
+    }
+    if (loops.size) {
+      extra.push('**Contributions:**');
+      for (const [cycle, list] of [...loops.entries()].sort((a, b) => a[0] - b[0])) extra.push(`- Loop ${cycle}: ${list.join(', ')}`);
+    }
+    const askerTurns = run.filter((m) => m.speaker === question.asker && m.text);
+    const lastAsker = askerTurns[askerTurns.length - 1];
+    const verdicts = lastAsker ? [...lastAsker.text.matchAll(/QUESTION STATUS:\s*\**\s*((?:RESOLVED|OPEN)\b[^\n]*)/gi)] : [];
+    // The blank line stops Markdown reading the verdict as part of the last list item.
+    if (verdicts.length) extra.push(...(extra.length ? [''] : []), `**${name(question.asker)}'s verdict:** ${oneLine(verdicts[verdicts.length - 1][1])}`);
+    if (answerMessage) anchor = answerMessage;
+    else if (run.length) anchor = run[run.length - 1];
+  } else {
+    verb = to === 'open' ? 'reopened' : to === 'escalated' ? 'escalated' : `marked ${STATUS_LABEL[to].toLowerCase()}`;
+    happened = to === 'open' ? 'The moderator reopened it.'
+      : to === 'escalated' ? 'The moderator escalated it for offline review.'
+        : `The moderator marked it ${STATUS_LABEL[to].toLowerCase()}.`;
+  }
+
+  const text = [
+    // Not "**Question**": the app's Markdown renderer turns that into a badge.
+    `**${name(question.asker)} asked ${addressees.map(name).join(' and ') || 'no one named'}:** "${oneLine(question.text)}"`,
+    '',
+    `Asked in ${ROUND_LABEL[question.round] || question.round || 'the transcript'}${asked ? `, message #${asked.seq}` : ''}.`,
+    '',
+    `**What happened:** ${happened}`,
+    '',
+    from === to ? `**Status:** ${STATUS_LABEL[to]} (unchanged)` : `**Status:** ${STATUS_LABEL[from] || from} → ${STATUS_LABEL[to] || to}`,
+    ...(note ? ['', `**Note:** ${oneLine(note)}`] : []),
+    ...(extra.length ? ['', ...extra] : []),
+  ].join('\n');
+
+  return {
+    label: `Question ${verb} · ${pair}`.slice(0, 200),
+    text,
+    anchor_message_id: anchor && /^\d+$/.test(String(anchor.id)) ? Number(anchor.id) : null,
+  };
+}
+
+module.exports = {
+  parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable, answeredListLength,
+  questionMinutes, STATUSES, MINUTES_ROUND,
+};

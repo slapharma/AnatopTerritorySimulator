@@ -86,3 +86,26 @@ moderator for offline review.
 - [ ] Intelligence tab "Agent Questions": filters, asker → addressee chips, status, asked-in / answered-in links, Answer, Discuss to resolution, mark/reopen/escalate
 - [ ] Run the answered-check whenever a meeting completes
 - [ ] Guide section; tests; review; hand over the schema command (the prod table must be created by hand)
+
+## Question minutes, conversation names in Agent notes, Intelligence page (2026-09-16)
+
+Decisions (Clifton): a minutes entry for every question action (moderator answer, discuss to
+resolution with any outcome, mark answered, escalate, reopen, the automatic answered-check);
+entries are a plain record built from data (no model call, no email, no Approve); the
+Escalations tab lists escalated questions.
+
+- [x] `src/questions.js`: pure `questionMinutes()` builds {label, text, anchor} for one action
+- [x] `src/app.js`: write the entry from PATCH status, POST answer, POST check; PATCH accepts `discussion: {run_id, outcome, cycles}`; responses carry `meeting_minutes`
+- [x] Client: settle a question discussion on every outcome (unchanged status still PATCHes with the run), update minutes from responses; question entries render without Approve
+- [x] Agent notes: autopilot rows and groups named by conversation (Autopilot discussion / on disagreement #n: topic / Question discussion: asker to addressees)
+- [x] Intelligence becomes a page inside the session view; its tabs are a sidebar nav under the Meeting Agenda with a Meeting transcript item; header Intelligence button toggles the page; any agent turn switches back to the transcript
+- [x] Escalations tab (escalated questions, same card actions)
+- [x] Guide text; tests; reviews
+
+### Review
+
+- Verified in the browser against an in-memory fake db (never the production DATABASE_URL): Escalations tab lists the escalated question and its count turns amber; reopen, mark answered, moderator answer and a discussion outcome each add a Minutes entry with no Approve button; "view in transcript" switches back; starting Converge from the Intelligence page returns to the transcript; Agent notes shows Question discussion / Disagreement debate #1 / Panel debate 1 instead of Autopilot.
+- debugger: PATCH and answer routes read the old status after the update; fixed by capturing it first.
+- code-reviewer: Decision/Favourites jump buttons, no tab access under 900px, stale status after a stopped discussion; all fixed and confirmed.
+- security-auditor: one Low (repeat PATCH with a discussion can add unlimited minutes entries), not fixed.
+- Not done: URL does not reflect the open Intelligence tab; Escape no longer leaves the page.

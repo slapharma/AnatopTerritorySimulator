@@ -45,7 +45,7 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .sidebar-expand-btn:hover { background: var(--surface-2); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--primary-hover); margin-bottom: 4px; }
 .brand-btn { border: none; background: none; padding: 0; cursor: pointer; text-align: left; width: 100%; font: inherit; }
-.brand-stack { flex-direction: column; align-items: flex-start; gap: 6px; }
+.brand-stack { flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 16px; }
 .brand-logo { width: 100%; max-width: 160px; height: auto; object-fit: contain; margin-bottom: 8px; }
 /* Simulation Process panel — every control that advances or reports on the
    simulation, stacked in the sidebar above the session list. Vertical because

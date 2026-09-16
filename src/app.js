@@ -571,23 +571,34 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
     });
     const openIds = new Set(open.map((x) => String(x.id)));
     const bySeq = new Map(session.messages.map((m) => [Number(m.seq), m]));
+    const claims = questions.parseAnsweredCheck(result.text);
+    // "Nothing answered" and "the model's reply could not be read" both end with
+    // no updates, so the log line says which one it was and why claims were dropped.
+    const skipped = { unknownId: 0, badSeq: 0, notAnAnswer: 0, noLongerOpen: 0 };
     let updated = 0;
-    for (const a of questions.parseAnsweredCheck(result.text)) {
-      if (!openIds.has(a.id)) continue;
+    for (const a of claims) {
+      if (!openIds.has(a.id)) { skipped.unknownId++; continue; }
       const qRow = open.find((x) => String(x.id) === a.id);
       const answerMsg = bySeq.get(a.seq);
       // An answer has to come after the question; anything else is the model
       // pointing at the question itself or at an earlier message.
       const askedSeq = seqOf.get(String(qRow.message_id));
-      if (!answerMsg || (askedSeq != null && answerMsg.seq <= askedSeq)) continue;
+      if (!answerMsg || (askedSeq != null && answerMsg.seq <= askedSeq)) { skipped.badSeq++; continue; }
       // It has to be a real answer from someone else: not the asker restating
       // the question, not a system note, not a failed or unfinished turn.
-      if (!answerMsg.text || answerMsg.error || answerMsg.role === 'system' || answerMsg.speaker === qRow.asker) continue;
+      if (!answerMsg.text || answerMsg.error || answerMsg.role === 'system' || answerMsg.speaker === qRow.asker) { skipped.notAnAnswer++; continue; }
       const row = await db.updateQuestion(qRow.id, id, {
         status: 'answered', resolution_note: a.note || `Answered in #${answerMsg.seq}`, answer_message_id: answerMsg.id,
       }, { onlyIfOpen: true });
-      if (row) updated++;
+      if (row) updated++; else skipped.noLongerOpen++;
     }
+    const raw = String(result.text || '');
+    // listed counts the reply's entries before malformed ones (non-numeric ids)
+    // are dropped; the reply's opening is logged whenever something was lost.
+    const listed = questions.answeredListLength(raw);
+    const readable = listed >= 0;
+    console.log(`[questions/check] session ${id} model=${result.model || '?'} open=${open.length} reply_chars=${raw.length} readable=${readable} listed=${listed} claims=${claims.length} updated=${updated} skipped=${JSON.stringify(skipped)} cost_usd=${Number(result.cost_usd || 0).toFixed(4)}`
+      + (readable && listed === claims.length ? '' : ` reply_start=${JSON.stringify(raw.slice(0, 200))}`));
     res.json({ updated, questions: await db.listQuestions(id) });
   } catch (e) { next(e); }
 });

@@ -4,7 +4,22 @@
 // (key/name/short/function/label per agent).
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck } = require('../src/questions');
+const { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable } = require('../src/questions');
+
+describe('isAnsweredCheckReadable', () => {
+  // The check's log line relies on this to tell "none answered" (readable,
+  // empty list) from a reply the model did not write as the JSON asked for.
+  it('is true for the expected object, including an empty answered list, fenced or not', () => {
+    assert.equal(isAnsweredCheckReadable('{"answered": []}'), true);
+    assert.equal(isAnsweredCheckReadable('```json\n{"answered":[{"id":"1","seq":2}]}\n```'), true);
+  });
+  it('is false for prose, broken JSON, or JSON without an answered list', () => {
+    assert.equal(isAnsweredCheckReadable('None of the questions were answered.'), false);
+    assert.equal(isAnsweredCheckReadable('{"answered": [ }'), false);
+    assert.equal(isAnsweredCheckReadable('{"result": []}'), false);
+    assert.equal(isAnsweredCheckReadable(''), false);
+  });
+});
 
 const AGENTS = {
   regulatory: { key: 'regulatory', name: 'Ruth', short: 'Ruth', function: 'Regulatory', label: 'Ruth (Regulatory)' },

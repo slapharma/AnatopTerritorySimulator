@@ -100,6 +100,24 @@ function parseAnsweredCheck(text) {
     .filter((x) => /^\d+$/.test(x.id));
 }
 
+// True when the reply holds the JSON object the check asks for (an "answered"
+// list, even an empty one), so a log can tell "none answered" from "unreadable".
+function isAnsweredCheckReadable(text) {
+  return answeredListLength(text) >= 0;
+}
+// How many entries the reply's "answered" list holds before any are dropped
+// as malformed, or -1 when there is no readable list.
+function answeredListLength(text) {
+  const s = String(text || '');
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start < 0 || end <= start) return -1;
+  try {
+    const obj = JSON.parse(s.slice(start, end + 1));
+    return Array.isArray(obj && obj.answered) ? obj.answered.length : -1;
+  } catch { return -1; }
+}
+
 const STATUSES = ['open', 'answered', 'resolved', 'escalated'];
 
-module.exports = { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, STATUSES };
+module.exports = { parseQuestions, addresseeKeys, parseQuestionStatus, parseAnsweredCheck, isAnsweredCheckReadable, answeredListLength, STATUSES };

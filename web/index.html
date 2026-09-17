@@ -11,54 +11,41 @@
   <button type="button" id="btn-sidebar-expand" class="sidebar-expand-btn" title="Show sidebar" hidden>▶</button>
   <aside class="sidebar">
     <div class="sidebar-head">
-      <button type="button" id="btn-sidebar-collapse" class="sidebar-collapse-btn" title="Collapse sidebar for full screen width">◀</button>
-      <button type="button" id="brand-home" class="brand brand-stack brand-btn" title="Back to dashboard">
-        <img src="/sla-logo.png" alt="SLA Pharma" class="brand-logo">
-      </button>
-      <button id="btn-new" class="btn btn-accent btn-block" type="button">New evaluation</button>
+      <div class="sidebar-brand-row">
+        <button type="button" id="brand-home" class="brand-btn" title="Back to dashboard">
+          <img src="/sla-logo.png" alt="SLA Pharma: back to dashboard" class="brand-logo">
+        </button>
+        <button type="button" id="btn-sidebar-collapse" class="sidebar-collapse-btn" title="Collapse sidebar for full screen width" aria-label="Collapse sidebar"><span data-icon="panelLeft"></span></button>
+      </div>
+      <button id="btn-new" class="btn btn-accent btn-block side-new" type="button"><span data-icon="plus"></span>New evaluation</button>
     </div>
 
-    <!-- Every control that advances or reports on the simulation, in one panel.
-         Keeps id="toolbar" because the run-state disable in setRunning() targets
-         it; hidden outside the session view, which the sidebar does not switch. -->
+    <!-- Every control that advances the simulation, in one panel. Keeps
+         id="toolbar" because the run-state disable in setRunning() targets it;
+         hidden outside the session view. Reports live on the Decision tab and
+         exports on every Intelligence tab, so everything here starts a turn. -->
     <nav class="sidebar-panel" id="toolbar" aria-label="Meeting agenda" hidden>
       <button type="button" class="side-section-head open" id="btn-toggle-process" aria-expanded="true" aria-controls="process-body">
-        <span>Meeting Agenda</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <span>Meeting agenda</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="side-section-body" id="process-body">
-      <!-- One box: the four numbered meetings, then the two ways to run a
-           meeting that isn't one of them. All six start a turn, so they belong
-           together and apart from Reports/Export, which only read the result. -->
-      <div class="sim-run">
-        <div class="meeting-steps">
-          <button class="meeting-btn" data-round="opening" type="button" title="Opening positions: each panel member presents an independent assessment"><span class="meeting-num">1</span>Baselines</button>
-          <button class="meeting-btn" data-round="round2" type="button" title="Scrutiny: each panel member tests at least two of the others' assumptions, on the evidence"><span class="meeting-num">2</span>Challenge</button>
-          <button class="meeting-btn" data-round="round3" type="button" title="Consensus: the panel tables base, upside and downside figures"><span class="meeting-num">3</span>Converge</button>
-          <button class="meeting-btn" data-round="crosstalk" type="button" title="Open floor: every panel member responds to the debate so far"><span class="meeting-num">4</span>Cross-talk</button>
-        </div>
+        <!-- The four meetings run in order, so they are drawn as a stepper: a
+             rail joins the numbers and a step turns green once it has run. -->
+        <ol class="meeting-steps">
+          <li><button class="meeting-btn" data-round="opening" type="button" title="Opening positions: each panel member presents an independent assessment"><span class="meeting-num">1</span><span class="meeting-label">Baselines</span></button></li>
+          <li><button class="meeting-btn" data-round="round2" type="button" title="Scrutiny: each panel member tests at least two of the others' assumptions, on the evidence"><span class="meeting-num">2</span><span class="meeting-label">Challenge</span></button></li>
+          <li><button class="meeting-btn" data-round="round3" type="button" title="Consensus: the panel tables base, upside and downside figures"><span class="meeting-num">3</span><span class="meeting-label">Converge</span></button></li>
+          <li><button class="meeting-btn" data-round="crosstalk" type="button" title="Open floor: every panel member responds to the debate so far"><span class="meeting-num">4</span><span class="meeting-label">Cross-talk</span></button></li>
+        </ol>
         <!-- Shown only when the latest meeting stopped before every agent
              answered (a reload mid-meeting, a failed or cut-off turn). -->
         <button class="btn btn-sm btn-block btn-resume" id="btn-resume-meeting" type="button" hidden></button>
-        <div class="sim-run-extra">
-          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-autopilot" type="button" title="Let the panel debate over several cycles unaided, within limits you set">Autopilot…</button>
-          <button class="btn btn-sm btn-block btn-start btn-quiet" id="btn-custom" type="button" title="Table your own agenda item for the panel">Custom meeting…</button>
+        <div class="side-subhead" id="other-meetings-label">Other meetings</div>
+        <div class="side-nav" role="group" aria-labelledby="other-meetings-label">
+          <button class="side-nav-item" id="btn-autopilot" type="button" title="Let the panel debate over several cycles unaided, within limits you set"><span data-icon="repeat"></span>Autopilot…</button>
+          <button class="side-nav-item" id="btn-custom" type="button" title="Table your own agenda item for the panel"><span data-icon="pencil"></span>Custom meeting…</button>
         </div>
-      </div>
-      <div class="menu">
-        <button class="btn btn-sm btn-block btn-start menu-btn" type="button" id="btn-reports">Reports<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-        <div class="menu-items" id="reports-menu" hidden>
-          <button type="button" id="btn-report-interim">Interim report…</button>
-          <button type="button" id="btn-report-final">Final report…</button>
-        </div>
-      </div>
-      <div class="menu">
-        <button class="btn btn-sm btn-block btn-start menu-btn" type="button" id="btn-export">Export<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-        <div class="menu-items" id="export-menu" hidden>
-          <a id="link-docx" href="#" download>Word (.docx)</a>
-          <a id="link-pdf" href="#" download>PDF</a>
-        </div>
-      </div>
-      <button class="btn btn-sm btn-block btn-start btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
+        <button class="btn btn-sm btn-block btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
       </div>
     </nav>
 
@@ -70,27 +57,24 @@
         <span>Intelligence</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="side-section-body side-nav" id="intel-nav-body">
-        <button type="button" class="side-nav-item" data-pane="transcript">Meeting transcript</button>
-        <div class="side-nav-divider" role="separator"></div>
-        <button type="button" class="side-nav-item" data-pane="sources">Sources <span class="count" id="count-sources">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="disagreements">Disagreements <span class="count" id="count-dis">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="questions">Agent Questions <span class="count" id="count-questions">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="escalations">Escalations <span class="count" id="count-escalations">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="decision">Decision</button>
-        <button type="button" class="side-nav-item" data-pane="favourites">Favourites <span class="count" id="count-favourites">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="reports">Reports <span class="count" id="count-reports">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="minutes">Minutes <span class="count" id="count-minutes">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="intelligence">Agent notes</button>
-        <button type="button" class="side-nav-item" data-pane="inputs">Inputs</button>
+        <button type="button" class="side-nav-item" data-pane="transcript"><span data-icon="chat"></span>Meeting transcript</button>
+        <div class="side-subhead">Evidence</div>
+        <button type="button" class="side-nav-item" data-pane="sources"><span data-icon="link"></span>Sources <span class="count" id="count-sources">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="disagreements"><span data-icon="alert"></span>Disagreements <span class="count" id="count-dis">0</span></button>
+        <div class="side-subhead">Panel</div>
+        <button type="button" class="side-nav-item" data-pane="intelligence"><span data-icon="notes"></span>Agent notes</button>
+        <button type="button" class="side-nav-item" data-pane="questions"><span data-icon="help"></span>Agent Questions <span class="count" id="count-questions">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="escalations"><span data-icon="flag"></span>Escalations <span class="count" id="count-escalations">0</span></button>
+        <div class="side-subhead">Outcome</div>
+        <button type="button" class="side-nav-item" data-pane="decision"><span data-icon="check"></span>Decision &amp; reports <span class="count" id="count-reports">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="minutes"><span data-icon="clipboard"></span>Minutes <span class="count" id="count-minutes">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="favourites"><span data-icon="star"></span>Favourites <span class="count" id="count-favourites">0</span></button>
+        <div class="side-subhead">Briefing</div>
+        <button type="button" class="side-nav-item" data-pane="inputs"><span data-icon="sliders"></span>Inputs</button>
       </div>
     </nav>
 
-    <div class="session-list-wrap">
-      <button type="button" id="btn-toggle-sessions" class="side-section-head" aria-expanded="false" aria-controls="session-list">
-        <span id="session-toggle-label">Evaluation Register</span><span class="count" id="session-toggle-count" hidden>0</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-      <div id="session-list" class="session-list" aria-label="Evaluation register" hidden></div>
-    </div>
+    <div class="sidebar-spacer"></div>
     <div class="sidebar-foot" id="sidebar-foot"></div>
   </aside>
 
@@ -108,8 +92,8 @@
         <div class="dashboard">
           <!-- Filled by renderDashboard(): KPI strip, then the two big start/resume
                tiles. User Guide, Agents and Admin are power buttons in every
-               view's header (renderPowerNav()), not tiles here. The saved evaluations are not
-               here any more — they are the sidebar's Evaluation Register.
+               view's header (renderPowerNav()), not tiles here. The saved evaluations are listed
+               on their own page, opened by the View all evaluations tile.
                Each block is its own container and each renderer addresses its
                own by id, so this order is set here and nowhere else. -->
           <!-- Hero: the three agents at the table with the moderator's back to
@@ -172,6 +156,30 @@
       </div>
     </section>
 
+    <!-- ============ ALL EVALUATIONS VIEW ============ -->
+    <section id="view-evaluations" class="view" hidden>
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1>All evaluations</h1>
+          <div class="muted" id="evals-sub"></div>
+        </div>
+        <div class="topbar-actions">
+          <nav class="power-nav" aria-label="Reference"></nav>
+        </div>
+      </header>
+      <div class="scroll">
+        <div class="evals-page">
+          <div class="evals-toolbar">
+            <label class="evals-search">
+              <span class="visually-hidden">Filter evaluations</span>
+              <input type="search" id="evals-filter" placeholder="Filter by title, product or country" autocomplete="off">
+            </label>
+          </div>
+          <div class="evals-table-wrap" id="evals-table"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ SETUP VIEW ============ -->
     <section id="view-setup" class="view" hidden>
       <header class="topbar">
@@ -216,7 +224,24 @@
         <div class="topbar-actions">
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
           <button type="button" class="cost" id="cost-meter" title="LLM spend for this session: click for the full breakdown by use, model and agent" aria-haspopup="dialog"></button>
-          <nav class="power-nav" aria-label="Board pack and reference" data-intelligence></nav>
+          <!-- Narrow screens hide the sidebar, and with it #intel-nav: this
+               picker stands in for it there and is hidden everywhere else. -->
+          <label class="intel-page-picker">
+            <span class="visually-hidden">Show</span>
+            <select id="intel-page-select">
+              <option value="transcript">Meeting transcript</option>
+              <option value="sources">Sources</option>
+              <option value="disagreements">Disagreements</option>
+              <option value="intelligence">Agent notes</option>
+              <option value="questions">Agent Questions</option>
+              <option value="escalations">Escalations</option>
+              <option value="decision">Decision &amp; reports</option>
+              <option value="minutes">Minutes</option>
+              <option value="favourites">Favourites</option>
+              <option value="inputs">Inputs</option>
+            </select>
+          </label>
+          <nav class="power-nav" aria-label="Reference"></nav>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this evaluation">Delete</button>
         </div>
       </header>
@@ -246,32 +271,41 @@
           <div class="intel-page-inner">
           <div class="intel-page-head">
             <h2 class="intel-page-title" id="intel-page-title">Sources</h2>
-            <!-- Narrow screens hide the sidebar, and with it #intel-nav: this
-                 picker stands in for it there and is hidden everywhere else. -->
-            <label class="intel-page-picker">
-              <span class="visually-hidden">Intelligence tab</span>
-              <select id="intel-page-select">
-                <option value="transcript">Meeting transcript</option>
-                <option value="sources">Sources</option>
-                <option value="disagreements">Disagreements</option>
-                <option value="questions">Agent Questions</option>
-                <option value="escalations">Escalations</option>
-                <option value="decision">Decision</option>
-                <option value="favourites">Favourites</option>
-                <option value="reports">Reports</option>
-                <option value="minutes">Minutes</option>
-                <option value="intelligence">Agent notes</option>
-                <option value="inputs">Inputs</option>
-              </select>
-            </label>
+            <!-- Every tab exports on its own; the full evaluation record (the
+                 old sidebar export) sits beside it. -->
+            <div class="menu intel-export">
+              <button type="button" class="btn btn-sm menu-btn" id="btn-intel-export" aria-haspopup="true" aria-expanded="false" aria-controls="intel-export-menu"><span data-icon="download"></span>Export<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+              <div class="menu-items" id="intel-export-menu" hidden>
+                <div class="menu-label" id="intel-export-label">This tab</div>
+                <a id="link-intel-docx" href="#" download>Word (.docx)</a>
+                <a id="link-intel-pdf" href="#" download>PDF</a>
+                <div class="menu-sep" role="separator"></div>
+                <div class="menu-label">Full evaluation record</div>
+                <a id="link-docx" href="#" download>Word (.docx)</a>
+                <a id="link-pdf" href="#" download>PDF</a>
+              </div>
+            </div>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
           <div class="tab-body" id="tab-questions" hidden></div>
           <div class="tab-body" id="tab-escalations" hidden></div>
-          <div class="tab-body" id="tab-decision" hidden></div>
+          <div class="tab-body" id="tab-decision" hidden>
+            <div id="decision-output"></div>
+            <!-- Reports used to be a sidebar menu and a tab of their own. They
+                 are written from the decision, so they sit under it. -->
+            <section class="decision-reports" aria-labelledby="decision-reports-title">
+              <div class="decision-reports-head">
+                <h3 id="decision-reports-title">Reports</h3>
+                <div class="decision-reports-actions">
+                  <button type="button" class="btn btn-sm report-generate" id="btn-report-interim">Interim report…</button>
+                  <button type="button" class="btn btn-sm btn-primary report-generate" id="btn-report-final">Final report…</button>
+                </div>
+              </div>
+              <div id="reports-list"></div>
+            </section>
+          </div>
           <div class="tab-body" id="tab-favourites" hidden></div>
-          <div class="tab-body" id="tab-reports" hidden></div>
           <div class="tab-body" id="tab-minutes" hidden></div>
           <div class="tab-body" id="tab-intelligence" hidden></div>
           <div class="tab-body" id="tab-inputs" hidden>

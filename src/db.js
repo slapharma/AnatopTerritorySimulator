@@ -55,12 +55,32 @@ async function one(text, params) {
   return rows[0] || null;
 }
 
-async function listSessions() {
-  return q(`SELECT s.id, s.title, s.product, s.country, s.created_at, s.updated_at,
+// The All evaluations page reads this. agent_questions may not exist yet (see
+// missingTable below), and a failure here would stop the whole page loading,
+// so without it the escalated count is reported as 0 rather than failing.
+function listSessionsSql(withQuestions) {
+  const escalated = withQuestions
+    ? "(SELECT COUNT(*) FROM agent_questions aq WHERE aq.session_id = s.id AND aq.status = 'escalated')"
+    : '0';
+  return `SELECT s.id, s.title, s.product, s.country, s.created_at, s.updated_at,
       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count,
       (SELECT COALESCE(SUM(cost_usd),0) FROM messages m WHERE m.session_id = s.id) AS cost_usd,
-      (s.decision_text IS NOT NULL) AS has_decision
-     FROM sessions s ORDER BY s.updated_at DESC`);
+      (s.decision_text IS NOT NULL) AS has_decision,
+      (SELECT COUNT(*) FROM reports r WHERE r.session_id = s.id) AS report_count,
+      (SELECT COUNT(*) FROM disagreements d WHERE d.session_id = s.id AND d.status <> 'resolved') AS open_disagreements,
+      ${escalated} AS escalated_questions,
+      ARRAY(SELECT DISTINCT m.mode FROM messages m
+             WHERE m.session_id = s.id AND m.role = 'agent' AND m.error IS NULL
+               AND m.mode IN ('opening', 'round2', 'round3', 'crosstalk')) AS meetings_run
+     FROM sessions s ORDER BY s.updated_at DESC`;
+}
+async function listSessions() {
+  try {
+    return await q(listSessionsSql(true));
+  } catch (e) {
+    if (missingTable(e)) return q(listSessionsSql(false));
+    throw e;
+  }
 }
 
 async function getSession(id) { return one('SELECT * FROM sessions WHERE id = $1', [id]); }

@@ -8,6 +8,7 @@ const prompts = require('./prompts');
 const { assembleText } = require('./transcript');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
+const intelExport = require('./intel-export');
 const email = require('./email');
 const questions = require('./questions');
 const usage = require('./usage');
@@ -1078,6 +1079,28 @@ app.get('/api/sessions/:id/export.pdf', async (req, res, next) => {
     const buf = await exporter.toPdf(s);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${exporter.fileName(s)}.pdf"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+// One Intelligence tab, as Word or PDF. The tab key is checked against
+// src/intel-export.js's list before anything is loaded; ?cut= only matters to
+// Agent notes, which exports whichever of its four views is on screen.
+const EXPORT_TYPES = {
+  docx: { build: exporter.toDocx, type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  pdf: { build: exporter.toPdf, type: 'application/pdf' },
+};
+app.get('/api/sessions/:id/intel/:section/export.:format', async (req, res, next) => {
+  try {
+    const fmt = Object.hasOwn(EXPORT_TYPES, req.params.format) ? EXPORT_TYPES[req.params.format] : null;
+    if (!fmt || !Object.hasOwn(intelExport.SECTIONS, req.params.section)) return res.status(404).send('Export not found');
+    const s = await db.fullSession(Number(req.params.id));
+    if (!s) return res.status(404).send('Session not found');
+    const cut = ['agent', 'meeting', 'disagreement', 'resolution'].includes(req.query.cut) ? req.query.cut : 'agent';
+    const section = intelExport.sectionDoc(s, req.params.section, { cut });
+    const buf = await fmt.build(s, { section });
+    res.setHeader('Content-Type', fmt.type);
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.sectionFileName(s, req.params.section)}.${req.params.format}"`);
     res.send(buf);
   } catch (e) { next(e); }
 });

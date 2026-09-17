@@ -36,6 +36,8 @@
   .restore-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; }
   .embedded body { max-width: none; margin: 0; padding: 18px 20px 60px; }
   .embedded .back { display: none !important; }
+  .guide img.shot { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; margin: 10px 0 6px; }
+  .guide .shot-caption { margin: 0 0 18px; font-size: 12px; color: var(--text-2); }
 </style>
 </head>
 <body>
@@ -56,6 +58,8 @@
     <button type="button" class="btn btn-sm" id="btn-restore-process">Show the four-step panel again</button>
     <span class="muted" id="restore-note"></span>
   </p>
+  <img class="shot" src="/guide-boardroom.png" alt="The Boardroom dashboard, with New evaluation and View all evaluations in the sidebar and the four-step process panel below the hero.">
+  <p class="shot-caption">The Boardroom — the dashboard you land on.</p>
 
   <h2>Convening an evaluation</h2>
   <ol>
@@ -66,6 +70,8 @@
     <li>Click <strong>Convene the panel and run Baselines</strong>. Each of the three agents presents an opening position in turn, with live web research.</li>
   </ol>
   <p>Note: Regulator and Reimbursement Bodies are not asked for — they follow from the Country you pick, and the agents identify them themselves as their first research step.</p>
+  <img class="shot" src="/guide-new-evaluation.png" alt="The New evaluation briefing form, with Product, Indication, Country, Reference approvals and Meeting settings fields.">
+  <p class="shot-caption">The New evaluation briefing form. Every field is optional.</p>
 
   <h3>Saving your own defaults</h3>
   <p>Hover any field in the New evaluation briefing form and a small <strong>Save as default</strong> button appears next to its label. Click it to make the field's current value the new default for everyone — the next person who clicks Restore Default Values gets it too. This is shared across the whole app, not just your browser.</p>
@@ -100,6 +106,8 @@
     <span class="badge badge-unknown">UNKNOWN <span class="d">needs a local in-market expert to settle</span></span>
   </div>
   <p>Numbered links like <code>[1]</code> next to a claim open the <strong>Sources</strong> tab of the Intelligence page and jump straight to that source, which lists every URL an agent searched or cited.</p>
+  <img class="shot" src="/guide-transcript.png" alt="A Baselines round in the three-column transcript, with Ruth's regulatory position showing a VERIFIED badge and Luca's clinical position showing an ESTIMATE badge.">
+  <p class="shot-caption">A live evaluation, with the three-column transcript, the meeting agenda stepper and Intelligence navigation in the sidebar, and VERIFIED / ESTIMATE badges inline.</p>
 
   <h3>Closing labels</h3>
   <p>Every response ends with at least one of these, called out as a small coloured label — the single most important takeaway of that message, not a recap of the whole thing:</p>
@@ -116,10 +124,14 @@
   <h2>Disagreements</h2>
   <p>When agents genuinely disagree, it's logged as a formal disagreement — shown in the Intelligence page's <strong>Disagreements</strong> tab (under Panel) as each side's position, what evidence would settle it, and a status you can toggle between <code>UNRESOLVED</code> and <code>RESOLVED</code>. "↑ view in message" jumps back to where it was raised (and switches you back to the transcript to show it). Disagreements are never resolved by averaging two guesses — only by evidence or an explicit toggle from you.</p>
   <p>Opening a disagreement offers <strong>Ask selected agents</strong> to put a question or steer to whichever agents you tick, and <strong>Autopilot on this disagreement…</strong>, which opens the Custom meeting dialog preset to let the panel debate it unaided (see Autopilot, above).</p>
+  <img class="shot" src="/guide-disagreements.png" alt="The Disagreements tab, listing each disagreement's raiser, both positions, what evidence would settle it, its status, and a RESOLVED or UNRESOLVED badge.">
+  <p class="shot-caption">The Disagreements tab — each side's position, what would settle it, and its status.</p>
 
   <h2>Agent Questions</h2>
   <p>When an agent ends a response with a "Questions for …" block, each question in it is picked up automatically and listed in the Intelligence page's <strong>Agent Questions</strong> tab (under Panel) — who asked whom, which meeting it was raised in (the message link opens it), and a status: <code>Open</code>, <code>Answered</code>, <code>Resolved</code> or <code>Escalated to moderator</code>. The tab's count is open-plus-escalated over the total; filter the list to Open, Escalated, Answered or All. For an evaluation run before this feature existed, <strong>Find questions in this evaluation</strong> reads the whole transcript for them; once any are found, the same button moves into the filter bar as <strong>Rescan transcript</strong>.</p>
   <p>After each meeting completes, the Moderator Assistant re-reads the transcript and marks any open question that a later message has already answered, noting who answered and linking to it. The filter bar's <strong>Check for answers now</strong> runs the same check on demand, next to <strong>Rescan transcript</strong>. It only looks at questions still <code>Open</code>, so anything you've settled by hand is left alone.</p>
+  <img class="shot" src="/guide-agent-questions.png" alt="The Agent Questions tab, filtered to Open, with each question's asker, the meeting it was raised in, View/Word/PDF/Excel links, and Answer, Ask agents to answer, Mark as Resolved and Escalate to Moderator buttons.">
+  <p class="shot-caption">The Agent Questions tab, filtered to Open — each card carries its own View and downloads alongside the actions below.</p>
   <ul>
     <li><strong>Answer…</strong> — write the answer yourself. It is posted into the transcript addressed to the asker, the question is marked <code>Answered</code>, and you can optionally ask the asker to respond.</li>
     <li><strong>Ask agents to answer…</strong> — tick one or more agents; each answers the question in turn, posted into the transcript as a custom turn, and once they're done the Moderator Assistant checks whether that answered it.</li>
@@ -150,14 +162,20 @@
 
   <h2>Cost and timing</h2>
   <p>Each response shows how long it took to generate. The topbar's ⏱ clock is a running total of generation time for the current browser tab (it resets if you reload the page — it's a convenience stopwatch, not a stored record). The $ · £ figure in the topbar is a button: click it to open <strong>LLM usage and cost</strong> for the open session — summary tiles (total cost, model calls including failed ones, API requests, tokens in/out, web searches), then a breakdown <strong>By use</strong> (Agent presentations, Question resolution, Disagreement resolution, Autopilot discussion, Reports and decision, Meeting minutes, each expandable into its features, e.g. Baselines, Answered check, Question discussion, Disagreement discussion, Interim/Final report), <strong>By model</strong> and <strong>By agent</strong>, and a list of every individual call with its time, use, feature, agent, model, tokens, cost and status.</p>
+  <img class="shot" src="/guide-cost-usage.png" alt="The LLM usage and cost panel, with summary tiles for total cost, model calls, API requests and tokens, then a By use breakdown down to individual features.">
+  <p class="shot-caption">LLM usage and cost, opened from the $ · £ figure in the topbar.</p>
   <p>The total counts every model call, including ones that leave no message in the transcript — the questions answered-check, meeting minutes, an interim report, or a turn that failed part-way (at whatever it had spent before failing) — so it can run higher than the sum of the costs shown on individual responses. Calls made before this per-call tracking existed are read back out of the transcript and marked <code>transcript</code>. Costs are what OpenRouter reported for each request; £ figures use the configured exchange rate and are estimates. Cost is shown to admins only. The <strong>Cost</strong> section of the <strong>Admin</strong> page still has the across-session view.</p>
 
   <h2>The board recommendation</h2>
   <p>Once you've run at least one round, the <strong>Final report…</strong> button — sitting under the decision output on the Intelligence page's <strong>Decision &amp; reports</strong> tab — triggers the Moderator Assistant to read the entire transcript and produce a fixed eleven-section decision document — the recommendation, the regulatory pathway, whether local clinical data is needed, how we would enter the market, the reconciled numbers, where the agents disagreed, the top risks, what would change the decision, what is still unresolved, an evidence table of every sourced claim, and the next five actions. It doesn't re-run the analysis or vote — it only synthesises what the three agents already established, keeping their tags and disagreements intact.</p>
   <p>The result lands in two places: as a Moderator Assistant message in the transcript, and as a card in the report list on the same <strong>Decision &amp; reports</strong> tab, alongside every other report generated for the evaluation — each with <strong>View</strong>, <strong>Word</strong>, <strong>PDF</strong>, <strong>Excel</strong>, <strong>Email…</strong> and <strong>Delete</strong>. An <strong>Interim report…</strong> button next to it works the same way at any earlier point, but does not write a decision.</p>
+  <img class="shot" src="/guide-decision-reports.png" alt="The Decision &amp; reports tab, with an Interim report card offering View, Word, PDF, Excel, Email and Delete, and Interim report / Final report buttons above it.">
+  <p class="shot-caption">Decision &amp; reports — every report generated for the evaluation, each with its own View and downloads.</p>
 
   <h2>Viewing and downloading</h2>
   <p>There is no Export menu. Instead, each thing you might want to keep opens on its own with <strong>View</strong> and downloads as <strong>Word</strong>, <strong>PDF</strong> or <strong>Excel</strong>: every report, the decision output, each minutes entry, every response (open it with ⤢ in the transcript, from Agent notes or from Favourites), each disagreement (in its dialog) and each agent question. On the <strong>Minutes</strong> tab, every Baselines, Challenge, Converge and Cross-talk entry also offers the <strong>Full transcript</strong> of that meeting — every response in it, in order — with the same View and downloads. In the Excel files, a meeting transcript is one row per response (number, speaker, meeting, time, response); anything else is one row per heading, paragraph or bullet with the section it sits under, and tables inside it keep their own columns.</p>
+  <img class="shot" src="/guide-minutes.png" alt="The Minutes tab, with one entry per meeting and per question action, each offering its own Minutes View/Word/PDF/Excel and, for the four standard meetings, a Full transcript View/Word/PDF/Excel too.">
+  <p class="shot-caption">Minutes — every entry, and every standard meeting's full transcript, downloads on its own.</p>
 
   <a class="back" href="/">← Back to the app</a>
 </div>

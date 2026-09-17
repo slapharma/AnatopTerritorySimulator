@@ -83,6 +83,22 @@ describe('web/app.js renderKnowledge — admin', () => {
     assert.match(ctx.elements['#tab-knowledgebase'].innerHTML, /id="kb-form"/);
   });
 
+  it('shows no form when /api/me failed to load, even though authenticated reads false', () => {
+    const ctx = loadRenderKnowledge({ knowledge: [item()], me: { failed: true, authenticated: false } });
+
+    ctx.renderKnowledge();
+
+    assert.doesNotMatch(ctx.elements['#tab-knowledgebase'].innerHTML, /id="kb-form"/);
+  });
+
+  it('shows no form when state.me was never set (no /api/me response yet)', () => {
+    const ctx = loadRenderKnowledge({ knowledge: [item()], me: undefined });
+
+    ctx.renderKnowledge();
+
+    assert.doesNotMatch(ctx.elements['#tab-knowledgebase'].innerHTML, /id="kb-form"/);
+  });
+
   it('sets the tab count to the number of items', () => {
     const ctx = loadRenderKnowledge({ knowledge: [item({ id: 1 }), item({ id: 2 })], me: { authenticated: true, is_admin: true } });
 

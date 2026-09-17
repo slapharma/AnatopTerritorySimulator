@@ -249,3 +249,43 @@ describe('web/app.js runSequence column assignment', () => {
     assert.equal(ctx.calls.runTurn[0].container.dataset.speaker, 'clinical');
   });
 });
+
+describe('web/app.js runSequence return value', () => {
+  it('resolves false without running anything when a turn is already running', async () => {
+    const ctx = loadHelpers({ running: true });
+
+    const result = await ctx.runSequence([{ speaker: 'regulatory', mode: 'round2' }]);
+
+    assert.equal(result, false);
+  });
+
+  it('resolves true once every turn in the sequence has run', async () => {
+    const ctx = loadHelpers();
+    const turns = ALL.map((a) => ({ speaker: a, mode: 'round2' }));
+
+    const result = await ctx.runSequence(turns);
+
+    assert.equal(result, true);
+  });
+
+  it('resolves false when a turn in the sequence fails', async () => {
+    const ctx = loadHelpers({ runTurnResult: (turn) => turn.speaker !== 'commercial' });
+    const turns = ALL.map((a) => ({ speaker: a, mode: 'round2' }));
+
+    const result = await ctx.runSequence(turns);
+
+    assert.equal(result, false);
+  });
+
+  it('resolves false when a stop was requested mid-sequence', async () => {
+    const ctx = loadHelpers({
+      runTurnResult: (turn) => { if (turn.speaker === 'regulatory') ctx.state.stopRequested = true; return true; },
+    });
+    const turns = ALL.map((a) => ({ speaker: a, mode: 'round2' }));
+
+    const result = await ctx.runSequence(turns);
+
+    assert.equal(result, false);
+    assert.ok(ctx.calls.runTurn.length < 3, 'the loop stopped before reaching every turn');
+  });
+});

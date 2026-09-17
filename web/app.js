@@ -1058,7 +1058,10 @@
       box.innerHTML = `<div class="empty">${state.knowledgeError ? `Could not load the knowledgebase: ${escapeHtml(state.knowledgeError)}` : 'Loading the knowledgebase…'}</div>`;
       return;
     }
-    const admin = Boolean(state.me && state.me.is_admin) || !(state.me && state.me.authenticated);
+    // No sign-in configured (authenticated false) counts as admin, as it does
+    // on the server; a /api/me that failed to load does not.
+    const me = state.me || { failed: true };
+    const admin = Boolean(me.is_admin) || (!me.authenticated && !me.failed);
     const editing = admin && state.kbEditId != null ? items.find((i) => String(i.id) === String(state.kbEditId)) : null;
     const categories = [...new Set(items.map((i) => i.category).filter(Boolean))];
     const v = (k) => escapeHtml((editing && editing[k]) || '');
@@ -1510,9 +1513,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
           if (mm) mm.approved = row.approved;
           renderMinutes();
           toast('Meeting approved.');
-          // "Approve and continue" goes on to the next meeting on the agenda.
-          if (btn.dataset.next) await startMeeting(btn.dataset.next);
-        } catch (e) { btn.disabled = false; toast(`Could not approve: ${e.message}`); }
+        } catch (e) { btn.disabled = false; toast(`Could not approve: ${e.message}`); return; }
+        // "Approve and continue" goes on to the next meeting on the agenda. The
+        // approval has landed by now, so a failure here is the meeting's alone.
+        if (!btn.dataset.next) return;
+        try {
+          await startMeeting(btn.dataset.next);
+        } catch (e) { toast(`Could not start ${MODE_LABEL[btn.dataset.next] || btn.dataset.next}: ${e.message}`); }
       });
     });
   }
@@ -1767,7 +1774,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     const statusActions = qRow.status === 'open'
       ? '<button type="button" class="btn btn-sm btn-quiet" data-qact="mark-resolved">Mark as Resolved</button><button type="button" class="btn btn-sm btn-quiet" data-qact="escalate">Escalate to Moderator</button>'
       : '<button type="button" class="btn btn-sm btn-quiet" data-qact="reopen">Reopen</button>';
-    const askable = questionAskableAgents(qRow);
+    // Only an open question: the answered-check that follows an ask looks at
+    // open questions only, so asking about an escalated or settled one would
+    // spend the turns and change nothing.
+    const askable = qRow.status === 'open' ? questionAskableAgents(qRow) : [];
     const askDefault = new Set(questionAgentAddressees(qRow).length ? questionAgentAddressees(qRow) : askable);
     const note = qRow.resolution_note ? escapeHtml(qRow.resolution_note) : '';
     return `<div class="qn qn-${escapeHtml(qRow.status)}" data-qid="${escapeHtml(String(qRow.id))}">
@@ -1834,9 +1844,11 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         $('.qn-ask', card).hidden = true;
         const instruction = questionAnswerInstruction(qRow);
         // A custom turn per agent, in order; question_id is carried for the record.
-        await runSequence(picks.map((speaker) => ({ speaker, mode: 'custom', instruction, question_id: String(qRow.id) })));
-        // The Moderator Assistant then decides whether that answered it.
-        await checkAnsweredQuestions({ quiet: true });
+        const ok = await runSequence(picks.map((speaker) => ({ speaker, mode: 'custom', instruction, question_id: String(qRow.id) })));
+        // The Moderator Assistant then decides whether that answered it, but
+        // only if every agent answered: after a stop or a failed turn the check
+        // would be a model call with nothing new to read.
+        if (ok) await checkAnsweredQuestions({ quiet: true });
       } else if (act === 'send-answer') {
         const text = $('.qn-answer textarea', card).value.trim();
         if (!text) return toast('Write an answer first.');
@@ -2133,8 +2145,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     return cols;
   }
 
+  // Resolves true when every turn ran, false after a stop, a failed turn or
+  // when another turn was already running.
   async function runSequence(turns) {
-    if (state.running) { toast('A turn is already running'); return; }
+    if (state.running) { toast('A turn is already running'); return false; }
     setRunning(true);
     try {
       // These rounds still run one agent at a time, in order — Round 2/3 and
@@ -2162,6 +2176,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       // Meeting minutes only for the four standard meetings run as a full trio —
       // not for custom rounds, replies, or dive-deeper follow-ups.
       if (allOk && columned) writeMinutesIfComplete(turns[0].mode, gridEligible);
+      return allOk;
     } finally {
       setRunning(false);
       loadSessions();
@@ -2542,7 +2557,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     renderFilterChips();
     buildForm($('#setup-form'), { saveDefault: true });
     buildForm($('#session-inputs-form'), { saveDefault: false });
-    const me = await api.get('/api/me').catch(() => ({ authenticated: false }));
+    // failed: the check could not run, which is not the same as no sign-in
+    // being configured (renderKnowledge treats only the latter as admin).
+    const me = await api.get('/api/me').catch(() => ({ authenticated: false, failed: true }));
     state.me = me;
     // Model picker, run-time stopwatch and $/£ cost meter are operational
     // detail an admin cares about — for anyone here to read a launch

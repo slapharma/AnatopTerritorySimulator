@@ -164,6 +164,19 @@ describe('web/app.js questionCardHtml — "Ask agents to answer…" and the .qn-
   });
 });
 
+describe('web/app.js questionCardHtml — "Ask agents to answer…" only appears for an open question', () => {
+  for (const status of ['escalated', 'answered', 'resolved']) {
+    it(`shows no "Ask agents to answer…" button and no .qn-ask panel for a "${status}" question`, () => {
+      const ctx = loadHelpers({});
+
+      const html = ctx.questionCardHtml(openQ({ status, asker: 'clinical', addressees: 'commercial' }));
+
+      assert.doesNotMatch(html, /data-qact="ask"/);
+      assert.doesNotMatch(html, /class="qn-ask"/);
+    });
+  }
+});
+
 describe('web/app.js questionAnswerInstruction', () => {
   it('includes the question text and the asker/addressee labels', () => {
     const ctx = loadHelpers({});
@@ -220,6 +233,19 @@ describe('web/app.js questionAction — ask / send-ask', () => {
     assert.equal(panel.hidden, true, 'the panel closes once the run is kicked off');
     const check = ctx.calls.apiSend.find((c) => c.method === 'POST' && /\/questions\/check$/.test(c.url));
     assert.ok(check, 'checkAnsweredQuestions({quiet:true}) posts to the check endpoint');
+  });
+
+  it('"send-ask" skips the answered-check when runSequence resolves false (a stop or a failed turn)', async () => {
+    const q = openQ({ asker: 'clinical', addressees: 'commercial' });
+    const ctx = loadHelpers({ questions: [q] });
+    ctx.runSequence = async (turns) => { ctx.calls.runSequence.push(turns); return false; };
+    const card = new FakeCard();
+    card._checked = ['regulatory'];
+
+    await ctx.questionAction(q, 'send-ask', card);
+
+    const check = ctx.calls.apiSend.find((c) => c.method === 'POST' && /\/questions\/check$/.test(c.url));
+    assert.equal(check, undefined, 'checkAnsweredQuestions is not called when runSequence resolved false');
   });
 
   it('"send-ask" with no agents ticked toasts and runs nothing', async () => {

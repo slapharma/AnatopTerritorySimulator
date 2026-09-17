@@ -195,6 +195,68 @@ describe('web/app.js renderMinutes', () => {
     assert.equal(ctx.state.session.meeting_minutes[0].approved, true);
   });
 
+  // FakeApproveButton stands in for the real anchor button, capturing whatever
+  // click handler renderMinutes wires onto it via addEventListener, the same
+  // way the "Approve and continue" test above does — but shared across the
+  // group below since none of them read the button's rendered HTML.
+  function makeApproveBtn(next) {
+    return {
+      dataset: next ? { next } : {}, disabled: false,
+      closest: () => ({ dataset: { id: '1' } }),
+      addEventListener(type, fn) { if (type === 'click') this._click = fn; },
+    };
+  }
+
+  it('plain "Approve" (no data-next) never calls startMeeting', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = makeApproveBtn(null);
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(started, []);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true);
+  });
+
+  it('when the approve PATCH itself fails, toasts "Could not approve: …", re-enables the button, and never calls startMeeting', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    const toasts = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.toast = (msg) => toasts.push(msg);
+    ctx.api.send = async () => { throw new Error('network down'); };
+    const btn = makeApproveBtn('round2');
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(toasts, ['Could not approve: network down']);
+    assert.equal(started.length, 0, 'startMeeting is never called when the PATCH itself failed');
+    assert.equal(btn.disabled, false, 'the button is re-enabled so the user can retry');
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, false, 'not marked approved locally');
+  });
+
+  it('when the PATCH succeeds but startMeeting(next) rejects, toasts "Could not start <label>: …", not "Could not approve"', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const toasts = [];
+    ctx.startMeeting = async () => { throw new Error('agent unavailable'); };
+    ctx.toast = (msg) => toasts.push(msg);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = makeApproveBtn('round2');
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(toasts, ['Meeting approved.', 'Could not start Challenge: agent unavailable']);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true, 'the approval itself landed');
+  });
+
   it('marks a card open — expanded, no [hidden] on its detail — when its id is in state.openMinutes', () => {
     const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 5, round: 'question' })], openMinutes: new Set([5]) });
 

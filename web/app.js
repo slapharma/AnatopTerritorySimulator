@@ -548,7 +548,6 @@
 
   function renderDashboard() {
     renderDashStats();
-    renderDashActions();
   }
 
   // KPI strip. Cost is admin-only for the same reason the session header's cost
@@ -576,49 +575,6 @@
           <span class="stat-sub">${s.sub}</span>
         </span>
       </div>`).join('');
-  }
-
-  // The two things you actually come here to do. Resume only appears when there
-  // is something to resume, so the tile is never a dead button.
-  function renderDashActions() {
-    const latest = state.sessions.length
-      ? state.sessions.reduce((a, b) => (new Date(a.updated_at) > new Date(b.updated_at) ? a : b))
-      : null;
-    const tiles = [`
-      <button type="button" class="action-tile action-tile-start" id="tile-new">
-        <span class="action-icon">${icon('plus')}</span>
-        <span class="action-text">
-          <span class="action-title">Table a new market evaluation</span>
-          <span class="action-sub">Set the briefing inputs, then convene the full panel for its opening Baselines meeting.</span>
-        </span>
-      </button>`];
-    if (latest) {
-      tiles.push(`
-      <button type="button" class="action-tile" data-open="${latest.id}">
-        <span class="action-icon">${icon('play')}</span>
-        <span class="action-text">
-          <span class="action-title">Reconvene ${escapeHtml(latest.title)}</span>
-          <span class="action-sub">${escapeHtml(latest.country || 'Country: INPUT MISSING')} · ${latest.message_count} responses · ${fmtRelative(latest.updated_at)}</span>
-        </span>
-      </button>`);
-    }
-    // Always offered: with no evaluations yet the page says so, rather than
-    // the tile appearing only once there is something to list.
-    const n = state.sessions.length;
-    tiles.push(`
-      <button type="button" class="action-tile" id="tile-evaluations">
-        <span class="action-icon">${icon('list')}</span>
-        <span class="action-text">
-          <span class="action-title">View all Evaluations</span>
-          <span class="action-sub">${n ? `${n} evaluation${n === 1 ? '' : 's'} on record, with market, progress, decision and last activity.` : 'Every evaluation you table is listed here.'}</span>
-        </span>
-      </button>`);
-    const box = $('#dash-actions');
-    box.innerHTML = tiles.join('');
-    $('#tile-new').addEventListener('click', showSetup);
-    $('#tile-evaluations').addEventListener('click', showEvaluations);
-    const resume = box.querySelector('[data-open]');
-    if (resume) resume.addEventListener('click', () => openSession(Number(resume.dataset.open)));
   }
 
   // ---------------- all evaluations ----------------
@@ -706,9 +662,12 @@
   // transcript. Its tabs are the sidebar's #intel-nav items; "transcript" is
   // the meeting itself. state.warRoomOpen is true while the page is showing and
   // state.activeTab remembers the tab. Reports are part of the Decision tab.
-  const INTEL_TABS = ['sources', 'disagreements', 'intelligence', 'questions', 'escalations', 'decision', 'minutes', 'favourites', 'inputs'];
+  const INTEL_TABS = ['sources', 'knowledgebase', 'intelligence', 'questions', 'escalations', 'disagreements', 'decision', 'minutes', 'favourites', 'inputs'];
+  // Tabs with no per-evaluation export: the knowledgebase is shared by every
+  // evaluation, so its export menu offers only the full evaluation record.
+  const NO_TAB_EXPORT = new Set(['knowledgebase']);
   const INTEL_TITLE = {
-    sources: 'Sources', disagreements: 'Disagreements', intelligence: 'Agent notes', questions: 'Agent Questions', escalations: 'Escalations',
+    sources: 'Sources', knowledgebase: 'Knowledgebase', disagreements: 'Disagreements', intelligence: 'Agent notes', questions: 'Agent Questions', escalations: 'Escalations',
     decision: 'Decision & reports', minutes: 'Minutes', favourites: 'Favourites', inputs: 'Inputs',
   };
   function showSessionPane(pane) {
@@ -717,6 +676,8 @@
     // Hiding the transcript can drop its scroll position; keep it for the way back.
     if (intel && !state.warRoomOpen) state.transcriptScroll = transcript.scrollTop;
     if (intel) state.activeTab = pane;
+    // Shared with other evaluations and other admins, so fetch it fresh each visit.
+    if (pane === 'knowledgebase') loadKnowledge();
     const wasOpen = state.warRoomOpen;
     state.warRoomOpen = intel;
     $('.transcript-col').hidden = intel;
@@ -744,6 +705,7 @@
     state.transcriptScroll = null;
     showSessionPane('transcript');
     renderSession();
+    loadKnowledge();
     await loadSessions();
   }
 
@@ -838,7 +800,7 @@
     row.id = 'agent-columns-heads';
     row.innerHTML = ALL
       .map((key) => {
-        const avatar = AGENT_AVATARS.has(key) ? `<img class="agent-avatar" src="/avatars/${key}.jpg" alt="" width="36" height="36">` : '';
+        const avatar = AGENT_AVATARS.has(key) ? `<img class="agent-avatar" src="/avatars/${key}.jpg" alt="" width="47" height="47">` : '';
         return `<div class="agent-head agent-head-${key}${avatar ? ' has-avatar' : ''}" data-speaker="${key}"${speakerStyle(key)}>${avatar}${escapeHtml(AGENT_LABEL[key])}</div>`;
       })
       .join('');
@@ -1070,6 +1032,109 @@
     box.innerHTML = citedHtml + toggleHtml + searchedHtml;
     const toggleBtn = $('#btn-toggle-searched', box);
     if (toggleBtn) toggleBtn.addEventListener('click', () => { state.showAllSources = !state.showAllSources; renderSources(); });
+  }
+
+  // ---------------- knowledgebase ----------------
+  // Curated internal documents every agent is told about at the start of each
+  // turn. Shared by all evaluations, so it is fetched on its own rather than
+  // with the session. Anyone can read it; the server lets only admins change
+  // it, so the add/edit form is only drawn for them. The form sits at the top:
+  // adding a source is the reason to open this tab.
+  async function loadKnowledge() {
+    try {
+      state.knowledge = await api.get('/api/knowledge');
+    } catch (e) {
+      state.knowledge = null;
+      state.knowledgeError = e.message;
+    }
+    renderKnowledge();
+  }
+
+  function renderKnowledge() {
+    const box = $('#tab-knowledgebase');
+    const items = state.knowledge;
+    $('#count-knowledge').textContent = items ? items.length : '0';
+    if (!items) {
+      box.innerHTML = `<div class="empty">${state.knowledgeError ? `Could not load the knowledgebase: ${escapeHtml(state.knowledgeError)}` : 'Loading the knowledgebase…'}</div>`;
+      return;
+    }
+    // No sign-in configured (authenticated false) counts as admin, as it does
+    // on the server; a /api/me that failed to load does not.
+    const me = state.me || { failed: true };
+    const admin = Boolean(me.is_admin) || (!me.authenticated && !me.failed);
+    const editing = admin && state.kbEditId != null ? items.find((i) => String(i.id) === String(state.kbEditId)) : null;
+    const categories = [...new Set(items.map((i) => i.category).filter(Boolean))];
+    const v = (k) => escapeHtml((editing && editing[k]) || '');
+    const form = admin ? `
+      <form class="kb-add" id="kb-form" autocomplete="off">
+        <div class="kb-add-head">
+          <h3>${editing ? 'Edit source' : 'Add a source'}</h3>
+          <p class="muted">${editing ? `Editing “${escapeHtml(editing.title)}”.` : 'A Drive or web link the agents are told about at the start of every turn, in every evaluation.'}</p>
+        </div>
+        <div class="kb-add-grid">
+          <label class="kb-wide">URL<input type="url" name="url" required placeholder="https://drive.google.com/…" value="${v('url')}"></label>
+          <label>Title<input type="text" name="title" required value="${v('title')}"></label>
+          <label>Category<input type="text" name="category" required list="kb-categories" value="${v('category')}"></label>
+          <datalist id="kb-categories">${categories.map((c) => `<option value="${escapeHtml(c)}">`).join('')}</datalist>
+          <label class="kb-wide">Note<input type="text" name="note" placeholder="What it covers, and when an agent should use it" value="${v('note')}"></label>
+        </div>
+        <div class="kb-add-actions">
+          <label class="check-inline"><input type="checkbox" name="sensitive"${editing && editing.sensitive ? ' checked' : ''}> Commercially sensitive (pricing, royalties, deal terms)</label>
+          <span class="spacer"></span>
+          ${editing ? '<button type="button" class="btn" id="kb-cancel">Cancel</button>' : ''}
+          <button type="submit" class="btn btn-primary">${editing ? 'Save changes' : 'Add source'}</button>
+        </div>
+      </form>` : '<p class="muted kb-readonly">Only admins can add or change knowledgebase sources.</p>';
+    const rows = items.map((i) => `
+      <tr data-id="${escapeHtml(String(i.id))}"${editing && String(editing.id) === String(i.id) ? ' class="kb-editing"' : ''}>
+        <td>${escapeHtml(i.category || '')}</td>
+        <td class="kb-title"><a href="${escapeHtml(i.url)}" target="_blank" rel="noopener">${escapeHtml(i.title)}</a>${i.sensitive ? ' <span class="kb-sensitive">Sensitive</span>' : ''}</td>
+        <td class="kb-note">${escapeHtml(i.note || '')}</td>
+        ${admin ? `<td class="kb-actions"><button type="button" class="btn btn-sm" data-kb="edit">Edit</button><button type="button" class="btn btn-sm btn-danger-ghost" data-kb="delete">Delete</button></td>` : ''}
+      </tr>`).join('');
+    box.innerHTML = `${form}
+      ${items.length ? `<div class="kb-table-wrap"><table class="kb-table">
+        <thead><tr><th scope="col">Category</th><th scope="col">Source</th><th scope="col">Note</th>${admin ? '<th scope="col"><span class="visually-hidden">Actions</span></th>' : ''}</tr></thead>
+        <tbody>${rows}</tbody></table></div>` : '<div class="empty">No sources in the knowledgebase yet.</div>'}`;
+    if (!admin) return;
+    $('#kb-form', box).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const btn = $('button[type=submit]', f);
+      // namedItem, not f.title: a form's own properties can shadow its fields.
+      const field = (n) => f.elements.namedItem(n);
+      const body = {
+        category: field('category').value.trim(), title: field('title').value.trim(), url: field('url').value.trim(),
+        note: field('note').value.trim(), sensitive: field('sensitive').checked,
+      };
+      btn.disabled = true;
+      try {
+        if (editing) await api.send('PATCH', `/api/knowledge/${editing.id}`, body);
+        else await api.send('POST', '/api/knowledge', body);
+        toast(editing ? 'Source updated.' : 'Source added.');
+        state.kbEditId = null;
+        await loadKnowledge();
+      } catch (err) { btn.disabled = false; toast(`Could not save the source: ${err.message}`); }
+    });
+    $('#kb-cancel', box)?.addEventListener('click', () => { state.kbEditId = null; renderKnowledge(); });
+    $$('[data-kb]', box).forEach((b) => b.addEventListener('click', async () => {
+      const id = b.closest('tr').dataset.id;
+      const item = items.find((i) => String(i.id) === id);
+      if (b.dataset.kb === 'edit') {
+        state.kbEditId = id;
+        renderKnowledge();
+        $('#kb-form input[name=url]').focus();
+        $('#intel-page').scrollTop = 0;
+        return;
+      }
+      if (!confirm(`Delete "${item.title}" from the knowledgebase?`)) return;
+      try {
+        await api.send('DELETE', `/api/knowledge/${id}`);
+        if (String(state.kbEditId) === id) state.kbEditId = null;
+        toast('Source deleted.');
+        await loadKnowledge();
+      } catch (err) { toast(`Could not delete: ${err.message}`); }
+    }));
   }
 
   // Splits the stored ⚠ DISAGREEMENT block into its fixed rows (Position A/B,
@@ -1417,7 +1482,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         <div class="minutes-head">
           <button type="button" class="minutes-toggle" aria-expanded="${isOpen(mm)}"><span class="minutes-num">${i + 1}</span><span class="label">${escapeHtml(mm.label)}</span><span class="muted minutes-date">${escapeHtml(fmtTime(mm.created_at))}</span></button>
           ${isQuestion(mm) ? '' : `<span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending'}</span>
-          ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}`}
+          ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}
+          ${!mm.approved && nextMeeting(mm.round) ? `<button type="button" class="btn btn-sm btn-primary minutes-approve minutes-continue" data-next="${escapeHtml(nextMeeting(mm.round))}" title="Approve these minutes, then convene ${escapeHtml(MODE_LABEL[nextMeeting(mm.round)])}">Approve and continue</button>` : ''}`}
         </div>
         <div class="minutes-detail"${isOpen(mm) ? '' : ' hidden'}>
           <div class="minutes-body"></div>
@@ -1447,7 +1513,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
           if (mm) mm.approved = row.approved;
           renderMinutes();
           toast('Meeting approved.');
-        } catch (e) { btn.disabled = false; toast(`Could not approve: ${e.message}`); }
+        } catch (e) { btn.disabled = false; toast(`Could not approve: ${e.message}`); return; }
+        // "Approve and continue" goes on to the next meeting on the agenda. The
+        // approval has landed by now, so a failure here is the meeting's alone.
+        if (!btn.dataset.next) return;
+        try {
+          await startMeeting(btn.dataset.next);
+        } catch (e) { toast(`Could not start ${MODE_LABEL[btn.dataset.next] || btn.dataset.next}: ${e.message}`); }
       });
     });
   }
@@ -1583,6 +1655,15 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   // Panel agents a question was put to, other than the asker: the people a
   // discussion to resolution can be held between.
   const questionAgentAddressees = (qRow) => qRow.addressees.split(',').filter((k) => ALL.includes(k) && k !== qRow.asker);
+  // Any panel agent but the asker can be asked to answer; the ones the
+  // question was put to are ticked first.
+  const questionAskableAgents = (qRow) => ALL.filter((k) => k !== qRow.asker);
+  // The brief for an agent asked to answer a question outside a discussion.
+  function questionAnswerInstruction(qRow) {
+    const party = (k) => (k === 'moderator' ? 'the Moderator' : AGENT_LABEL[k] || k);
+    const to = qRow.addressees.split(',').filter(Boolean).map(party).join(' and ') || 'the panel';
+    return `The moderator asks you to answer this question, which ${party(qRow.asker)} put to ${to}:\n\n"${qRow.text}"\n\nAnswer it directly and specifically, with tagged evidence (search first if the answer needs it). If someone has already answered it in the transcript, add only what is missing or say where you disagree. Do not raise other topics.`;
+  }
 
   // Question routes answer with the session's minutes as well, since every
   // action on a question adds an entry. Merged by id rather than replaced, so a
@@ -1637,12 +1718,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     };
     const shown = list.filter((x) => filter === 'all' || (filter === 'done' ? (x.status === 'answered' || x.status === 'resolved') : x.status === filter));
     const chip = (key, label) => `<button type="button" class="chip${filter === key ? ' active' : ''}" data-qfilter="${key}">${label} (${counts[key]})</button>`;
-    box.innerHTML = `<div class="qn-filters">${chip('open', 'Open')}${chip('escalated', 'Escalated')}${chip('done', 'Answered')}${chip('all', 'All')}</div>
-      ${shown.length ? shown.map(questionCardHtml).join('') : '<div class="empty">No questions in this view.</div>'}
-      <div class="qn-footer">
-        <button type="button" class="btn btn-sm" id="btn-questions-check">Check for answers now</button>
-        <button type="button" class="btn btn-sm btn-quiet" id="btn-questions-scan">Rescan transcript</button>
-      </div>`;
+    box.innerHTML = `<div class="qn-filters">${chip('open', 'Open')}${chip('escalated', 'Escalated')}${chip('done', 'Answered')}${chip('all', 'All')}
+        <span class="qn-filters-actions">
+          <button type="button" class="btn btn-sm" id="btn-questions-check">Check for answers now</button>
+          <button type="button" class="btn btn-sm btn-quiet" id="btn-questions-scan">Rescan transcript</button>
+        </span>
+      </div>
+      ${shown.length ? shown.map(questionCardHtml).join('') : '<div class="empty">No questions in this view.</div>'}`;
     $$('[data-qfilter]', box).forEach((b) => b.addEventListener('click', () => { state.questionFilter = b.dataset.qfilter; renderQuestions(); }));
     wireQuestionCards('questions', list);
     $('#btn-questions-check', box).addEventListener('click', () => checkAnsweredQuestions());
@@ -1690,8 +1772,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     const addressees = qRow.addressees.split(',').filter(Boolean);
     const canDiscuss = ALL.includes(qRow.asker) && questionAgentAddressees(qRow).length > 0;
     const statusActions = qRow.status === 'open'
-      ? '<button type="button" class="btn btn-sm btn-quiet" data-qact="mark-answered">Mark answered</button><button type="button" class="btn btn-sm btn-quiet" data-qact="escalate">Escalate</button>'
+      ? '<button type="button" class="btn btn-sm btn-quiet" data-qact="mark-resolved">Mark as Resolved</button><button type="button" class="btn btn-sm btn-quiet" data-qact="escalate">Escalate to Moderator</button>'
       : '<button type="button" class="btn btn-sm btn-quiet" data-qact="reopen">Reopen</button>';
+    // Only an open question: the answered-check that follows an ask looks at
+    // open questions only, so asking about an escalated or settled one would
+    // spend the turns and change nothing.
+    const askable = qRow.status === 'open' ? questionAskableAgents(qRow) : [];
+    const askDefault = new Set(questionAgentAddressees(qRow).length ? questionAgentAddressees(qRow) : askable);
     const note = qRow.resolution_note ? escapeHtml(qRow.resolution_note) : '';
     return `<div class="qn qn-${escapeHtml(qRow.status)}" data-qid="${escapeHtml(String(qRow.id))}">
       <div class="qn-head">${questionPartyChip(qRow.asker)} <span>asked</span> ${addressees.map(questionPartyChip).join(' ')}
@@ -1700,9 +1787,17 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       <div class="qn-meta">Asked in ${escapeHtml(MODE_LABEL[qRow.round] || qRow.round || 'the transcript')}${asked ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(asked.id))}">#${asked.seq}</button>` : ''}${qRow.status !== 'open' && (note || answer) ? ` · ${note || 'Answered'}${answer ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(answer.id))}">#${answer.seq}</button>` : ''}` : ''}</div>
       <div class="qn-actions">
         <button type="button" class="btn btn-sm" data-qact="answer">Answer…</button>
+        ${askable.length ? '<button type="button" class="btn btn-sm" data-qact="ask">Ask agents to answer…</button>' : ''}
         ${canDiscuss ? '<button type="button" class="btn btn-sm" data-qact="discuss">Discuss to resolution…</button>' : ''}
         ${statusActions}
       </div>
+      ${askable.length ? `<div class="qn-ask" hidden>
+        <fieldset class="agent-picks">
+          <legend>Who answers, in order</legend>
+          ${askable.map((k) => `<label><input type="checkbox" value="${escapeHtml(k)}"${askDefault.has(k) ? ' checked' : ''}> ${escapeHtml(AGENT_LABEL[k] || k)}</label>`).join('')}
+        </fieldset>
+        <div><button type="button" class="btn btn-sm btn-primary" data-qact="send-ask">Ask selected agents</button></div>
+      </div>` : ''}
       <div class="qn-answer" hidden>
         <textarea rows="3" placeholder="Your answer, as moderator"></textarea>
         ${ALL.includes(qRow.asker) ? `<label class="check-inline"><input type="checkbox" class="qn-ask-back" checked> Ask ${escapeHtml(AGENT_LABEL[qRow.asker] || qRow.asker)} to respond</label>` : ''}
@@ -1734,12 +1829,26 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   }
 
   async function questionAction(qRow, act, card) {
-    if (act !== 'answer' && state.running) return toast('Wait for the current turn to finish.');
+    if (!['answer', 'ask'].includes(act) && state.running) return toast('Wait for the current turn to finish.');
     try {
       if (act === 'answer') {
         const panel = $('.qn-answer', card);
         panel.hidden = !panel.hidden;
         if (!panel.hidden) $('textarea', panel).focus();
+      } else if (act === 'ask') {
+        const panel = $('.qn-ask', card);
+        panel.hidden = !panel.hidden;
+      } else if (act === 'send-ask') {
+        const picks = $$('.qn-ask input:checked', card).map((c) => c.value);
+        if (!picks.length) return toast('Pick at least one agent');
+        $('.qn-ask', card).hidden = true;
+        const instruction = questionAnswerInstruction(qRow);
+        // A custom turn per agent, in order; question_id is carried for the record.
+        const ok = await runSequence(picks.map((speaker) => ({ speaker, mode: 'custom', instruction, question_id: String(qRow.id) })));
+        // The Moderator Assistant then decides whether that answered it, but
+        // only if every agent answered: after a stop or a failed turn the check
+        // would be a model call with nothing new to read.
+        if (ok) await checkAnsweredQuestions({ quiet: true });
       } else if (act === 'send-answer') {
         const text = $('.qn-answer textarea', card).value.trim();
         if (!text) return toast('Write an answer first.');
@@ -1768,8 +1877,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         applyQuestionResponse(r);
         toast('Answer sent');
         if (askBack && r.respondents.length) await runSequence(r.respondents.map((a) => ({ speaker: a, mode: 'reply' })));
-      } else if (act === 'mark-answered') {
-        await setQuestionStatus(qRow, 'answered', 'Marked answered by the moderator');
+      } else if (act === 'mark-resolved') {
+        await setQuestionStatus(qRow, 'resolved', 'Marked resolved by the moderator');
       } else if (act === 'escalate') {
         await setQuestionStatus(qRow, 'escalated', 'Escalated by the moderator for offline review');
       } else if (act === 'reopen') {
@@ -1987,6 +2096,34 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     return null;
   }
 
+  // The standard meeting after `mode` on the agenda, or null after the last.
+  const nextMeeting = (mode) => {
+    const i = GRID_MODES.indexOf(mode);
+    return i >= 0 && i < GRID_MODES.length - 1 ? GRID_MODES[i + 1] : null;
+  };
+
+  // Convenes one of the four standard meetings: the sidebar's agenda steps and
+  // the Minutes tab's "Approve and continue" both come here.
+  function startMeeting(mode) {
+    if (state.running) return toast('A turn is already running');
+    // Mirrors the server's round-order check (src/app.js) so a premature
+    // click gets one clear toast instead of three separate "Turn failed"
+    // messages, one per agent.
+    const prior = unmetPriorRound(mode);
+    if (prior) return toast(`Run ${MODE_LABEL[prior] || prior} for all ${ALL.length} agents before starting ${MODE_LABEL[mode] || mode}.`);
+    const pending = turnsForRound(mode, ALL);
+    if (pending.length === ALL.length) return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
+    if (!pending.length) {
+      if (!confirm(`${MODE_LABEL[mode] || mode} already has a response from every agent. Run it again? This adds new responses; it does not replace the old ones.`)) return;
+      return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
+    }
+    // A previous run of this round failed partway through — only run the
+    // agents that don't already have a response, instead of duplicating
+    // the ones that succeeded.
+    toast(`Resuming ${MODE_LABEL[mode] || mode}: ${pending.length} agent(s) haven't answered yet.`);
+    return runSequence(pending.map((a) => ({ speaker: a, mode })));
+  }
+
   // The columns a live meeting's turns stream into, keyed by agent. Reuses the
   // transcript's last grid when it is this meeting's and nothing follows it
   // (resuming, or retrying one agent), so answers line up with the ones already
@@ -2008,8 +2145,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     return cols;
   }
 
+  // Resolves true when every turn ran, false after a stop, a failed turn or
+  // when another turn was already running.
   async function runSequence(turns) {
-    if (state.running) { toast('A turn is already running'); return; }
+    if (state.running) { toast('A turn is already running'); return false; }
     setRunning(true);
     try {
       // These rounds still run one agent at a time, in order — Round 2/3 and
@@ -2037,6 +2176,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       // Meeting minutes only for the four standard meetings run as a full trio —
       // not for custom rounds, replies, or dive-deeper follow-ups.
       if (allOk && columned) writeMinutesIfComplete(turns[0].mode, gridEligible);
+      return allOk;
     } finally {
       setRunning(false);
       loadSessions();
@@ -2124,6 +2264,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
             : {
               speaker, mode: 'autopilot', max_chars: settings.max_chars,
               stance_index: settings.stances[speaker], disagreement_n: settings.disagreement_n,
+              // The Custom meeting dialog's agenda item, when one was given.
+              instruction: settings.instruction || undefined,
               autopilot: { run_id: run.id, cycle },
             };
           const ok = await runTurn(turn, col);
@@ -2193,15 +2335,26 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     });
   }
 
-  function openAutopilotDialog({ scope, disagreementN, disagreementTopic }) {
-    const dlg = $('#dlg-autopilot');
+  // Custom meeting and Autopilot share one dialog: the agenda item and the
+  // panel are the same either way, and "How it runs" decides whether each
+  // agent answers once or the panel debates it over several cycles. Opened
+  // from the sidebar (discussion scope) or from a disagreement, which presets
+  // Autopilot on that disagreement.
+  function openCustomMeetingDialog({ scope = 'discussion', disagreementN, disagreementTopic } = {}) {
+    const dlg = $('#dlg-custom');
+    const onDisagreement = scope === 'disagreement';
     dlg.dataset.scope = scope;
     dlg.dataset.disagreementN = disagreementN || '';
-    $('#autopilot-subtitle').textContent = scope === 'disagreement'
-      ? `Let the panel debate Disagreement #${disagreementN} — ${disagreementTopic} — unaided. Set the terms of reference, then observe.`
-      : 'Let the panel debate the point unaided. Set the terms of reference, then observe.';
-    $('#autopilot-auto-resolve-row').hidden = scope !== 'disagreement';
-    $$('#dlg-autopilot .agent-picks input').forEach((c) => { c.checked = true; });
+    $('#custom-title').textContent = onDisagreement ? `Autopilot: Disagreement #${disagreementN}` : 'Custom meeting';
+    $('#custom-subtitle').textContent = onDisagreement
+      ? `Let the panel debate ${disagreementTopic} unaided. Add a steer if you want one, set the limits, then observe.`
+      : 'Table your own agenda item. It replaces the standard meeting brief; the evidence rules still apply.';
+    $('#custom-instruction').value = '';
+    $$('#custom-agents input').forEach((c) => { c.checked = true; });
+    // A disagreement debate is autopilot by definition; the choice is hidden.
+    $('#custom-run-mode').hidden = onDisagreement;
+    $(`#custom-run-mode input[value="${onDisagreement ? 'autopilot' : 'once'}"]`).checked = true;
+    $('#autopilot-auto-resolve-row').hidden = !onDisagreement;
     $('#autopilot-length').value = 1;
     $('#autopilot-length-label').textContent = LENGTH_LABELS[1];
     $('#autopilot-interactions').value = 6;
@@ -2209,7 +2362,18 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#autopilot-stop-unanimous').checked = true;
     $('#autopilot-auto-resolve').checked = true;
     autopilotStanceRows($('#autopilot-stances'), ALL);
+    syncCustomRunMode();
     dlg.showModal();
+    $('#custom-instruction').focus();
+  }
+  const customRunMode = () => ($('#custom-run-mode input:checked') || {}).value || 'once';
+  function syncCustomRunMode() {
+    const auto = customRunMode() === 'autopilot';
+    $('#custom-autopilot').hidden = !auto;
+    $('#btn-custom-run').textContent = auto ? 'Start autopilot' : 'Convene meeting';
+    $('#custom-instruction').placeholder = auto
+      ? 'Optional: the point to debate, e.g. Is a 2027 launch realistic without a local bridging study?'
+      : 'e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only.';
   }
 
   // ---------------- reports ----------------
@@ -2393,7 +2557,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     renderFilterChips();
     buildForm($('#setup-form'), { saveDefault: true });
     buildForm($('#session-inputs-form'), { saveDefault: false });
-    const me = await api.get('/api/me').catch(() => ({ authenticated: false }));
+    // failed: the check could not run, which is not the same as no sign-in
+    // being configured (renderKnowledge treats only the latter as admin).
+    const me = await api.get('/api/me').catch(() => ({ authenticated: false, failed: true }));
     state.me = me;
     // Model picker, run-time stopwatch and $/£ cost meter are operational
     // detail an admin cares about — for anyone here to read a launch
@@ -2402,12 +2568,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     // server-side admin gate in this app (auth.js noAuthConfigured()).
     document.body.classList.toggle('non-admin', Boolean(me.authenticated) && !me.is_admin);
     renderPowerNav();
-    // "Default" since the New Evaluation form can start a session on any of the
-    // offered models — this is only what an untouched picker will run on.
-    // Agents / Admin links used to lead this foot; they are header power
-    // buttons now. Hidden when empty so a bare bordered strip isn't left behind.
+    // Only a missing API key is worth the sidebar's space: the default model is
+    // shown on the New Evaluation form's picker instead. Hidden when empty so a
+    // bare bordered strip isn't left behind.
     const footLines = [
-      document.body.classList.contains('non-admin') ? '' : `Default model <code>${escapeHtml(state.config.model)}</code>`,
       state.config.has_api_key ? '' : '<strong style="color:#B91C1C">No API key: add it to .env and restart</strong>',
     ].filter(Boolean);
     $('#sidebar-foot').innerHTML = footLines.join('<br>');
@@ -2433,6 +2597,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#btn-sidebar-expand').addEventListener('click', () => setSidebarCollapsed(false));
 
     $('#btn-new').addEventListener('click', showSetup);
+    $('#btn-all-evals').addEventListener('click', showEvaluations);
     $('#evals-filter').addEventListener('input', (e) => { state.evalsFilter = e.target.value; renderEvaluations(); });
     // A row opens its evaluation from anywhere on it; the title is the real
     // button, so keyboard users get Enter on the row as well.
@@ -2486,25 +2651,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       } catch (err) { toast(`Could not save inputs: ${err.message}`); }
     });
 
-    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () => {
-      const mode = b.dataset.round;
-      // Mirrors the server's round-order check (src/app.js) so a premature
-      // click gets one clear toast instead of three separate "Turn failed"
-      // messages, one per agent.
-      const prior = unmetPriorRound(mode);
-      if (prior) return toast(`Run ${MODE_LABEL[prior] || prior} for all ${ALL.length} agents before starting ${MODE_LABEL[mode] || mode}.`);
-      const pending = turnsForRound(mode, ALL);
-      if (pending.length === ALL.length) return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
-      if (!pending.length) {
-        if (!confirm(`${MODE_LABEL[mode] || mode} already has a response from every agent. Run it again? This adds new responses; it does not replace the old ones.`)) return;
-        return mode === 'opening' ? runRound1Parallel() : runSequence(ALL.map((a) => ({ speaker: a, mode })));
-      }
-      // A previous run of this round failed partway through — only run the
-      // agents that don't already have a response, instead of duplicating
-      // the ones that succeeded.
-      toast(`Resuming ${MODE_LABEL[mode] || mode}: ${pending.length} agent(s) haven't answered yet.`);
-      return runSequence(pending.map((a) => ({ speaker: a, mode })));
-    }));
+    $$('#toolbar [data-round]').forEach((b) => b.addEventListener('click', () => startMeeting(b.dataset.round)));
     $('#btn-resume-meeting').addEventListener('click', resumeStalledMeeting);
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
 
@@ -2530,34 +2677,40 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       }
     });
 
-    // Autopilot
-    $('#btn-autopilot').addEventListener('click', () => openAutopilotDialog({ scope: 'discussion' }));
+    // Autopilot settings, inside the Custom meeting dialog
+    $$('#custom-run-mode input').forEach((r) => r.addEventListener('change', syncCustomRunMode));
     $('#autopilot-length').addEventListener('input', (e) => { $('#autopilot-length-label').textContent = LENGTH_LABELS[Number(e.target.value)]; });
     $('#autopilot-interactions').addEventListener('input', (e) => {
       const v = Number(e.target.value);
       $('#autopilot-interactions-label').textContent = v > 20 ? '∞ (until unanimous)' : String(v);
     });
-    $$('#dlg-autopilot .agent-picks input').forEach((c) => c.addEventListener('change', () => {
-      autopilotStanceRows($('#autopilot-stances'), $$('#dlg-autopilot .agent-picks input:checked').map((x) => x.value));
+    $$('#custom-agents input').forEach((c) => c.addEventListener('change', () => {
+      autopilotStanceRows($('#autopilot-stances'), $$('#custom-agents input:checked').map((x) => x.value));
     }));
-    $('#dlg-autopilot form').addEventListener('submit', (e) => {
-      if (e.submitter && e.submitter.value === 'start') {
-        const agents = $$('#dlg-autopilot .agent-picks input:checked').map((c) => c.value);
-        if (!agents.length) { e.preventDefault(); return toast('Pick at least one agent'); }
-        const dlg = $('#dlg-autopilot');
-        const interactionsRaw = Number($('#autopilot-interactions').value);
-        const stances = {};
-        $$('.stance-slider', $('#autopilot-stances')).forEach((sl) => { stances[sl.dataset.agent] = Number(sl.value) + 1; });
-        const settings = {
-          scope: dlg.dataset.scope, disagreement_n: dlg.dataset.disagreementN ? Number(dlg.dataset.disagreementN) : null,
-          agents, max_chars: LENGTH_VALUES[Number($('#autopilot-length').value)],
-          interactions: interactionsRaw > 20 ? 'inf' : interactionsRaw,
-          stopOnUnanimous: $('#autopilot-stop-unanimous').checked,
-          autoResolve: $('#autopilot-auto-resolve').checked,
-          stances,
-        };
-        setTimeout(() => runAutopilot(settings), 0);
+    $('#btn-custom').addEventListener('click', () => openCustomMeetingDialog({ scope: 'discussion' }));
+    $('#dlg-custom form').addEventListener('submit', (e) => {
+      if (!(e.submitter && e.submitter.value === 'run')) return;
+      const dlg = $('#dlg-custom');
+      const instruction = $('#custom-instruction').value.trim();
+      const agents = $$('#custom-agents input:checked').map((c) => c.value);
+      if (!agents.length) { e.preventDefault(); return toast('Pick at least one agent'); }
+      if (customRunMode() === 'once') {
+        if (!instruction) { e.preventDefault(); return toast('Write an agenda item first'); }
+        setTimeout(() => runSequence(agents.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
+        return;
       }
+      const interactionsRaw = Number($('#autopilot-interactions').value);
+      const stances = {};
+      $$('.stance-slider', $('#autopilot-stances')).forEach((sl) => { stances[sl.dataset.agent] = Number(sl.value) + 1; });
+      const settings = {
+        scope: dlg.dataset.scope, disagreement_n: dlg.dataset.disagreementN ? Number(dlg.dataset.disagreementN) : null,
+        agents, max_chars: LENGTH_VALUES[Number($('#autopilot-length').value)],
+        interactions: interactionsRaw > 20 ? 'inf' : interactionsRaw,
+        stopOnUnanimous: $('#autopilot-stop-unanimous').checked,
+        autoResolve: $('#autopilot-auto-resolve').checked,
+        stances, instruction,
+      };
+      setTimeout(() => runAutopilot(settings), 0);
     });
 
     // Agent Questions: discuss to resolution
@@ -2601,16 +2754,6 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
     $('#cost-meter').addEventListener('click', () => openUsageModal());
-    $('#btn-custom').addEventListener('click', () => { $('#dlg-custom').showModal(); $('#custom-instruction').focus(); });
-    $('#dlg-custom form').addEventListener('submit', (e) => {
-      if (e.submitter && e.submitter.value === 'run') {
-        const instruction = $('#custom-instruction').value.trim();
-        const picks = $$('#dlg-custom input[type=checkbox]:checked').map((c) => c.value);
-        if (!instruction) { e.preventDefault(); return toast('Write an instruction first'); }
-        if (!picks.length) { e.preventDefault(); return toast('Pick at least one agent'); }
-        setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
-      }
-    });
 
     $('#dlg-disagreement form').addEventListener('submit', (e) => {
       const n = $('#dlg-disagreement').dataset.n;
@@ -2623,7 +2766,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         // disagreement_n only classifies the cost as disagreement resolution.
         setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction, disagreement_n: d.n }))), 0);
       } else if (e.submitter && e.submitter.value === 'autopilot') {
-        setTimeout(() => openAutopilotDialog({ scope: 'disagreement', disagreementN: d.n, disagreementTopic: d.topic }), 0);
+        setTimeout(() => openCustomMeetingDialog({ scope: 'disagreement', disagreementN: d.n, disagreementTopic: d.topic }), 0);
       }
     });
 
@@ -2686,6 +2829,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         const base = `/api/sessions/${state.session.id}`;
         const tab = state.activeTab;
         const cut = tab === 'intelligence' ? `?cut=${encodeURIComponent(state.intelCut)}` : '';
+        const tabExport = !NO_TAB_EXPORT.has(tab);
+        ['#intel-export-label', '#link-intel-docx', '#link-intel-pdf', '#intel-export-menu .menu-sep'].forEach((sel) => { $(sel).hidden = !tabExport; });
         $('#intel-export-label').textContent = `This tab: ${INTEL_TITLE[tab]}`;
         $('#link-intel-docx').href = `${base}/intel/${tab}/export.docx${cut}`;
         $('#link-intel-pdf').href = `${base}/intel/${tab}/export.pdf${cut}`;

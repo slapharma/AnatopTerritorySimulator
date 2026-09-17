@@ -45,6 +45,10 @@ function loadRenderMinutes({ meetingMinutes = [], openMinutes } = {}) {
     state: { session: { meeting_minutes: meetingMinutes }, openMinutes },
     $: (sel, root) => (root ? null : (elements[sel] || null)),
     $$: () => [],
+    // "Approve and continue" names the next meeting on the agenda.
+    MODE_LABEL: { opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk' },
+    nextMeeting: (m) => ({ opening: 'round2', round2: 'round3', round3: 'crosstalk' }[m] || null),
+    startMeeting: () => {},
   };
   vm.createContext(ctx);
   vm.runInContext(`${src.slice(start, end)}\nthis.renderMinutes = renderMinutes;`, ctx);
@@ -126,6 +130,131 @@ describe('web/app.js renderMinutes', () => {
     ctx.renderMinutes();
 
     assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-back/);
+  });
+
+  it('an unapproved standard-meeting entry gets "Approve and continue" naming the next meeting on the agenda', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+
+    ctx.renderMinutes();
+
+    const html = ctx.elements['#tab-minutes'].innerHTML;
+    assert.match(html, /class="btn btn-sm btn-primary minutes-approve minutes-continue" data-next="round2"/);
+    assert.match(html, />Approve and continue</);
+  });
+
+  for (const [round, next] of [['opening', 'round2'], ['round2', 'round3'], ['round3', 'crosstalk']]) {
+    it(`names "${next}" as data-next for an unapproved "${round}" entry`, () => {
+      const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round, approved: false })] });
+
+      ctx.renderMinutes();
+
+      assert.match(ctx.elements['#tab-minutes'].innerHTML, new RegExp(`data-next="${next}"`));
+    });
+  }
+
+  it('a pending crosstalk entry (last standard meeting) gets no "Approve and continue" — nothing follows it', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'crosstalk', approved: false })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('an already-approved entry gets no "Approve and continue", even mid-agenda', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: true })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('a question-round entry gets no "Approve and continue"', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'question', approved: false })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('clicking "Approve and continue" approves, then starts the next meeting named on the button', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = {
+      dataset: { next: 'round2' }, disabled: false,
+      closest: () => ({ dataset: { id: '1' } }),
+      addEventListener(type, fn) { if (type === 'click') this._click = fn; },
+    };
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes(); // wires btn._click
+    await btn._click();
+
+    assert.deepEqual(started, ['round2']);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true);
+  });
+
+  // FakeApproveButton stands in for the real anchor button, capturing whatever
+  // click handler renderMinutes wires onto it via addEventListener, the same
+  // way the "Approve and continue" test above does — but shared across the
+  // group below since none of them read the button's rendered HTML.
+  function makeApproveBtn(next) {
+    return {
+      dataset: next ? { next } : {}, disabled: false,
+      closest: () => ({ dataset: { id: '1' } }),
+      addEventListener(type, fn) { if (type === 'click') this._click = fn; },
+    };
+  }
+
+  it('plain "Approve" (no data-next) never calls startMeeting', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = makeApproveBtn(null);
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(started, []);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true);
+  });
+
+  it('when the approve PATCH itself fails, toasts "Could not approve: …", re-enables the button, and never calls startMeeting', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    const toasts = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.toast = (msg) => toasts.push(msg);
+    ctx.api.send = async () => { throw new Error('network down'); };
+    const btn = makeApproveBtn('round2');
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(toasts, ['Could not approve: network down']);
+    assert.equal(started.length, 0, 'startMeeting is never called when the PATCH itself failed');
+    assert.equal(btn.disabled, false, 'the button is re-enabled so the user can retry');
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, false, 'not marked approved locally');
+  });
+
+  it('when the PATCH succeeds but startMeeting(next) rejects, toasts "Could not start <label>: …", not "Could not approve"', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const toasts = [];
+    ctx.startMeeting = async () => { throw new Error('agent unavailable'); };
+    ctx.toast = (msg) => toasts.push(msg);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = makeApproveBtn('round2');
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes();
+    await btn._click();
+
+    assert.deepEqual(toasts, ['Meeting approved.', 'Could not start Challenge: agent unavailable']);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true, 'the approval itself landed');
   });
 
   it('marks a card open — expanded, no [hidden] on its detail — when its id is in state.openMinutes', () => {

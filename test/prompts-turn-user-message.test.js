@@ -101,3 +101,49 @@ describe('turnUserMessage — questions_check', () => {
     assert.match(out, /OPEN QUESTIONS:\n\(none\)/);
   });
 });
+
+describe('turnUserMessage — autopilot agenda item (instruction)', () => {
+  it('appends the AGENDA ITEM block, with the instruction text, for a plain (non-question) autopilot turn', () => {
+    const out = turnUserMessage({
+      agentKey: 'clinical', mode: 'autopilot', messages: [],
+      instruction: 'Is a 2027 launch realistic without a local bridging study?', max_chars: 600,
+    });
+
+    assert.match(out, /AGENDA ITEM set by the moderator for this discussion:/);
+    assert.ok(out.includes('Is a 2027 launch realistic without a local bridging study?'));
+    assert.match(out, /Keep every cycle on this item\./);
+  });
+
+  it('omits the AGENDA ITEM block entirely when no instruction is given', () => {
+    const out = turnUserMessage({ agentKey: 'clinical', mode: 'autopilot', messages: [], max_chars: 600 });
+
+    assert.doesNotMatch(out, /AGENDA ITEM set by the moderator/);
+  });
+
+  it('never appends the AGENDA ITEM block to a question-scoped autopilot turn, even when an instruction is given', () => {
+    const question = {
+      text: 'What is the PAMI reimbursement timeline?', askerLabel: 'Luca (Clinical)',
+      addresseesLabel: 'Charlie (Commercial)', role: 'addressee',
+    };
+
+    const out = turnUserMessage({
+      agentKey: 'commercial', mode: 'autopilot', messages: [], question,
+      instruction: 'This should never appear — question turns ignore instruction entirely.', max_chars: 600,
+    });
+
+    assert.doesNotMatch(out, /AGENDA ITEM set by the moderator/);
+    assert.ok(!out.includes('This should never appear'));
+  });
+
+  it('places the AGENDA ITEM block before the disagreement-topic line and the character limit', () => {
+    const out = turnUserMessage({
+      agentKey: 'clinical', mode: 'autopilot', messages: [],
+      instruction: 'Debate the pricing floor.', disagreementTopic: 'Pricing strategy', max_chars: 600,
+    });
+
+    const agendaIdx = out.indexOf('AGENDA ITEM set by the moderator');
+    const disIdx = out.indexOf('This discussion is scoped to Disagreement');
+    const limitIdx = out.indexOf('Hard limit: 600 characters.');
+    assert.ok(agendaIdx >= 0 && disIdx > agendaIdx && limitIdx > disIdx);
+  });
+});

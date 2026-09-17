@@ -53,8 +53,24 @@ class FakeNav {
   get innerHTML() { return this._html; }
 }
 
-class FakeWarRoomEl {
-  constructor() { this._open = false; this.classList = { toggle: (cls, on) => { if (cls === 'open') this._open = on; } }; }
+// The session view's two panes and the Intelligence page's parts, as far as
+// showSessionPane touches them.
+function fakePage() {
+  const el = () => ({ hidden: false, textContent: '', scrollTop: 0, scrollHeight: 0 });
+  const tabs = ['sources', 'disagreements', 'questions', 'escalations', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'];
+  const page = { '#transcript': el(), '.transcript-col': el(), '#intel-page': el(), '#intel-page-title': el(), '#intel-page-select': { value: '' } };
+  for (const t of tabs) page[`#tab-${t}`] = el();
+  page['#intel-page'].hidden = true;
+  const navItems = ['transcript', ...tabs].map((pane) => {
+    const attrs = {};
+    return {
+      dataset: { pane },
+      setAttribute: (k, v) => { attrs[k] = String(v); },
+      removeAttribute: (k) => { delete attrs[k]; },
+      getAttribute: (k) => attrs[k],
+    };
+  });
+  return { page, navItems };
 }
 
 // navShape: array of booleans, one per .power-nav in the view, true where
@@ -66,9 +82,9 @@ function loadPowerNav({ navShape = [false], isAdmin = false, navPanel = null, wa
   assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did renderPowerNav/syncPowerNav/setWarRoom move?');
 
   const navs = navShape.map((hasIntelligence) => new FakeNav(hasIntelligence));
-  const warRoomEl = new FakeWarRoomEl();
+  const { page, navItems } = fakePage();
   const ctx = {
-    state: { me: { is_admin: isAdmin }, navPanel, warRoomOpen },
+    state: { me: { is_admin: isAdmin }, navPanel, warRoomOpen, activeTab: 'sources' },
     escapeHtml: (s) => String(s),
     icon: (name) => `<icon:${name}>`,
     $: (sel) => {
@@ -79,22 +95,23 @@ function loadPowerNav({ navShape = [false], isAdmin = false, navPanel = null, wa
         }
         return null;
       }
-      if (sel === '#war-room') return warRoomEl;
+      if (sel in page) return page[sel];
       throw new Error(`unexpected $ selector: ${sel}`);
     },
     $$: (sel) => {
       if (sel === '.power-nav') return navs;
+      if (sel === '#intel-nav [data-pane]') return navItems;
       if (sel === '.power-btn[data-nav]') return navs.flatMap((n) => n.buttons.filter((b) => b.dataset.nav));
       throw new Error(`unexpected $$ selector: ${sel}`);
     },
   };
   vm.createContext(ctx);
   vm.runInContext(
-    `${src.slice(start, end)}\nthis.renderPowerNav = renderPowerNav;\nthis.syncPowerNav = syncPowerNav;\nthis.setWarRoom = setWarRoom;`,
+    `${src.slice(start, end)}\nthis.renderPowerNav = renderPowerNav;\nthis.syncPowerNav = syncPowerNav;\nthis.setWarRoom = setWarRoom;\nthis.showSessionPane = showSessionPane;`,
     ctx,
   );
   ctx.renderPowerNav();
-  return { ctx, navs, warRoomEl };
+  return { ctx, navs, page, navItems };
 }
 
 describe('web/app.js renderPowerNav — button set', () => {
@@ -170,26 +187,48 @@ describe('web/app.js syncPowerNav — aria-pressed', () => {
   });
 });
 
-describe('web/app.js setWarRoom', () => {
-  it('opens the war-room panel and marks #btn-warroom pressed', () => {
-    const { ctx, navs, warRoomEl } = loadPowerNav({ navShape: [true], isAdmin: false, warRoomOpen: false });
+describe('web/app.js setWarRoom — the Intelligence page', () => {
+  const current = (navItems) => navItems.filter((b) => b.getAttribute('aria-current') === 'page').map((b) => b.dataset.pane);
+
+  it('shows the page on its last tab in place of the transcript, and marks #btn-warroom pressed', () => {
+    const { ctx, navs, page, navItems } = loadPowerNav({ navShape: [true], isAdmin: false, warRoomOpen: false });
+    ctx.state.activeTab = 'escalations';
 
     ctx.setWarRoom(true);
 
     assert.equal(ctx.state.warRoomOpen, true);
-    assert.equal(warRoomEl._open, true);
+    assert.equal(page['#intel-page'].hidden, false);
+    assert.equal(page['.transcript-col'].hidden, true);
+    assert.equal(page['#tab-escalations'].hidden, false);
+    assert.equal(page['#tab-sources'].hidden, true);
+    assert.equal(page['#intel-page-title'].textContent, 'Escalations');
+    assert.deepEqual(current(navItems), ['escalations']);
+    assert.equal(page['#intel-page-select'].value, 'escalations', 'the narrow-screen picker follows the page');
     assert.equal(navs[0].buttons.find((b) => b.id === 'btn-warroom').getAttribute('aria-pressed'), 'true');
   });
 
-  it('closes the war-room panel and clears #btn-warroom pressed', () => {
-    const { ctx, navs, warRoomEl } = loadPowerNav({ navShape: [true], isAdmin: false, warRoomOpen: true });
-    ctx.setWarRoom(true); // simulate it having been open already
-    warRoomEl.classList.toggle('open', true);
+  it('goes back to the transcript, keeps the tab for next time, and clears #btn-warroom pressed', () => {
+    const { ctx, navs, page, navItems } = loadPowerNav({ navShape: [true], isAdmin: false, warRoomOpen: false });
+    ctx.showSessionPane('minutes');
 
     ctx.setWarRoom(false);
 
     assert.equal(ctx.state.warRoomOpen, false);
-    assert.equal(warRoomEl._open, false);
+    assert.equal(ctx.state.activeTab, 'minutes');
+    assert.equal(page['#intel-page'].hidden, true);
+    assert.equal(page['.transcript-col'].hidden, false);
+    assert.deepEqual(current(navItems), ['transcript']);
     assert.equal(navs[0].buttons.find((b) => b.id === 'btn-warroom').getAttribute('aria-pressed'), 'false');
+  });
+
+  it('puts the transcript back at the scroll position it had before the page opened', () => {
+    const { ctx, page } = loadPowerNav({ navShape: [true], isAdmin: false, warRoomOpen: false });
+    page['#transcript'].scrollTop = 480;
+
+    ctx.showSessionPane('sources');
+    page['#transcript'].scrollTop = 0; // hidden: the browser may drop it
+    ctx.showSessionPane('transcript');
+
+    assert.equal(page['#transcript'].scrollTop, 480);
   });
 });

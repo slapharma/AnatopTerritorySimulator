@@ -509,6 +509,7 @@
     $('#view-session').hidden = true;
     $('#view-setup').hidden = false;
     $('#toolbar').hidden = true;
+    $('#intel-nav').hidden = true;
     $$('.session-item').forEach((el) => el.classList.remove('active'));
   }
 
@@ -555,6 +556,7 @@
     $('#view-session').hidden = true;
     $('#view-dashboard').hidden = false;
     $('#toolbar').hidden = true;
+    $('#intel-nav').hidden = true;
     $$('.session-item').forEach((el) => el.classList.remove('active'));
     renderDashboard();
   }
@@ -640,18 +642,49 @@
     syncPowerNav();
   }
 
-  // Pressed state mirrors whichever drawer is open, so the header shows it.
+  // Pressed state mirrors whichever drawer or page is open, so the header shows it.
   function syncPowerNav() {
     $$('.power-btn[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === state.navPanel)));
     const intel = $('#btn-warroom');
     if (intel) intel.setAttribute('aria-pressed', String(state.warRoomOpen));
   }
 
-  // Intelligence: floating pop-out panel toggle.
-  function setWarRoom(open) {
-    state.warRoomOpen = open;
-    $('#war-room').classList.toggle('open', open);
+  // Intelligence is a page of the session view, shown in place of the
+  // transcript. Its tabs are the sidebar's #intel-nav items; "transcript" is
+  // the meeting itself. state.warRoomOpen is true while the page is showing and
+  // state.activeTab remembers the tab, so the header button returns to it.
+  const INTEL_TABS = ['sources', 'disagreements', 'questions', 'escalations', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'];
+  const INTEL_TITLE = {
+    sources: 'Sources', disagreements: 'Disagreements', questions: 'Agent Questions', escalations: 'Escalations', decision: 'Decision',
+    favourites: 'Favourites', reports: 'Reports', minutes: 'Minutes', intelligence: 'Agent notes', inputs: 'Inputs',
+  };
+  function showSessionPane(pane) {
+    const intel = INTEL_TABS.includes(pane);
+    const transcript = $('#transcript');
+    // Hiding the transcript can drop its scroll position; keep it for the way back.
+    if (intel && !state.warRoomOpen) state.transcriptScroll = transcript.scrollTop;
+    if (intel) state.activeTab = pane;
+    const wasOpen = state.warRoomOpen;
+    state.warRoomOpen = intel;
+    $('.transcript-col').hidden = intel;
+    $('#intel-page').hidden = !intel;
+    INTEL_TABS.forEach((k) => { $(`#tab-${k}`).hidden = k !== state.activeTab; });
+    $('#intel-page-title').textContent = INTEL_TITLE[state.activeTab];
+    const current = intel ? state.activeTab : 'transcript';
+    $$('#intel-nav [data-pane]').forEach((b) => {
+      if (b.dataset.pane === current) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
+    // The narrow-screen stand-in for #intel-nav.
+    const picker = $('#intel-page-select');
+    if (picker) picker.value = current;
+    if (intel) $('#intel-page').scrollTop = 0;
+    else if (wasOpen && state.transcriptScroll != null) transcript.scrollTop = state.transcriptScroll;
     syncPowerNav();
+  }
+  // The header's Intelligence button: open the page on its last tab, or go back.
+  function setWarRoom(open) {
+    showSessionPane(open ? state.activeTab : 'transcript');
   }
 
   // ---------------- session view ----------------
@@ -662,6 +695,10 @@
     $('#view-setup').hidden = true;
     $('#view-session').hidden = false;
     $('#toolbar').hidden = false;
+    $('#intel-nav').hidden = false;
+    // A session always opens on its transcript, not on the page the last one was left on.
+    state.transcriptScroll = null;
+    showSessionPane('transcript');
     renderSession();
     $$('.session-item').forEach((el) => el.classList.remove('active'));
     await loadSessions();
@@ -1217,21 +1254,24 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     const list = s.meeting_minutes || [];
     $('#count-minutes').textContent = list.length;
     const box = $('#tab-minutes');
-    if (!list.length) { box.innerHTML = '<div class="empty">No meeting minutes yet. They\'re written automatically once a meeting (Baselines/Challenge/Converge/Cross-talk) finishes.</div>'; return; }
-    // One line per meeting, in the order they were held; a line opens to the
-    // full minutes, and open lines stay open across re-renders.
+    if (!list.length) { box.innerHTML = '<div class="empty">No minutes yet. They\'re written automatically once a meeting (Baselines/Challenge/Converge/Cross-talk) finishes, and an entry is added whenever an agent\'s question is answered, discussed, escalated or reopened.</div>'; return; }
+    // One line per meeting or question action, in the order they happened; a
+    // line opens to the full minutes, and open lines stay open across re-renders.
+    // A question entry is a record, not minutes awaiting approval, so it has no
+    // Approve button or Pending badge.
     state.openMinutes = state.openMinutes || new Set();
     const isOpen = (mm) => state.openMinutes.has(mm.id);
+    const isQuestion = (mm) => mm.round === 'question';
     box.innerHTML = `<ol class="minutes-list">${list.map((mm, i) => `
-      <li class="minutes-card${isOpen(mm) ? ' open' : ''}" data-id="${mm.id}">
+      <li class="minutes-card${isQuestion(mm) ? ' minutes-question' : ''}${isOpen(mm) ? ' open' : ''}" data-id="${mm.id}">
         <div class="minutes-head">
           <button type="button" class="minutes-toggle" aria-expanded="${isOpen(mm)}"><span class="minutes-num">${i + 1}</span><span class="label">${escapeHtml(mm.label)}</span><span class="muted minutes-date">${escapeHtml(fmtTime(mm.created_at))}</span></button>
-          <span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending'}</span>
-          ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}
+          ${isQuestion(mm) ? '' : `<span class="${mm.approved ? 'minutes-approved' : 'minutes-pending'}">${mm.approved ? 'Approved' : 'Pending'}</span>
+          ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}`}
         </div>
         <div class="minutes-detail"${isOpen(mm) ? '' : ' hidden'}>
           <div class="minutes-body"></div>
-          ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ view meeting</a>` : ''}
+          ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ ${isQuestion(mm) ? 'view in transcript' : 'view meeting'}</a>` : ''}
         </div>
       </li>`).join('')}</ol>`;
     $$('#tab-minutes .minutes-card').forEach((el, i) => { $('.minutes-body', el).replaceChildren(renderMarkdown(list[i].text)); });
@@ -1289,20 +1329,50 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     return `<div class="intel-row"><button type="button" class="intel-open" data-msg="${m.id}">${escapeHtml(title)}</button><span class="muted">${escapeHtml(fmtTime(m.created_at))}</span></div>`;
   }
 
+  // An Autopilot message is named after the conversation it belongs to, not the
+  // engine that ran it: the question or disagreement it discussed, or which
+  // open panel debate. Returns { key, label }; key groups one run's messages.
+  function conversationOf(m) {
+    if (m.mode !== 'autopilot') return { key: m.mode, label: MODE_LABEL[m.mode] || m.mode || '' };
+    const s = state.session;
+    const meta = autopilotMeta(m) || {};
+    const runs = s.autopilot_runs || [];
+    const run = runs.find((r) => String(r.id) === String(meta.run_id));
+    const key = `autopilot:${meta.run_id ?? 'unknown'}`;
+    if (meta.question_id != null || (run && run.scope === 'question')) {
+      const q = meta.question_id == null ? null : (s.questions || []).find((x) => String(x.id) === String(meta.question_id));
+      const to = q ? q.addressees.split(',').filter(Boolean).map((k) => (k === 'moderator' ? 'Moderator' : AGENT_LABEL[k] || k)).join(', ') : '';
+      return { key, label: q ? `Question discussion: ${AGENT_LABEL[q.asker] || q.asker} → ${to}` : 'Question discussion' };
+    }
+    if (run && run.scope === 'disagreement' && run.disagreement_n != null) {
+      const d = (s.disagreements || []).find((x) => String(x.n) === String(run.disagreement_n));
+      return { key, label: `Disagreement debate #${run.disagreement_n}${d ? `: ${d.topic}` : ''}` };
+    }
+    const debates = runs.filter((r) => r.scope !== 'question' && r.scope !== 'disagreement');
+    const n = run ? debates.indexOf(run) + 1 : 0;
+    return { key, label: n ? `Panel debate ${n}` : 'Panel debate' };
+  }
+
   function renderIntelligenceBody(body) {
     const s = state.session;
     if (state.intelCut === 'agent') {
       const groups = [...ALL, 'moderator', 'user'].map((sp) => ({
         key: sp, label: AGENT_LABEL[sp], rows: s.messages.filter((m) => (m.role === 'user' ? 'user' : m.speaker) === sp && !m.error && m.text != null),
       })).filter((g) => g.rows.length);
-      body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelMsgRow(m, `#${m.seq} · ${MODE_LABEL[m.mode] || m.mode || ''}`)).join('')}</div>`).join('')
+      body.innerHTML = groups.length ? groups.map((g) => `<div class="intel-group"><h4>${escapeHtml(g.label)} (${g.rows.length})</h4>${g.rows.map((m) => intelMsgRow(m, `#${m.seq} · ${conversationOf(m).label}`)).join('')}</div>`).join('')
         : '<div class="empty">No messages yet.</div>';
     } else if (state.intelCut === 'meeting') {
-      const modes = [...new Set(s.messages.filter((m) => m.mode).map((m) => m.mode))];
-      body.innerHTML = modes.length ? modes.map((mode) => {
-        const rows = s.messages.filter((m) => m.mode === mode && !m.error && m.text != null);
-        const mm = (s.meeting_minutes || []).find((x) => x.round === mode);
-        return `<div class="intel-group"><h4>${escapeHtml(MODE_LABEL[mode] || mode)}${mm ? ' · minutes ✓' : ''}</h4>${rows.map((m) => intelMsgRow(m, `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker] || m.speaker} #${m.seq}`)).join('')}</div>`;
+      // One group per meeting type, and one per Autopilot conversation.
+      const groups = new Map();
+      for (const m of s.messages) {
+        if (!m.mode) continue;
+        const c = conversationOf(m);
+        if (!groups.has(c.key)) groups.set(c.key, { ...c, mode: m.mode, rows: [] });
+        if (!m.error && m.text != null) groups.get(c.key).rows.push(m);
+      }
+      body.innerHTML = groups.size ? [...groups.values()].map((g) => {
+        const mm = g.mode === 'autopilot' ? null : (s.meeting_minutes || []).find((x) => x.round === g.mode);
+        return `<div class="intel-group"><h4>${escapeHtml(g.label)}${mm ? ' · minutes ✓' : ''}</h4>${g.rows.map((m) => intelMsgRow(m, `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker] || m.speaker} #${m.seq}`)).join('')}</div>`;
       }).join('') : '<div class="empty">No meetings run yet.</div>';
     } else if (state.intelCut === 'disagreement') {
       body.innerHTML = s.disagreements.length ? s.disagreements.map((d) => intelRow(`#dis-${d.n}`, `#${d.n} ${d.topic}`, d.status.toUpperCase())).join('')
@@ -1347,8 +1417,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     try {
       const r = await api.send('POST', `/api/sessions/${id}/questions/check`, {});
       if (!state.session || String(state.session.id) !== String(id)) return;
-      state.session.questions = r.questions;
-      renderQuestions();
+      applyQuestionResponse(r);
       if (r.updated) toast(`${r.updated} question(s) found answered in the transcript`);
       else if (!quiet) toast('None of the open questions has been answered yet.');
     } catch (e) {
@@ -1364,20 +1433,43 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   // discussion to resolution can be held between.
   const questionAgentAddressees = (qRow) => qRow.addressees.split(',').filter((k) => ALL.includes(k) && k !== qRow.asker);
 
+  // Question routes answer with the session's minutes as well, since every
+  // action on a question adds an entry. Merged by id rather than replaced, so a
+  // meeting's minutes written while the request was out are not dropped.
+  function applyQuestionResponse(r) {
+    if (r.questions) state.session.questions = r.questions;
+    if (r.meeting_minutes) {
+      const byId = new Map((state.session.meeting_minutes || []).map((x) => [String(x.id), x]));
+      for (const row of r.meeting_minutes) byId.set(String(row.id), row);
+      state.session.meeting_minutes = [...byId.values()].sort((a, b) => Number(a.id) - Number(b.id));
+      renderMinutes();
+    }
+    renderQuestions();
+  }
+
+  // The same question cards are drawn in two places: the Agent Questions tab
+  // (every question, filterable) and the Escalations tab (escalated ones only).
+  const QUESTION_BOXES = { questions: '#tab-questions', escalations: '#tab-escalations' };
+
   function renderQuestions() {
     const s = state.session;
     const list = s.questions || [];
-    const box = $('#tab-questions');
-    // The list is rebuilt after every turn, and Answer… can be open during a
-    // meeting: keep any answer being typed, and keep its box open.
+    // The lists are rebuilt after every turn, and Answer… can be open during a
+    // meeting: keep any answer being typed, and keep its box open. Drafts are
+    // kept per box, as the same question can be open in both.
     state.questionDrafts = state.questionDrafts || {};
-    $$('.qn', box).forEach((card) => {
-      const panel = $('.qn-answer', card);
-      if (panel && !panel.hidden) state.questionDrafts[card.dataset.qid] = $('textarea', panel).value;
-      else if (panel) delete state.questionDrafts[card.dataset.qid];
-    });
+    for (const [name, sel] of Object.entries(QUESTION_BOXES)) {
+      $$('.qn', $(sel)).forEach((card) => {
+        const panel = $('.qn-answer', card);
+        const key = `${name}:${card.dataset.qid}`;
+        if (panel && !panel.hidden) state.questionDrafts[key] = $('textarea', panel).value;
+        else if (panel) delete state.questionDrafts[key];
+      });
+    }
     const openN = list.filter((x) => x.status === 'open' || x.status === 'escalated').length;
     $('#count-questions').textContent = list.length ? `${openN}/${list.length}` : '0';
+    renderEscalations(list);
+    const box = $(QUESTION_BOXES.questions);
     if (!list.length) {
       const hasAgentTurns = s.messages.some((m) => m.role === 'agent' && m.text);
       box.innerHTML = `<div class="empty">No questions logged yet. When an agent ends a response with "Questions for …", each question appears here with who asked whom, and you can answer it or have the agents discuss it to resolution.</div>
@@ -1401,6 +1493,27 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         <button type="button" class="btn btn-sm btn-quiet" id="btn-questions-scan">Rescan transcript</button>
       </div>`;
     $$('[data-qfilter]', box).forEach((b) => b.addEventListener('click', () => { state.questionFilter = b.dataset.qfilter; renderQuestions(); }));
+    wireQuestionCards('questions', list);
+    $('#btn-questions-check', box).addEventListener('click', () => checkAnsweredQuestions());
+    $('#btn-questions-scan', box).addEventListener('click', scanQuestions);
+  }
+
+  // Escalations: the questions waiting on the moderator. The count turns amber
+  // while there are any.
+  function renderEscalations(list) {
+    const escalated = list.filter((x) => x.status === 'escalated');
+    const count = $('#count-escalations');
+    count.textContent = escalated.length;
+    count.className = escalated.length ? 'count count-alert' : 'count';
+    const box = $(QUESTION_BOXES.escalations);
+    box.innerHTML = escalated.length
+      ? `<p class="qn-intro">Questions the panel could not settle within its loop or cost limit, and any you escalated yourself. Answer one, have the agents discuss it again, or reopen it.</p>${escalated.map(questionCardHtml).join('')}`
+      : '<div class="empty">Nothing is escalated. A question comes here when a discussion to resolution runs out of loops or reaches the cost limit, or when you escalate it.</div>';
+    wireQuestionCards('escalations', list);
+  }
+
+  function wireQuestionCards(name, list) {
+    const box = $(QUESTION_BOXES[name]);
     $$('[data-open-msg]', box).forEach((b) => b.addEventListener('click', () => {
       const m = findMessage(b.dataset.openMsg);
       if (m) openMessageModal(m, m.role === 'user' ? 'user' : m.speaker);
@@ -1410,10 +1523,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       if (!qRow) return;
       $$('[data-qact]', card).forEach((b) => b.addEventListener('click', () => questionAction(qRow, b.dataset.qact, card)));
     });
-    $('#btn-questions-check', box).addEventListener('click', () => checkAnsweredQuestions());
-    $('#btn-questions-scan', box).addEventListener('click', scanQuestions);
-    for (const [qid, draft] of Object.entries(state.questionDrafts)) {
-      const card = $$('.qn', box).find((c) => c.dataset.qid === qid);
+    const prefix = `${name}:`;
+    for (const [key, draft] of Object.entries(state.questionDrafts)) {
+      if (!key.startsWith(prefix)) continue;
+      const card = $$('.qn', box).find((c) => c.dataset.qid === key.slice(prefix.length));
       if (!card) continue;
       $('.qn-answer', card).hidden = false;
       $('.qn-answer textarea', card).value = draft;
@@ -1460,10 +1573,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     } catch (e) { toast(`Could not scan for questions: ${e.message}`); }
   }
 
-  async function setQuestionStatus(qRow, status, resolution_note, answer_message_id) {
+  // discussion: { run_id, outcome, cycles } when a discuss-to-resolution run is
+  // what this change closes, so its minutes entry records the run.
+  async function setQuestionStatus(qRow, status, resolution_note, answer_message_id, discussion) {
     const id = state.session.id;
-    state.session.questions = await api.send('PATCH', `/api/sessions/${id}/questions/${qRow.id}`, { status, resolution_note, answer_message_id });
-    renderQuestions();
+    const r = await api.send('PATCH', `/api/sessions/${id}/questions/${qRow.id}`, { status, resolution_note, answer_message_id, discussion });
+    if (String(state.session.id) !== String(id)) return;
+    applyQuestionResponse(r);
   }
 
   async function questionAction(qRow, act, card) {
@@ -1490,14 +1606,15 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         } finally { state.sendingAnswer.delete(qid); }
         // Sent: close the box on whichever card is live now, and drop the draft
         // so the redraw below does not reopen it.
-        delete (state.questionDrafts || {})[qid];
-        const live = $$('.qn', $('#tab-questions')).find((c) => c.dataset.qid === qid);
-        if (live) $('.qn-answer', live).hidden = true;
+        for (const [name, sel] of Object.entries(QUESTION_BOXES)) {
+          delete (state.questionDrafts || {})[`${name}:${qid}`];
+          const live = $$('.qn', $(sel)).find((c) => c.dataset.qid === qid);
+          if (live) $('.qn-answer', live).hidden = true;
+        }
         state.session.messages.push(r.message);
-        state.session.questions = r.questions;
         $('.empty', $('#transcript'))?.remove();
         $('#transcript').appendChild(messageElement(r.message));
-        renderQuestions();
+        applyQuestionResponse(r);
         toast('Answer sent');
         if (askBack && r.respondents.length) await runSequence(r.respondents.map((a) => ({ speaker: a, mode: 'reply' })));
       } else if (act === 'mark-answered') {
@@ -1527,18 +1644,24 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
   // Autopilot outcome → question status. Resolved when the asker said so;
   // escalated when the loop or cost limit ran out first. A failed turn or a
-  // manual stop leaves the question open, since nothing was decided.
-  async function settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg) {
+  // manual stop leaves the status as it was, since nothing was decided, but
+  // still reports the run so it gets its minutes entry.
+  async function settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg, runId) {
     const qRow = (state.session.questions || []).find((x) => String(x.id) === String(settings.question_id));
     if (!qRow) return;
+    const discussion = { run_id: runId, outcome: outcome || 'stopped_by_moderator', cycles: cycle };
     try {
       if (outcome === 'resolved') {
-        await setQuestionStatus(qRow, 'resolved', `Resolved in discussion after ${cycle} loop(s)`, resolvedMsg ? resolvedMsg.id : null);
+        await setQuestionStatus(qRow, 'resolved', `Resolved in discussion after ${cycle} loop(s)`, resolvedMsg ? resolvedMsg.id : null, discussion);
         toast('Question resolved');
       } else if (['cycle_cap', 'safety_cap', 'cost_cap'].includes(outcome)) {
         const why = outcome === 'cost_cap' ? 'the cost limit was reached' : `${cycle} loop(s)`;
-        await setQuestionStatus(qRow, 'escalated', `Not resolved after ${why}; escalated to the moderator for offline review`);
+        await setQuestionStatus(qRow, 'escalated', `Not resolved after ${why}; escalated to the moderator for offline review`, undefined, discussion);
         toast('Question not resolved: escalated to you for offline review', 5000);
+      } else {
+        // Nothing was decided: send no status, so a change made while the run
+        // was going (the answered-check, another tab) is not overwritten.
+        await setQuestionStatus(qRow, undefined, undefined, undefined, discussion);
       }
     } catch (e) { toast(`Could not update the question: ${e.message}`); }
   }
@@ -1583,6 +1706,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   // column instead of the flat transcript, when running in parallel.
   function runTurn(turn, container) {
     const { speaker, mode, instruction } = turn;
+    // Every agent turn streams into the transcript, so show it: a meeting,
+    // discussion or reply can be started from the Intelligence page.
+    // Land at the end, where the new turn is, not where reading was left.
+    if (state.warRoomOpen) {
+      showSessionPane('transcript');
+      $('#transcript').scrollTop = $('#transcript').scrollHeight;
+    }
     return new Promise(async (resolve) => {
       const t = $('#transcript');
       $('.empty', t)?.remove();
@@ -1802,6 +1932,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         scope: settings.scope, disagreement_n: settings.disagreement_n, settings,
       });
       if (!run || run.id == null) throw new Error('no run was created');
+      // Agent notes names each run's messages from this list, so the new run
+      // has to be on it before the first turn lands.
+      state.session.autopilot_runs = [...(state.session.autopilot_runs || []), run];
     } catch (e) { toast(`Could not start autopilot: ${e.message}`); setRunning(false); return; }
 
     const base = settings.agents.slice();
@@ -1875,7 +2008,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         t.appendChild(messageElement(note));
         t.scrollTop = t.scrollHeight;
       } catch (e) { /* non-fatal: the run row still has the outcome */ }
-      if (isQuestion && String(state.session.id) === String(sessionId)) await settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg);
+      if (isQuestion && String(state.session.id) === String(sessionId)) await settleQuestionAfterDiscussion(settings, outcome, cycle, resolvedMsg, run.id);
       if (outcome === 'unanimous' && settings.autoResolve && settings.scope === 'disagreement' && settings.disagreement_n) {
         try {
           state.session.disagreements = await api.send('PATCH', `/api/sessions/${sessionId}/disagreements/${settings.disagreement_n}`, { status: 'resolved' });
@@ -1954,7 +2087,10 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
   function jumpToDecision() {
     const m = [...state.session.messages].reverse().find((x) => x.mode === 'decision');
-    if (m) $(`#msg-${m.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!m) return;
+    // The transcript is hidden while this tab's page is showing.
+    showSessionPane('transcript');
+    $(`#msg-${m.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   // Favourites tab. Was a transcript filter chip; as a tab you can read the
@@ -1996,6 +2132,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       $('.fav-jump', el).addEventListener('click', () => {
         const target = $(`#msg-${m.id}`);
         if (!target) return toast('That response is not in the current transcript view.');
+        showSessionPane('transcript');
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target.style.outline = '2px solid var(--primary)';
         setTimeout(() => { target.style.outline = ''; }, 1500);
@@ -2092,8 +2229,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         renderDecisionTab();
       }
       renderReports();
-      setWarRoom(true);
-      $$('.tab').find((tt) => tt.dataset.tab === 'reports').click();
+      showSessionPane('reports');
       toast(`${KIND_LABEL[kind]} generated.`);
     } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); }
   }
@@ -2381,15 +2517,25 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#btn-export').addEventListener('click', (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; });
     document.addEventListener('click', () => { $('#export-menu').hidden = true; $('#reports-menu').hidden = true; });
 
-    $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
-      $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-      ['sources', 'disagreements', 'questions', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'].forEach((k) => { $(`#tab-${k}`).hidden = k !== tab.dataset.tab; });
-      state.activeTab = tab.dataset.tab;
-    }));
+    // Intelligence page navigation in the sidebar.
+    $$('#intel-nav [data-pane]').forEach((b) => b.addEventListener('click', () => showSessionPane(b.dataset.pane)));
+    $('#intel-page-select').addEventListener('change', (e) => showSessionPane(e.target.value));
+    $('#btn-toggle-intel').addEventListener('click', () => {
+      const head = $('#btn-toggle-intel');
+      const open = $('#intel-nav-body').hidden;
+      $('#intel-nav-body').hidden = !open;
+      head.classList.toggle('open', open);
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    // A link into the transcript (#msg-…) from the Intelligence page, or from a
+    // dialog opened on it, has to bring the transcript back before the browser
+    // scrolls to the target. Click handlers run before that default action.
+    document.addEventListener('click', (e) => {
+      if (state.warRoomOpen && e.target.closest('a[href^="#msg-"]')) showSessionPane('transcript');
+    });
 
     // #btn-warroom is rendered into the session header by renderPowerNav().
     $('#btn-warroom').addEventListener('click', () => setWarRoom(!state.warRoomOpen));
-    $('#btn-warroom-close').addEventListener('click', () => setWarRoom(false));
 
     // Left slide-over for the guide / agent profiles / admin pages. The pages
     // themselves are unchanged and still work as standalone URLs (the ↗ in the
@@ -2447,7 +2593,6 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (state.navPanel) setNavPanel(null);
-      else if (state.warRoomOpen) setWarRoom(false);
     });
 
     $('#brand-home').addEventListener('click', showDashboard);
@@ -2456,7 +2601,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');
       if (!a) return;
-      $$('.tab').find((t) => t.dataset.tab === 'sources').click();
+      showSessionPane('sources');
       const target = $(`#src-${a.dataset.src}`);
       if (target) { target.scrollIntoView({ block: 'center' }); target.style.background = 'var(--primary-soft)'; setTimeout(() => (target.style.background = ''), 1500); }
       e.preventDefault();

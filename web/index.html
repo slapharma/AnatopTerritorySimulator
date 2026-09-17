@@ -62,6 +62,29 @@
       </div>
     </nav>
 
+    <!-- The Intelligence page's own navigation. Each item shows that tab as a
+         full page in place of the transcript; "Meeting transcript" goes back.
+         Not inside #toolbar, so a running meeting does not disable it. -->
+    <nav class="sidebar-panel" id="intel-nav" aria-label="Intelligence" hidden>
+      <button type="button" class="side-section-head open" id="btn-toggle-intel" aria-expanded="true" aria-controls="intel-nav-body">
+        <span>Intelligence</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="side-section-body side-nav" id="intel-nav-body">
+        <button type="button" class="side-nav-item" data-pane="transcript">Meeting transcript</button>
+        <div class="side-nav-divider" role="separator"></div>
+        <button type="button" class="side-nav-item" data-pane="sources">Sources <span class="count" id="count-sources">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="disagreements">Disagreements <span class="count" id="count-dis">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="questions">Agent Questions <span class="count" id="count-questions">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="escalations">Escalations <span class="count" id="count-escalations">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="decision">Decision</button>
+        <button type="button" class="side-nav-item" data-pane="favourites">Favourites <span class="count" id="count-favourites">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="reports">Reports <span class="count" id="count-reports">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="minutes">Minutes <span class="count" id="count-minutes">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="intelligence">Agent notes</button>
+        <button type="button" class="side-nav-item" data-pane="inputs">Inputs</button>
+      </div>
+    </nav>
+
     <div class="session-list-wrap">
       <button type="button" id="btn-toggle-sessions" class="side-section-head" aria-expanded="false" aria-controls="session-list">
         <span id="session-toggle-label">Evaluation Register</span><span class="count" id="session-toggle-count" hidden>0</span><svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
@@ -217,25 +240,35 @@
           </form>
         </div>
 
-        <aside class="panel" id="war-room" aria-label="Intelligence">
-          <div class="panel-head">
-            <span class="panel-title">Intelligence</span>
-            <button type="button" class="panel-close" id="btn-warroom-close" title="Close">✕</button>
-          </div>
-          <div class="tabs" role="tablist">
-            <button class="tab active" data-tab="sources" role="tab" type="button">Sources <span class="count" id="count-sources">0</span></button>
-            <button class="tab" data-tab="disagreements" role="tab" type="button">Disagreements <span class="count" id="count-dis">0</span></button>
-            <button class="tab" data-tab="questions" role="tab" type="button">Agent Questions <span class="count" id="count-questions">0</span></button>
-            <button class="tab" data-tab="decision" role="tab" type="button">Decision</button>
-            <button class="tab" data-tab="favourites" role="tab" type="button">★ Favourites <span class="count" id="count-favourites">0</span></button>
-            <button class="tab" data-tab="reports" role="tab" type="button">Reports <span class="count" id="count-reports">0</span></button>
-            <button class="tab" data-tab="minutes" role="tab" type="button">Minutes <span class="count" id="count-minutes">0</span></button>
-            <button class="tab" data-tab="intelligence" role="tab" type="button">Agent notes</button>
-            <button class="tab" data-tab="inputs" role="tab" type="button">Inputs</button>
+        <!-- Intelligence page: shown in place of the transcript. The sidebar's
+             #intel-nav picks which body is on show. -->
+        <section class="intel-page" id="intel-page" aria-labelledby="intel-page-title" hidden>
+          <div class="intel-page-inner">
+          <div class="intel-page-head">
+            <h2 class="intel-page-title" id="intel-page-title">Sources</h2>
+            <!-- Narrow screens hide the sidebar, and with it #intel-nav: this
+                 picker stands in for it there and is hidden everywhere else. -->
+            <label class="intel-page-picker">
+              <span class="visually-hidden">Intelligence tab</span>
+              <select id="intel-page-select">
+                <option value="transcript">Meeting transcript</option>
+                <option value="sources">Sources</option>
+                <option value="disagreements">Disagreements</option>
+                <option value="questions">Agent Questions</option>
+                <option value="escalations">Escalations</option>
+                <option value="decision">Decision</option>
+                <option value="favourites">Favourites</option>
+                <option value="reports">Reports</option>
+                <option value="minutes">Minutes</option>
+                <option value="intelligence">Agent notes</option>
+                <option value="inputs">Inputs</option>
+              </select>
+            </label>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
           <div class="tab-body" id="tab-questions" hidden></div>
+          <div class="tab-body" id="tab-escalations" hidden></div>
           <div class="tab-body" id="tab-decision" hidden></div>
           <div class="tab-body" id="tab-favourites" hidden></div>
           <div class="tab-body" id="tab-reports" hidden></div>
@@ -256,7 +289,8 @@
               </div>
             </form>
           </div>
-        </aside>
+          </div>
+        </section>
       </div>
     </section>
   </main>

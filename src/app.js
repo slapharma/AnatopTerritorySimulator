@@ -9,6 +9,7 @@ const { assembleText } = require('./transcript');
 const { runTurn } = require('./agents');
 const exporter = require('./export');
 const intelExport = require('./intel-export');
+const xlsx = require('./xlsx');
 const email = require('./email');
 const questions = require('./questions');
 const usage = require('./usage');
@@ -1101,6 +1102,48 @@ app.get('/api/sessions/:id/intel/:section/export.:format', async (req, res, next
     const buf = await fmt.build(s, { section });
     res.setHeader('Content-Type', fmt.type);
     res.setHeader('Content-Disposition', `attachment; filename="${exporter.sectionFileName(s, req.params.section)}.${req.params.format}"`);
+    res.send(buf);
+  } catch (e) { next(e); }
+});
+
+// One item on the page — a report, the decision, a minutes entry, a meeting's
+// transcript, a response, a disagreement or a question — for its View modal
+// (JSON) and its Word / PDF / Excel downloads. src/intel-export.js itemDoc
+// says what each kind contains.
+async function loadItem(req, res) {
+  const s = await db.fullSession(Number(req.params.id));
+  if (!s) { res.status(404).json({ error: 'Session not found' }); return null; }
+  const doc = intelExport.itemDoc(s, req.params.kind, req.params.key);
+  if (!doc) { res.status(404).json({ error: 'Item not found' }); return null; }
+  return { s, doc };
+}
+app.get('/api/sessions/:id/items/:kind/:key', async (req, res, next) => {
+  try {
+    const loaded = await loadItem(req, res);
+    if (!loaded) return;
+    res.json({ title: loaded.doc.title, markdown: loaded.doc.markdown });
+  } catch (e) { next(e); }
+});
+const ITEM_FORMATS = {
+  ...EXPORT_TYPES,
+  xlsx: {
+    build: (s, { doc }) => xlsx.toXlsx({ sheet: doc.title, ...(doc.table || xlsx.markdownRows(doc.markdown)) }),
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  },
+};
+app.get('/api/sessions/:id/items/:kind/:key/export.:format', async (req, res, next) => {
+  try {
+    const fmt = Object.hasOwn(ITEM_FORMATS, req.params.format) ? ITEM_FORMATS[req.params.format] : null;
+    if (!fmt) return res.status(404).json({ error: 'Export not found' });
+    const loaded = await loadItem(req, res);
+    if (!loaded) return;
+    const { s, doc } = loaded;
+    // Word and PDF keep a report's own cover; everything else uses the section cover.
+    const buf = req.params.format === 'xlsx' ? await fmt.build(s, { doc })
+      : await fmt.build(s, doc.report ? { report: doc.report } : { section: doc });
+    const name = doc.report ? exporter.reportFileName(s, doc.report) : exporter.sectionFileName(s, `${req.params.kind}_${req.params.key}`.replace(/[^\w-]+/g, '_'));
+    res.setHeader('Content-Type', fmt.type);
+    res.setHeader('Content-Disposition', `attachment; filename="${name}.${req.params.format}"`);
     res.send(buf);
   } catch (e) { next(e); }
 });

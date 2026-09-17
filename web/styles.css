@@ -52,9 +52,9 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .sidebar-expand-btn { position: fixed; top: 12px; left: 12px; z-index: 45; border: 1px solid var(--border-strong); background: var(--surface); box-shadow: var(--shadow); border-radius: var(--radius); width: 28px; height: 28px; font-size: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-2); }
 .sidebar-expand-btn:hover { background: var(--surface-2); }
 .side-new { min-height: 40px; gap: 8px; }
-/* New evaluation sits 100px below the brand row, with View all evaluations
+/* New evaluation sits 50px below the brand row, with View all evaluations
    directly under it. */
-.side-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 100px; }
+.side-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 50px; }
 .side-new .icon { width: 16px; height: 16px; flex: none; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--primary-hover); }
 
@@ -117,10 +117,10 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 .sidebar-foot { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
 /* An open evaluation adds the agenda and the Intelligence nav to the sidebar,
    which must still fit the window without scrolling. Rows tighten, and the
-   100px gap above New evaluation gives way to whatever height is left (it
-   keeps the full 100px on a window tall enough). */
+   50px gap above New evaluation gives way to whatever height is left (it
+   keeps the full 50px on a window tall enough). */
 .sidebar:has(#intel-nav:not([hidden])) .sidebar-head { padding: 10px 12px 10px; gap: 8px; }
-.sidebar:has(#intel-nav:not([hidden])) .side-actions { gap: 6px; margin-top: clamp(0px, calc(100vh - 862px), 100px); }
+.sidebar:has(#intel-nav:not([hidden])) .side-actions { gap: 6px; margin-top: clamp(0px, calc(100vh - 862px), 50px); }
 .sidebar:has(#intel-nav:not([hidden])) .side-new { min-height: 34px; }
 .sidebar:has(#intel-nav:not([hidden])) .sidebar-panel { padding: 8px 12px 10px; gap: 2px; }
 .sidebar:has(#intel-nav:not([hidden])) .side-section-head { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }
@@ -574,20 +574,18 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .report-kind-final { color: var(--accent); }
 
 /* ---------- dashboard ---------- */
-/* Fills the main column top to bottom with no scroll: the hero photo takes
-   whatever height the callout and KPI strip leave it. .scroll still scrolls
-   if a very short window cannot fit the hero's floor. */
-#view-dashboard .scroll { display: flex; flex-direction: column; }
-.dashboard { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
-/* Hero photo. Cropped to a banner with object-fit rather than shown at 16:9,
-   which would push everything else below the fold. object-position keeps the
-   logo and all three faces in frame; the heading is laid over the blank wall
-   at top left, which is light enough for body text colour without a scrim.
+/* Full width of the main column. The hero photo is shown whole, at its own
+   aspect ratio, and the callout and KPI strip follow below it; the page
+   scrolls to reach them. */
+.dashboard { width: 100%; box-sizing: border-box; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px; }
+/* Hero photo, uncropped at the image's 2400x1340 ratio. The heading is laid
+   over the blank wall at top left, which is light enough for body text colour
+   without a scrim.
    The switch to stacked is a container query, not a media query: the sidebar
    takes 268px, so the viewport width says nothing about how much wall is free. */
-.dash-hero { flex: 1 1 auto; min-height: 240px; display: flex; flex-direction: column; position: relative; overflow: hidden; container-type: inline-size; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
-.dash-hero-media { display: block; position: relative; flex: 1; min-height: 0; }
-.dash-hero-media img { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 16%; }
+.dash-hero { flex: none; position: relative; overflow: hidden; container-type: inline-size; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.dash-hero-media, .dash-hero-media img { display: block; width: 100%; }
+.dash-hero-media img { height: auto; aspect-ratio: 2400 / 1340; }
 .dash-hero-text { position: absolute; top: 24px; left: 26px; max-width: 31%; }
 .dash-hero-text h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -.01em; color: var(--text); }
 .dash-hero-text p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--text-2); }
@@ -747,15 +745,6 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .fav-card-actions button { border: none; background: none; color: var(--primary); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; }
 .fav-card-actions button.danger { color: var(--danger); }
 
-/* ---------- Intelligence export menu ---------- */
-.intel-export .menu-btn { gap: 6px; }
-.intel-export .menu-btn .icon { width: 15px; height: 15px; flex: none; }
-.intel-export .menu-btn .side-section-caret { width: 14px; height: 14px; margin-left: 0; }
-.intel-export .menu-btn[aria-expanded="true"] .side-section-caret { transform: rotate(180deg); }
-.intel-export .menu-items { min-width: 230px; }
-.menu-label { padding: 7px 12px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
-.menu-items a:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
 /* ---------- All evaluations ---------- */
 .evals-page { max-width: 1180px; margin: 0 auto; padding: 24px 24px 64px; display: flex; flex-direction: column; gap: 14px; }
@@ -835,3 +824,20 @@ dialog.dlg-medium { width: min(720px, 94vw); }
 .kb-sensitive { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); vertical-align: middle; }
 @media (max-width: 640px) { .kb-add-grid { grid-template-columns: minmax(0, 1fr); } .kb-add-grid input { font-size: 16px; } }
 @media (prefers-reduced-motion: reduce) { .run-mode-option { transition: none; } }
+
+/* ---------- item downloads (Word / PDF / Excel beside every View) ---------- */
+.item-downloads { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; }
+.item-downloads a { display: inline-flex; align-items: center; min-height: 26px; padding: 2px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: var(--primary); text-decoration: none; transition: background .15s; }
+.item-downloads a:hover { background: var(--primary-soft); color: var(--primary-hover); }
+.item-downloads a:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.dialog-downloads { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; }
+.dialog-downloads:not(:empty)::before { content: 'Download'; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.dis-modal-links { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.item-view { border: none; background: none; padding: 2px 7px; min-height: 26px; border-radius: 6px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--text); cursor: pointer; }
+.item-view:hover { background: var(--surface-2); }
+.item-view:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.minutes-tools { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; padding-left: 30px; }
+.minutes-tool { display: inline-flex; align-items: center; gap: 2px; }
+.minutes-tool-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.decision-tab-tools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .item-downloads a { transition: none; } }

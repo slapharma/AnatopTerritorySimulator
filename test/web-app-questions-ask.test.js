@@ -72,6 +72,8 @@ function loadHelpers({ questions = [], messages = [] } = {}) {
   const ctx = {
     ALL, AGENT_LABEL, MODE_LABEL, QUESTION_STATUS_LABEL, LENGTH_LABELS: [],
     escapeHtml, agentChipHtml,
+    // Word / PDF / Excel links beside each item (openItemModal and its route are tested elsewhere).
+    itemDownloadsHtml: (kind, key) => `<span class="item-downloads" data-kind="${kind}" data-key="${key}"></span>`, openItemModal: () => {}, GRID_MODES: ['opening', 'round2', 'round3', 'crosstalk'],
     state: { questionFilter: 'all', session: { id: 39, questions: questions.slice(), messages: messages.slice() } },
     document: { createElement: () => ({}) },
     $: (sel, root) => (root ? root.querySelector(sel) : (elements[sel] || null)),

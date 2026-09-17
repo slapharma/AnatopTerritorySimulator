@@ -1136,11 +1136,120 @@
     $('#dlg-message').showModal();
   }
 
-  // The token/cost breakdown lives on the Admin page now, across all
-  // sessions. What stays here is the header meter for the open session.
+  // ---------------- LLM usage ----------------
+  // Header cost chip. The transcript's own message costs miss every model call
+  // that writes no message (answered-check, meeting minutes, interim reports,
+  // failed turns), so the chip shows the server's usage total (src/usage.js)
+  // and only falls back to the message sum until that first arrives.
+  let usageSeq = 0;
   function renderCost() {
-    const total = state.session.messages.reduce((a, m) => a + (m.cost_usd || 0), 0);
-    $('#cost-meter').textContent = money(total);
+    const s = state.session;
+    if (!s) return;
+    const cached = state.usage && String(state.usage.session_id) === String(s.id) ? state.usage : null;
+    $('#cost-meter').textContent = money(cached ? cached.total.cost_usd : s.messages.reduce((a, m) => a + (m.cost_usd || 0), 0));
+    // The usage endpoint is admin-only, like the chip.
+    if (isAdminUser()) refreshUsage().catch(() => {});
+  }
+  // Latest request wins: a slow reply for an earlier session or an earlier
+  // turn must not overwrite a newer one.
+  async function refreshUsage() {
+    const s = state.session;
+    if (!s) return null;
+    const seq = ++usageSeq;
+    const data = await api.get(`/api/sessions/${s.id}/usage`);
+    if (seq !== usageSeq || !state.session || String(state.session.id) !== String(s.id)) return null;
+    state.usage = { ...data, session_id: s.id };
+    $('#cost-meter').textContent = money(data.total.cost_usd);
+    // Whichever refresh lands last redraws an open modal, so a turn finishing
+    // while it is open cannot strand it on older figures or "Loading usage…".
+    if ($('#dlg-usage').open) renderUsageModal(state.usage);
+    return state.usage;
+  }
+
+  const fmtInt = (n) => (Number(n) || 0).toLocaleString();
+  const usageAgentLabel = (key) => (key === 'unknown' ? 'Unknown' : AGENT_LABEL[key] || key);
+  function usageBar(cost, total) {
+    const pct = total > 0 ? (cost / total) * 100 : 0;
+    return `<div class="usage-share"><span class="usage-bar" aria-hidden="true"><span style="width:${Math.min(100, pct).toFixed(1)}%"></span></span><span class="usage-pct">${pct >= 0.1 || pct === 0 ? pct.toFixed(1) : '&lt;0.1'}%</span></div>`;
+  }
+  const usageCallsCell = (g) => `${fmtInt(g.calls)}${g.failed_calls ? ` <span class="usage-failed">${fmtInt(g.failed_calls)} failed</span>` : ''}`;
+  // One breakdown table: name, calls, tokens, cost, share of the session total.
+  // childRows, when given, lists indented sub-rows under each row.
+  function usageGroupTable(caption, nameHeader, rows, total, nameOf, childRows) {
+    const row = (g, cls, name) => `<tr class="${cls}">
+        <th scope="row">${name}</th>
+        <td class="num">${usageCallsCell(g)}</td>
+        <td class="num">${fmtInt(g.input_tokens)} / ${fmtInt(g.output_tokens)}</td>
+        <td class="num">${money(Number(g.cost_usd) || 0)}</td>
+        <td>${usageBar(Number(g.cost_usd) || 0, total)}</td></tr>`;
+    const body = rows.map((g) => row(g, g.calls ? 'usage-row' : 'usage-row usage-zero', nameOf(g))
+      + (childRows ? childRows(g).map((f) => row(f, 'usage-sub', escapeHtml(f.label))).join('') : '')).join('');
+    return `<section class="usage-section"><h3>${escapeHtml(caption)}</h3><div class="usage-scroll"><table class="usage-table">
+      <thead><tr><th scope="col">${escapeHtml(nameHeader)}</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Tokens in / out</th><th scope="col" class="num">Cost</th><th scope="col">Share</th></tr></thead>
+      <tbody>${body || '<tr><td colspan="5" class="muted">No model calls yet.</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  function renderUsageModal(u) {
+    const t = u.total;
+    const total = t.cost_usd;
+    // Every named use is listed, even at zero, so "nothing spent on it" reads
+    // as a fact rather than a missing row. "Other" only appears when used.
+    const byKey = new Map(u.by_category.map((g) => [g.key, g]));
+    const categories = u.categories
+      .map((c) => byKey.get(c.key) || { key: c.key, label: c.label, cost_usd: 0, calls: 0, failed_calls: 0, input_tokens: 0, output_tokens: 0, features: [] })
+      .filter((g) => g.key !== 'other' || g.calls)
+      .sort((a, b) => b.cost_usd - a.cost_usd || b.calls - a.calls);
+    const tiles = [
+      ['Total cost', money(total)],
+      ['Model calls', usageCallsCell(t)],
+      ['API requests', fmtInt(t.requests)],
+      ['Tokens in / out', `${fmtInt(t.input_tokens)} / ${fmtInt(t.output_tokens)}`],
+      ['Web searches', fmtInt(t.searches)],
+    ].map(([label, value]) => `<div class="usage-tile"><div class="usage-tile-label">${label}</div><div class="usage-tile-value">${value}</div></div>`).join('');
+    const calls = u.calls.map((c) => `<tr${c.error ? ' class="usage-error"' : ''}>
+      <td class="nowrap">${escapeHtml(fmtTime(c.created_at))}</td>
+      <td>${escapeHtml(c.category_label)}</td>
+      <td>${escapeHtml(c.feature_label)}</td>
+      <td>${escapeHtml(usageAgentLabel(c.speaker || 'unknown'))}</td>
+      <td><code>${escapeHtml(c.model)}</code></td>
+      <td class="num">${fmtInt(c.input_tokens)} / ${fmtInt(c.output_tokens)}</td>
+      <td class="num">${money(Number(c.cost_usd) || 0)}</td>
+      <td>${c.error ? `<span class="usage-failed" title="${escapeHtml(c.error)}">Failed</span>` : 'OK'}${c.source === 'transcript' ? ' <span class="muted" title="Recorded before per-call tracking; read from the transcript">· transcript</span>' : ''}</td></tr>`).join('');
+    const notes = [
+      u.ledger_available ? '' : 'Per-call tracking is not enabled on this database yet (the <code>llm_calls</code> table is missing), so these figures come from transcript messages and reports only. Answered-checks, meeting minutes and failed turns are not included.',
+      u.ledger_available && u.legacy_calls ? `${fmtInt(u.legacy_calls)} call(s) ran before per-call tracking and are read from the transcript, so their model and request count may be missing.` : '',
+      'Costs are what OpenRouter reported for each request. £ figures use the configured exchange rate and are estimates.',
+    ].filter(Boolean).map((n) => `<p class="muted">${n}</p>`).join('');
+    $('#usage-modal-body').innerHTML = `
+      <div class="usage-tiles">${tiles}</div>
+      ${usageGroupTable('By use', 'Use', categories, total, (g) => escapeHtml(g.label), (g) => (g.features.length > 1 ? g.features : []))}
+      <div class="usage-pair">
+        ${usageGroupTable('By model', 'Model', u.by_model, total, (g) => `<code>${escapeHtml(g.label)}</code>`)}
+        ${usageGroupTable('By agent', 'Agent', u.by_agent, total, (g) => escapeHtml(usageAgentLabel(g.key)))}
+      </div>
+      <section class="usage-section"><h3>Calls${u.call_count > u.calls.length ? ` <span class="muted">(latest ${fmtInt(u.calls.length)} of ${fmtInt(u.call_count)})</span>` : ''}</h3>
+        <div class="usage-scroll usage-calls"><table class="usage-table">
+          <thead><tr><th scope="col">When</th><th scope="col">Use</th><th scope="col">Feature</th><th scope="col">Agent</th><th scope="col">Model</th><th scope="col" class="num">Tokens in / out</th><th scope="col" class="num">Cost</th><th scope="col">Status</th></tr></thead>
+          <tbody>${calls || '<tr><td colspan="8" class="muted">No model calls yet.</td></tr>'}</tbody>
+        </table></div>
+      </section>
+      ${notes}`;
+  }
+
+  async function openUsageModal() {
+    const s = state.session;
+    if (!s) return;
+    const dlg = $('#dlg-usage');
+    $('#usage-modal-title').textContent = `LLM usage and cost · ${s.title}`;
+    const cached = state.usage && String(state.usage.session_id) === String(s.id) ? state.usage : null;
+    if (cached) renderUsageModal(cached);
+    else $('#usage-modal-body').innerHTML = '<p class="muted">Loading usage…</p>';
+    if (!dlg.open) dlg.showModal();
+    try {
+      await refreshUsage();
+    } catch (e) {
+      if (!cached && dlg.open) $('#usage-modal-body').innerHTML = `<p class="usage-failed" role="alert">Could not load usage: ${escapeHtml(e.message)}</p>`;
+    }
   }
 
   // Marks each Simulation Process step as "ran" once at least one message exists for its mode.
@@ -1418,6 +1527,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       const r = await api.send('POST', `/api/sessions/${id}/questions/check`, {});
       if (!state.session || String(state.session.id) !== String(id)) return;
       applyQuestionResponse(r);
+      renderCost();
       if (r.updated) toast(`${r.updated} question(s) found answered in the transcript`);
       else if (!quiet) toast('None of the open questions has been answered yet.');
     } catch (e) {
@@ -1676,7 +1786,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       state.session.meeting_minutes = [...(state.session.meeting_minutes || []), row];
       renderMinutes(); renderIntelligence();
       toast('Meeting minutes ready');
-    } catch (e) { toast(`Could not write meeting minutes: ${e.message}`); }
+    } catch (e) { toast(`Could not write meeting minutes: ${e.message}`); } finally { renderCost(); }
   }
 
   function setRunning(on) {
@@ -2231,7 +2341,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       renderReports();
       showSessionPane('reports');
       toast(`${KIND_LABEL[kind]} generated.`);
-    } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); }
+    } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); renderCost(); }
   }
 
   // ---------------- events ----------------
@@ -2443,6 +2553,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
     $$('#filter-chips .chip').forEach((c) => c.addEventListener('click', () => { state.filterSpeaker = c.dataset.speaker; applyFilter(); }));
 
+    $('#cost-meter').addEventListener('click', () => openUsageModal());
     $('#btn-custom').addEventListener('click', () => { $('#dlg-custom').showModal(); $('#custom-instruction').focus(); });
     $('#dlg-custom form').addEventListener('submit', (e) => {
       if (e.submitter && e.submitter.value === 'run') {
@@ -2462,7 +2573,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         if (!picks.length) { e.preventDefault(); return toast('Pick at least one agent'); }
         const note = $('#dis-modal-instruction').value.trim();
         const instruction = `The moderator wants to discuss ⚠ DISAGREEMENT #${d.n} — ${d.topic} (see the full transcript above for both positions).${note ? ` ${note}` : ' State your current position and whether anything changes it.'}`;
-        setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction }))), 0);
+        // disagreement_n only classifies the cost as disagreement resolution.
+        setTimeout(() => runSequence(picks.map((a) => ({ speaker: a, mode: 'custom', instruction, disagreement_n: d.n }))), 0);
       } else if (e.submitter && e.submitter.value === 'autopilot') {
         setTimeout(() => openAutopilotDialog({ scope: 'disagreement', disagreementN: d.n, disagreementTopic: d.topic }), 0);
       }

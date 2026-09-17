@@ -237,6 +237,35 @@ CREATE TABLE IF NOT EXISTS agent_questions (
 );
 CREATE INDEX IF NOT EXISTS agent_questions_session_id_idx ON agent_questions (session_id);
 
+-- ------------------------------------------------------------ llm_calls
+-- One row per model call (one agents.runTurn), successful or failed, written
+-- by every caller in src/app.js. It is the only record of calls whose result
+-- is stored nowhere else or stored without its cost: the questions
+-- answered-check, meeting minutes, and failed turns. category and feature are
+-- src/usage.js classify() keys. message_id and report_id have no foreign key
+-- on purpose: deleting a message or report must not erase what it cost.
+-- requests is how many HTTP requests the turn made (one per tool round).
+CREATE TABLE IF NOT EXISTS llm_calls (
+  id            bigserial   PRIMARY KEY,
+  session_id    bigint      NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  category      text        NOT NULL,
+  feature       text        NOT NULL,
+  speaker       text,
+  model         text,
+  message_id    bigint,
+  report_id     bigint,
+  requests      integer     NOT NULL DEFAULT 0,
+  input_tokens  integer     NOT NULL DEFAULT 0,
+  output_tokens integer     NOT NULL DEFAULT 0,
+  searches      integer     NOT NULL DEFAULT 0,
+  cost_usd      double precision NOT NULL DEFAULT 0,
+  duration_ms   integer,
+  error         text,
+  created_by    text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS llm_calls_session_id_idx ON llm_calls (session_id);
+
 -- ============================================================ ACCESS ======
 --
 -- The application connects as a dedicated login role, NOT as the table owner
@@ -277,7 +306,7 @@ DECLARE
 BEGIN
   FOREACH t IN ARRAY ARRAY[
     'agent_questions', 'agents', 'app_defaults', 'autopilot_runs', 'disagreements', 'knowledge_items',
-    'meeting_minutes', 'messages', 'report_emails', 'reports', 'sessions',
+    'llm_calls', 'meeting_minutes', 'messages', 'report_emails', 'reports', 'sessions',
     'sources', 'users'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);

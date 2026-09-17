@@ -10,6 +10,7 @@ const { runTurn } = require('./agents');
 const exporter = require('./export');
 const email = require('./email');
 const questions = require('./questions');
+const usage = require('./usage');
 const { sendMeetingMinutesEmail } = email;
 const auth = require('./auth');
 const { authenticate, requireAdmin, hashPassword } = auth;
@@ -487,6 +488,44 @@ async function extractDisagreements(sessionId, messageId, text) {
 // The panel agents only (prompts.AGENTS also carries the moderator assistant).
 const panelAgents = () => Object.fromEntries(prompts.AGENT_ORDER.map((k) => [k, prompts.AGENTS[k]]));
 const agentLabel = (key) => (key === 'moderator' ? 'the Moderator' : (prompts.AGENTS[key] ? prompts.AGENTS[key].label : key));
+
+// One llm_calls row per runTurn, success or failure (src/usage.js). `outcome`
+// is runTurn's result, or the error it threw, which carries the usage spent
+// before it failed. Never throws: losing a usage row must not fail the turn,
+// and the row's absence only means summarise() falls back to the message's own
+// cost figures.
+async function recordLlmCall(req, sessionId, { classification, speaker, requestedModel, outcome, error, message_id, report_id, started }) {
+  const u = (outcome && outcome.usage) || {};
+  try {
+    await db.addLlmCall(sessionId, {
+      ...classification, speaker,
+      model: (outcome && outcome.model) || requestedModel || null,
+      message_id: message_id ?? null, report_id: report_id ?? null,
+      requests: u.requests, input_tokens: u.input_tokens, output_tokens: u.output_tokens, searches: u.searches,
+      cost_usd: Number((outcome && outcome.cost_usd) || 0),
+      duration_ms: started ? Date.now() - started : null,
+      error: error ? String(error).slice(0, 1000) : null,
+      created_by: (req.user && req.user.email) || null,
+    });
+  } catch (e) {
+    console.error(`[llm_calls] session ${sessionId}: could not record ${classification.feature} usage:`, e.message);
+  }
+}
+
+// The breakdown behind the header cost chip. Admin-only, like the chip itself.
+app.get('/api/sessions/:id/usage', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const session = await db.fullSession(id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const calls = await db.listLlmCalls(id);
+    res.json({
+      ...usage.summarise({ calls, messages: session.messages, reports: session.reports, autopilotRuns: session.autopilot_runs }),
+      categories: usage.CATEGORIES,
+      usd_to_gbp: config.USD_TO_GBP,
+    });
+  } catch (e) { next(e); }
+});
 // A non-numeric id would reach Postgres as an invalid bigint and come back as a 500.
 const questionFor = (qid, sessionId) => (/^\d+$/.test(String(qid)) ? db.getQuestion(String(qid), sessionId) : Promise.resolve(null));
 
@@ -609,10 +648,20 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
     if (!open.length) return res.json({ updated: 0, questions: session.questions || [], meeting_minutes: session.meeting_minutes || [] });
     const seqOf = new Map(session.messages.map((m) => [String(m.id), m.seq]));
     const list = open.map((x) => `- id ${x.id} · asked by ${agentLabel(x.asker)} in message [${seqOf.get(String(x.message_id)) ?? '?'}] to ${x.addressees.split(',').map(agentLabel).join(' and ')}: ${x.text.replace(/\s+/g, ' ')}`).join('\n');
-    const result = await runTurn({
-      inputs: session.inputs, agentKey: 'moderator', mode: 'questions_check', instruction: list,
-      messages: session.messages, model: session.model || config.MODEL, onEvent: () => {},
-    });
+    const checkModel = session.model || config.MODEL;
+    const checkStarted = Date.now();
+    const checkCall = { classification: usage.classify({ mode: 'questions_check' }), speaker: 'moderator', requestedModel: checkModel, started: checkStarted };
+    let result;
+    try {
+      result = await runTurn({
+        inputs: session.inputs, agentKey: 'moderator', mode: 'questions_check', instruction: list,
+        messages: session.messages, model: checkModel, onEvent: () => {},
+      });
+    } catch (err) {
+      await recordLlmCall(req, id, { ...checkCall, outcome: err, error: err.message });
+      throw err;
+    }
+    await recordLlmCall(req, id, { ...checkCall, outcome: result });
     const openIds = new Set(open.map((x) => String(x.id)));
     const bySeq = new Map(session.messages.map((m) => [Number(m.seq), m]));
     const claims = questions.parseAnsweredCheck(result.text);
@@ -777,8 +826,22 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   else send('start', { report: true, kind: req.body.kind, depth: req.body.depth });
   const searches = [];
   const turnStarted = Date.now();
+  // disagreement_n on a custom meeting is classification only: it marks the
+  // "Discuss" action on a disagreement, and changes nothing in the prompt.
+  const turnCall = {
+    classification: usage.classify({
+      mode, question_id: req.body.question_id, disagreement_n: req.body.disagreement_n,
+      report_kind: req.body.kind === 'final' ? 'final' : 'interim',
+    }),
+    speaker, requestedModel: session.model || config.MODEL, started: turnStarted,
+  };
+  // runTurn's result once it has one: a failure after that point (saving the
+  // answer, say) still spent the whole turn, so the catch records that figure.
+  let result = null;
+  let callRecorded = false;
+  const recordTurn = (fields) => { callRecorded = true; return recordLlmCall(req, id, { ...turnCall, ...fields }); };
   try {
-    const result = await runTurn({
+    result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
       disagreements: session.disagreements,
       model: session.model || config.MODEL,
@@ -805,6 +868,9 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
         kind, depth, text, model: result.model, cost_usd: result.cost_usd,
         created_by: (req.user && req.user.email) || null,
       });
+      // Recorded against the report, not the Final report's transcript copy:
+      // summarise() skips a message whose report_id is already accounted for.
+      await recordTurn({ outcome: result, report_id: report.id });
       // Backward compat: a Final report still leaves a transcript message and
       // mirrors to sessions.decision_text, so old sessions/exports render unchanged.
       let finalMessage = null;
@@ -828,6 +894,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
     // leave them pointing at nothing, so discard this result instead.
     if (!(await db.getMessage(msg.id))) {
       console.warn(`[turn ${msg.id}] ${speaker}/${mode} finished after its row was cleared; result discarded`);
+      await recordTurn({ outcome: result, message_id: msg.id, error: 'Cleared before it finished; answer discarded' });
       send('error', { message_id: msg.id, message: 'This turn was cleared before it finished, so its answer was discarded.', code: 'CLEARED' });
       return;
     }
@@ -842,6 +909,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
       searches: u.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
     });
+    await recordTurn({ outcome: result, message_id: msg.id });
     const disagreements = await extractDisagreements(id, msg.id, text);
     // A question that cannot be stored must not fail a turn that already has
     // its answer saved: log it and carry on.
@@ -864,6 +932,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
     console.error(`[turn ${msg ? msg.id : 'report'}] ${speaker}/${mode} failed:`, message);
+    if (!callRecorded) await recordTurn({ outcome: result || err, message_id: msg ? msg.id : null, error: message });
     if (msg) {
       await db.updateMessage(msg.id, {
         text: '', content_json: null, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
@@ -953,10 +1022,19 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
     const rawAnchor = req.body.anchor_message_id;
     const anchorNum = typeof rawAnchor === 'string' && /^\d+$/.test(rawAnchor) ? Number(rawAnchor) : rawAnchor;
     const anchorMessageId = Number.isSafeInteger(anchorNum) ? anchorNum : null;
-    const result = await runTurn({
-      inputs: session.inputs, agentKey: 'moderator', mode: 'meeting_minutes', instruction: label,
-      messages: session.messages, model: session.model || config.MODEL, onEvent: () => {},
-    });
+    const minutesModel = session.model || config.MODEL;
+    const minutesCall = { classification: usage.classify({ mode: 'meeting_minutes' }), speaker: 'moderator', requestedModel: minutesModel, started: Date.now() };
+    let result;
+    try {
+      result = await runTurn({
+        inputs: session.inputs, agentKey: 'moderator', mode: 'meeting_minutes', instruction: label,
+        messages: session.messages, model: minutesModel, onEvent: () => {},
+      });
+    } catch (err) {
+      await recordLlmCall(req, id, { ...minutesCall, outcome: err, error: err.message });
+      throw err;
+    }
+    await recordLlmCall(req, id, { ...minutesCall, outcome: result });
     const row = await db.addMeetingMinutes(id, { round, label, text: result.text, anchor_message_id: anchorMessageId });
     const recipient = (req.user && req.user.email) || process.env.MODERATOR_EMAIL || null;
     sendMeetingMinutesEmail(session, row, recipient).catch((e) => console.error('[meeting-minutes] email failed:', e.message));

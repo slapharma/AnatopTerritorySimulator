@@ -173,8 +173,23 @@ async function runTool(call, counters, onEvent) {
 /**
  * Runs one turn. Returns { text, trace, usage, model, stop_reason, cost_usd }.
  * onEvent(name, payload): 'status' {text}, 'text' {delta}, 'search' {query}
+ *
+ * A turn that throws may already have paid for several requests (tool rounds,
+ * a truncated answer, a timeout). The error then carries what was spent up to
+ * that point as err.usage, err.model and err.cost_usd, so the usage ledger
+ * records failures at their real cost rather than at zero.
  */
-async function runTurn({ inputs, agentKey, mode, instruction, messages, disagreements, onEvent, model: requestedModel, max_chars, stance, disagreementTopic, question, report }) {
+async function runTurn(args) {
+  const spent = {};
+  try {
+    return await turn(args, spent);
+  } catch (err) {
+    if (spent.snapshot && err && typeof err === 'object') Object.assign(err, spent.snapshot());
+    throw err;
+  }
+}
+
+async function turn({ inputs, agentKey, mode, instruction, messages, disagreements, onEvent, model: requestedModel, max_chars, stance, disagreementTopic, question, report }, spent) {
   apiKey();
   const [systemContent, abilities] = await Promise.all([systemPrompt(agentKey, inputs), agentAbilities(agentKey)]);
   const tools = search.TOOLS.filter((t) =>
@@ -207,6 +222,12 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, disagree
     model = r.model || model;
     finish = r.finish;
   };
+  const costUsd = () => {
+    const p = config.PRICES;
+    return usage.cost || (usage.input_tokens * p.input_per_mtok + usage.output_tokens * p.output_per_mtok) / 1e6 + counters.searches * p.web_search_per_1000 / 1000;
+  };
+  const usageOut = () => ({ ...usage, searches: counters.searches, opens: counters.opens });
+  spent.snapshot = () => ({ usage: usageOut(), model, cost_usd: costUsd() });
 
   // Only the last round's text is kept as the answer — earlier rounds are the
   // model narrating what it's about to search for, not its conclusion.
@@ -286,9 +307,7 @@ async function runTurn({ inputs, agentKey, mode, instruction, messages, disagree
     text += '\n\n**[Response truncated — the model ran out of output tokens. Treat this as incomplete, not a finished answer.]**';
   }
 
-  const p = config.PRICES;
-  const cost_usd = usage.cost || (usage.input_tokens * p.input_per_mtok + usage.output_tokens * p.output_per_mtok) / 1e6 + counters.searches * p.web_search_per_1000 / 1000;
-  return { text, trace, usage: { ...usage, searches: counters.searches, opens: counters.opens }, model, stop_reason: finish, cost_usd };
+  return { text, trace, usage: usageOut(), model, stop_reason: finish, cost_usd: costUsd() };
 }
 
 module.exports = { runTurn };

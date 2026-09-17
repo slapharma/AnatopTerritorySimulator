@@ -6,6 +6,12 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { CATEGORIES, FEATURE_LABEL, classify, summarise } = require('../src/usage');
 
+describe('FEATURE_LABEL', () => {
+  it('has a human label for the question_answer feature ("Ask agents to answer")', () => {
+    assert.equal(FEATURE_LABEL.question_answer, 'Agents asked to answer');
+  });
+});
+
 describe('classify', () => {
   it('classifies the questions answered-check', () => {
     assert.deepEqual(classify({ mode: 'questions_check' }), { category: 'question_resolution', feature: 'questions_check' });
@@ -89,6 +95,25 @@ describe('classify', () => {
 
     it('treats disagreement_n 0 on a custom meeting as present (boundary)', () => {
       assert.deepEqual(classify({ mode: 'custom', disagreement_n: 0 }), { category: 'disagreement_resolution', feature: 'disagreement_discussion' });
+    });
+
+    it('classifies a custom meeting scoped to a question (Ask agents to answer) as question_resolution/question_answer', () => {
+      assert.deepEqual(classify({ mode: 'custom', question_id: '9' }), { category: 'question_resolution', feature: 'question_answer' });
+    });
+
+    it('treats question_id 0 on a custom meeting as present (boundary: falsy but not empty)', () => {
+      assert.deepEqual(classify({ mode: 'custom', question_id: 0 }), { category: 'question_resolution', feature: 'question_answer' });
+    });
+
+    it('does not treat an empty-string question_id on a custom meeting as present', () => {
+      assert.deepEqual(classify({ mode: 'custom', question_id: '' }), { category: 'agent_presentation', feature: 'custom' });
+    });
+
+    it('still classifies a custom meeting as disagreement_discussion when both disagreement_n and question_id are present (disagreement checked first)', () => {
+      assert.deepEqual(
+        classify({ mode: 'custom', disagreement_n: 4, question_id: '9' }),
+        { category: 'disagreement_resolution', feature: 'disagreement_discussion' },
+      );
     });
   });
 

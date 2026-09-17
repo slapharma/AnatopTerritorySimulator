@@ -368,6 +368,10 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
     if (max_chars && max_chars !== 'as_required') roundText += `\n\nHard limit: ${max_chars} characters.`;
   } else if (mode === 'autopilot') {
     roundText = r.autopilot;
+    // Autopilot is started from the Custom meeting dialog, whose agenda item
+    // gives the debate its subject; without one the panel had nothing to debate
+    // but its own last positions.
+    if (instruction) roundText += `\n\nAGENDA ITEM set by the moderator for this discussion:\n${instruction}\nKeep every cycle on this item.`;
     if (disagreementTopic) roundText += `\n\nThis discussion is scoped to Disagreement — ${disagreementTopic}. Your POSITION line's sentence must name this topic.`;
     if (max_chars && max_chars !== 'as_required') roundText += `\n\nHard limit: ${max_chars} characters.`;
     if (stance) roundText += `\n\n${stance}`;

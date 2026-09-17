@@ -26,7 +26,7 @@ const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label]
 const FEATURE_LABEL = {
   opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk',
   reply: 'Reply', custom: 'Custom meeting', dive_deeper: 'Dive Deeper',
-  question_discussion: 'Question discussion', questions_check: 'Answered check',
+  question_discussion: 'Question discussion', question_answer: 'Agents asked to answer', questions_check: 'Answered check',
   disagreement_discussion: 'Disagreement discussion', disagreement_autopilot: 'Disagreement autopilot',
   autopilot: 'Autopilot', decision: 'Decision output',
   report_interim: 'Interim report', report_final: 'Final report', meeting_minutes: 'Meeting minutes',
@@ -54,6 +54,8 @@ function classify({ mode, question_id, disagreement_n, autopilot_scope, report_k
   if (PRESENTATION_MODES.has(mode)) {
     // "Discuss" on a disagreement runs a custom meeting about it.
     if (mode === 'custom' && has(disagreement_n)) return { category: 'disagreement_resolution', feature: 'disagreement_discussion' };
+    // "Ask agents to answer" on an Agent Questions card runs a custom meeting on it.
+    if (mode === 'custom' && has(question_id)) return { category: 'question_resolution', feature: 'question_answer' };
     return { category: 'agent_presentation', feature: mode };
   }
   return { category: 'other', feature: mode || 'unknown' };

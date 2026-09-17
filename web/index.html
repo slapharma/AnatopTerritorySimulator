@@ -17,7 +17,10 @@
         </button>
         <button type="button" id="btn-sidebar-collapse" class="sidebar-collapse-btn" title="Collapse sidebar for full screen width" aria-label="Collapse sidebar"><span data-icon="panelLeft"></span></button>
       </div>
-      <button id="btn-new" class="btn btn-accent btn-block side-new" type="button"><span data-icon="plus"></span>New evaluation</button>
+      <div class="side-actions">
+        <button id="btn-new" class="btn btn-accent btn-block side-new" type="button"><span data-icon="plus"></span>New evaluation</button>
+        <button id="btn-all-evals" class="btn btn-primary btn-block side-new" type="button"><span data-icon="list"></span>View all evaluations</button>
+      </div>
     </div>
 
     <!-- Every control that advances the simulation, in one panel. Keeps
@@ -42,8 +45,7 @@
         <button class="btn btn-sm btn-block btn-resume" id="btn-resume-meeting" type="button" hidden></button>
         <div class="side-subhead" id="other-meetings-label">Other meetings</div>
         <div class="side-nav" role="group" aria-labelledby="other-meetings-label">
-          <button class="side-nav-item" id="btn-autopilot" type="button" title="Let the panel debate over several cycles unaided, within limits you set"><span data-icon="repeat"></span>Autopilot…</button>
-          <button class="side-nav-item" id="btn-custom" type="button" title="Table your own agenda item for the panel"><span data-icon="pencil"></span>Custom meeting…</button>
+          <button class="side-nav-item" id="btn-custom" type="button" title="Table your own agenda item for the panel, once or on autopilot over several cycles"><span data-icon="pencil"></span>Custom meeting…</button>
         </div>
         <button class="btn btn-sm btn-block btn-danger-ghost" id="btn-stop" type="button" hidden>Stop after this turn</button>
       </div>
@@ -60,11 +62,12 @@
         <button type="button" class="side-nav-item" data-pane="transcript"><span data-icon="chat"></span>Meeting transcript</button>
         <div class="side-subhead">Evidence</div>
         <button type="button" class="side-nav-item" data-pane="sources"><span data-icon="link"></span>Sources <span class="count" id="count-sources">0</span></button>
-        <button type="button" class="side-nav-item" data-pane="disagreements"><span data-icon="alert"></span>Disagreements <span class="count" id="count-dis">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="knowledgebase"><span data-icon="book"></span>Knowledgebase <span class="count" id="count-knowledge">0</span></button>
         <div class="side-subhead">Panel</div>
         <button type="button" class="side-nav-item" data-pane="intelligence"><span data-icon="notes"></span>Agent notes</button>
         <button type="button" class="side-nav-item" data-pane="questions"><span data-icon="help"></span>Agent Questions <span class="count" id="count-questions">0</span></button>
         <button type="button" class="side-nav-item" data-pane="escalations"><span data-icon="flag"></span>Escalations <span class="count" id="count-escalations">0</span></button>
+        <button type="button" class="side-nav-item" data-pane="disagreements"><span data-icon="alert"></span>Disagreements <span class="count" id="count-dis">0</span></button>
         <div class="side-subhead">Outcome</div>
         <button type="button" class="side-nav-item" data-pane="decision"><span data-icon="check"></span>Decision &amp; reports <span class="count" id="count-reports">0</span></button>
         <button type="button" class="side-nav-item" data-pane="minutes"><span data-icon="clipboard"></span>Minutes <span class="count" id="count-minutes">0</span></button>
@@ -90,12 +93,11 @@
       </header>
       <div class="scroll">
         <div class="dashboard">
-          <!-- Filled by renderDashboard(): KPI strip, then the two big start/resume
-               tiles. User Guide, Agents and Admin are power buttons in every
-               view's header (renderPowerNav()), not tiles here. The saved evaluations are listed
-               on their own page, opened by the View all evaluations tile.
-               Each block is its own container and each renderer addresses its
-               own by id, so this order is set here and nowhere else. -->
+          <!-- Hero, onboarding callout, then the KPI strip filled by
+               renderDashboard(). Sized to fill the main column with no scroll.
+               Starting an evaluation and listing them all are the sidebar's
+               New evaluation and View all evaluations buttons; User Guide,
+               Agents and Admin are header power buttons (renderPowerNav()). -->
           <!-- Hero: the three agents at the table with the moderator's back to
                the camera. Static, so renderDashboard() never touches it. On a
                wide screen the heading sits on the empty wall at top left; once
@@ -151,7 +153,6 @@
           </section>
 
           <div id="dash-stats" class="stat-strip" aria-label="Portfolio summary"></div>
-          <div id="dash-actions" class="action-grid"></div>
         </div>
       </div>
     </section>
@@ -231,10 +232,11 @@
             <select id="intel-page-select">
               <option value="transcript">Meeting transcript</option>
               <option value="sources">Sources</option>
-              <option value="disagreements">Disagreements</option>
+              <option value="knowledgebase">Knowledgebase</option>
               <option value="intelligence">Agent notes</option>
               <option value="questions">Agent Questions</option>
               <option value="escalations">Escalations</option>
+              <option value="disagreements">Disagreements</option>
               <option value="decision">Decision &amp; reports</option>
               <option value="minutes">Minutes</option>
               <option value="favourites">Favourites</option>
@@ -287,6 +289,9 @@
             </div>
           </div>
           <div class="tab-body" id="tab-sources"></div>
+          <!-- Global, not per evaluation: the curated documents every agent is
+               told about at the start of each turn. Moved here from Admin. -->
+          <div class="tab-body" id="tab-knowledgebase" hidden></div>
           <div class="tab-body" id="tab-disagreements" hidden></div>
           <div class="tab-body" id="tab-questions" hidden></div>
           <div class="tab-body" id="tab-escalations" hidden></div>
@@ -342,18 +347,38 @@
   <iframe class="panel-frame" id="nav-frame" title="Reference content"></iframe>
 </aside>
 
-<!-- Custom round dialog -->
-<dialog id="dlg-custom">
+<!-- Custom meeting dialog. Also the only way into Autopilot: run the agenda
+     item once, or let the panel debate it over several cycles. The
+     disagreement dialog opens it preset to autopilot on that disagreement. -->
+<dialog id="dlg-custom" class="dlg-medium">
   <form method="dialog" class="dialog-form">
-    <h2>Custom meeting</h2>
-    <p class="muted">Table your own agenda item. It replaces the standard meeting brief; the evidence rules still apply.</p>
-    <label>Instruction<textarea id="custom-instruction" rows="5" placeholder="e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only."></textarea></label>
-    <fieldset class="agent-picks">
+    <h2 id="custom-title">Custom meeting</h2>
+    <p class="muted" id="custom-subtitle">Table your own agenda item. It replaces the standard meeting brief; the evidence rules still apply.</p>
+    <label>Agenda item<textarea id="custom-instruction" rows="4" placeholder="e.g. Assume the dossier includes a 12-month ICH stability package. Re-state your timeline and cost only."></textarea></label>
+    <fieldset class="agent-picks" id="custom-agents">
       <legend>Who responds, in order</legend>
       <label><input type="checkbox" value="regulatory" checked> Regulatory</label>
       <label><input type="checkbox" value="clinical" checked> Clinical</label>
       <label><input type="checkbox" value="commercial" checked> Commercial</label>
     </fieldset>
+    <fieldset class="run-mode" id="custom-run-mode">
+      <legend>How it runs</legend>
+      <label class="run-mode-option"><input type="radio" name="custom-mode" value="once" checked><span><strong>Once</strong><span class="muted">Each selected agent responds one time.</span></span></label>
+      <label class="run-mode-option"><input type="radio" name="custom-mode" value="autopilot"><span><strong>Autopilot</strong><span class="muted">The panel debates it over several cycles unaided, within the limits below.</span></span></label>
+    </fieldset>
+    <div class="autopilot-settings" id="custom-autopilot" hidden>
+      <label>Response length
+        <input type="range" id="autopilot-length" min="0" max="4" step="1" value="1">
+        <span class="range-label" id="autopilot-length-label"></span>
+      </label>
+      <label>Interactions (cycles)
+        <input type="range" id="autopilot-interactions" min="3" max="21" step="1" value="6">
+        <span class="range-label" id="autopilot-interactions-label"></span>
+      </label>
+      <label class="check-inline"><input type="checkbox" id="autopilot-stop-unanimous" checked> Stop when unanimous</label>
+      <label class="check-inline" id="autopilot-auto-resolve-row" hidden><input type="checkbox" id="autopilot-auto-resolve" checked> Auto-resolve this disagreement when unanimous</label>
+      <div id="autopilot-stances"></div>
+    </div>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Cancel</button>
       <button value="run" class="btn btn-primary" type="submit" id="btn-custom-run">Convene meeting</button>
@@ -401,35 +426,6 @@
     <div id="usage-modal-body" class="usage-body" aria-live="polite"></div>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Close</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- Autopilot dialog -->
-<dialog id="dlg-autopilot" class="dlg-wide">
-  <form method="dialog" class="dialog-form">
-    <h2>Autopilot</h2>
-    <p class="muted" id="autopilot-subtitle">Let the panel debate the point unaided. Set the terms of reference, then observe.</p>
-    <fieldset class="agent-picks">
-      <legend>Panel members</legend>
-      <label><input type="checkbox" value="regulatory" checked> Regulatory</label>
-      <label><input type="checkbox" value="clinical" checked> Clinical</label>
-      <label><input type="checkbox" value="commercial" checked> Commercial</label>
-    </fieldset>
-    <label>Response length
-      <input type="range" id="autopilot-length" min="0" max="4" step="1" value="1">
-      <span class="range-label" id="autopilot-length-label"></span>
-    </label>
-    <label>Interactions (cycles)
-      <input type="range" id="autopilot-interactions" min="3" max="21" step="1" value="6">
-      <span class="range-label" id="autopilot-interactions-label"></span>
-    </label>
-    <label class="check-inline"><input type="checkbox" id="autopilot-stop-unanimous" checked> Stop when unanimous</label>
-    <label class="check-inline" id="autopilot-auto-resolve-row" hidden><input type="checkbox" id="autopilot-auto-resolve" checked> Auto-resolve this disagreement when unanimous</label>
-    <div id="autopilot-stances"></div>
-    <div class="dialog-actions">
-      <button value="cancel" class="btn" type="submit">Cancel</button>
-      <button value="start" class="btn btn-primary" type="submit" id="btn-autopilot-start">Start autopilot</button>
     </div>
   </form>
 </dialog>

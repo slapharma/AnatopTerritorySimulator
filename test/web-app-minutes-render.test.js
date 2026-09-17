@@ -45,6 +45,10 @@ function loadRenderMinutes({ meetingMinutes = [], openMinutes } = {}) {
     state: { session: { meeting_minutes: meetingMinutes }, openMinutes },
     $: (sel, root) => (root ? null : (elements[sel] || null)),
     $$: () => [],
+    // "Approve and continue" names the next meeting on the agenda.
+    MODE_LABEL: { opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk' },
+    nextMeeting: (m) => ({ opening: 'round2', round2: 'round3', round3: 'crosstalk' }[m] || null),
+    startMeeting: () => {},
   };
   vm.createContext(ctx);
   vm.runInContext(`${src.slice(start, end)}\nthis.renderMinutes = renderMinutes;`, ctx);
@@ -126,6 +130,69 @@ describe('web/app.js renderMinutes', () => {
     ctx.renderMinutes();
 
     assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-back/);
+  });
+
+  it('an unapproved standard-meeting entry gets "Approve and continue" naming the next meeting on the agenda', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+
+    ctx.renderMinutes();
+
+    const html = ctx.elements['#tab-minutes'].innerHTML;
+    assert.match(html, /class="btn btn-sm btn-primary minutes-approve minutes-continue" data-next="round2"/);
+    assert.match(html, />Approve and continue</);
+  });
+
+  for (const [round, next] of [['opening', 'round2'], ['round2', 'round3'], ['round3', 'crosstalk']]) {
+    it(`names "${next}" as data-next for an unapproved "${round}" entry`, () => {
+      const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round, approved: false })] });
+
+      ctx.renderMinutes();
+
+      assert.match(ctx.elements['#tab-minutes'].innerHTML, new RegExp(`data-next="${next}"`));
+    });
+  }
+
+  it('a pending crosstalk entry (last standard meeting) gets no "Approve and continue" — nothing follows it', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'crosstalk', approved: false })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('an already-approved entry gets no "Approve and continue", even mid-agenda', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: true })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('a question-round entry gets no "Approve and continue"', () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'question', approved: false })] });
+
+    ctx.renderMinutes();
+
+    assert.doesNotMatch(ctx.elements['#tab-minutes'].innerHTML, /minutes-continue/);
+  });
+
+  it('clicking "Approve and continue" approves, then starts the next meeting named on the button', async () => {
+    const ctx = loadRenderMinutes({ meetingMinutes: [mm({ id: 1, round: 'opening', approved: false })] });
+    const started = [];
+    ctx.startMeeting = (mode) => started.push(mode);
+    ctx.api.send = async () => ({ approved: true });
+    const btn = {
+      dataset: { next: 'round2' }, disabled: false,
+      closest: () => ({ dataset: { id: '1' } }),
+      addEventListener(type, fn) { if (type === 'click') this._click = fn; },
+    };
+    ctx.$$ = (sel) => (sel === '#tab-minutes .minutes-approve' ? [btn] : []);
+
+    ctx.renderMinutes(); // wires btn._click
+    await btn._click();
+
+    assert.deepEqual(started, ['round2']);
+    assert.equal(ctx.state.session.meeting_minutes[0].approved, true);
   });
 
   it('marks a card open — expanded, no [hidden] on its detail — when its id is in state.openMinutes', () => {

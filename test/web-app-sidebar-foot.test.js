@@ -1,12 +1,11 @@
 'use strict';
-// init() builds #sidebar-foot from footLines: a "Default model <code>...</code>"
-// line (suppressed for a non-admin user, via document.body.classList
-// contains('non-admin')) and a "No API key" warning (suppressed when
-// state.config.has_api_key is true). Agents/Admin links used to live in this
-// foot as .navlink buttons; they moved to the header power buttons, so the
-// foot should never contain that markup any more. As in the other web/app.js
-// vm tests, the block is sliced out of init() by string markers and run in a
-// vm context against a fake $/document.body.classList/state.config.
+// init() builds #sidebar-foot from footLines. The "Default model" line was
+// removed from the sidebar (the New Evaluation form's picker shows it), so the
+// only line left is the "No API key" warning, suppressed when
+// state.config.has_api_key is true, for admins and non-admins alike. The foot
+// must never carry the old Agents/Admin .navlink markup either. As in the
+// other web/app.js vm tests, the block is sliced out of init() by string
+// markers and run in a vm context against a fake $/document.body.classList/state.config.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -25,7 +24,7 @@ class FakeFoot {
 
 function runFootLines({ nonAdmin = false, hasApiKey = true, model = 'gpt-5' } = {}) {
   const src = fs.readFileSync(WEB_APP_JS, 'utf8');
-  const start = src.indexOf('    // "Default" since the New Evaluation form can start a session on any of the');
+  const start = src.indexOf('    const footLines = [');
   const end = src.indexOf('    await loadSessions();', start);
   assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did the sidebar-foot block move?');
 
@@ -45,37 +44,24 @@ function runFootLines({ nonAdmin = false, hasApiKey = true, model = 'gpt-5' } = 
 }
 
 describe('web/app.js init — #sidebar-foot', () => {
-  it('shows only the default-model line for an admin user with an API key', () => {
-    const foot = runFootLines({ nonAdmin: false, hasApiKey: true, model: 'gpt-5' });
+  for (const nonAdmin of [false, true]) {
+    const who = nonAdmin ? 'a non-admin' : 'an admin';
 
-    assert.equal(foot.innerHTML, 'Default model <code>gpt-5</code>');
-    assert.equal(foot.hidden, false);
-    assert.equal(foot.innerHTML.includes('data-nav'), false);
-    assert.equal(foot.innerHTML.includes('navlink'), false);
-  });
+    it(`is empty and hidden for ${who} user with an API key: no default-model line`, () => {
+      const foot = runFootLines({ nonAdmin, hasApiKey: true, model: 'gpt-5' });
 
-  it('is empty and hidden for a non-admin user with an API key', () => {
-    const foot = runFootLines({ nonAdmin: true, hasApiKey: true });
+      assert.equal(foot.innerHTML, '');
+      assert.equal(foot.hidden, true);
+    });
 
-    assert.equal(foot.innerHTML, '');
-    assert.equal(foot.hidden, true);
-  });
+    it(`shows only the no-API-key warning for ${who} user with no API key`, () => {
+      const foot = runFootLines({ nonAdmin, hasApiKey: false, model: 'gpt-5' });
 
-  it('shows only the no-API-key warning for a non-admin user with no API key', () => {
-    const foot = runFootLines({ nonAdmin: true, hasApiKey: false });
-
-    assert.equal(foot.innerHTML, '<strong style="color:#B91C1C">No API key: add it to .env and restart</strong>');
-    assert.equal(foot.innerHTML.startsWith('<br>'), false);
-    assert.equal(foot.hidden, false);
-  });
-
-  it('joins the model line and the warning with a single <br> for an admin user with no API key', () => {
-    const foot = runFootLines({ nonAdmin: false, hasApiKey: false, model: 'gpt-5' });
-
-    assert.equal(
-      foot.innerHTML,
-      'Default model <code>gpt-5</code><br><strong style="color:#B91C1C">No API key: add it to .env and restart</strong>',
-    );
-    assert.equal(foot.hidden, false);
-  });
+      assert.equal(foot.innerHTML, '<strong style="color:#B91C1C">No API key: add it to .env and restart</strong>');
+      assert.equal(foot.innerHTML.includes('Default model'), false);
+      assert.equal(foot.innerHTML.includes('gpt-5'), false);
+      assert.equal(foot.innerHTML.includes('navlink'), false);
+      assert.equal(foot.hidden, false);
+    });
+  }
 });

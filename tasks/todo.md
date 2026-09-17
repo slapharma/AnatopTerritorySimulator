@@ -109,3 +109,19 @@ Escalations tab lists escalated questions.
 - code-reviewer: Decision/Favourites jump buttons, no tab access under 900px, stale status after a stopped discussion; all fixed and confirmed.
 - security-auditor: one Low (repeat PATCH with a discussion can add unlimited minutes entries), not fixed.
 - Not done: URL does not reflect the open Intelligence tab; Escape no longer leaves the page.
+
+## UI updates and feature refactor (2026-09-17)
+
+- [x] Restore CSS dropped by 569b150 (drawer, dialogs, usage modal, sources, disagreements, cost chip): Admin/Agents slide-over works again
+- [x] Remove "Default model" from the sidebar foot
+- [x] 100px space above New evaluation; blue "View all evaluations" button under it
+- [x] Remove the sidebar Autopilot button; Autopilot becomes a "How it runs" option inside Custom meeting (agenda item now reaches autopilot turns)
+- [x] Transcript agent headshots 36px -> 47px (+30%)
+- [x] Agent Questions: "Ask agents to answer…" (custom turn per picked agent, then the answered-check)
+- [x] "Mark answered" -> "Mark as Resolved" (sets resolved); "Escalate" -> "Escalate to Moderator"
+- [x] "Check for answers now" / "Rescan transcript" moved into the qn-filters bar
+- [x] Disagreements moved under Panel
+- [x] Evidence > Knowledgebase tab (moved from Admin), add-source form at top
+- [x] Dashboard: action tiles removed; hero fills the main column with no scroll
+- [x] Session sidebar fits the window with no scroll (horizontal meeting stepper, tighter rows; the 100px gap shrinks first on shorter windows). Checked at 1000, 860 and 760px tall
+- [x] Minutes: "Approve and continue" approves, then convenes the next meeting on the agenda

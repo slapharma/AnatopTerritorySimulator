@@ -118,32 +118,50 @@ function roundsSummaryLine(s) {
   return parts.length ? parts.join(', ') : 'none run yet';
 }
 
+// A cover page and one Markdown body: either a generated report or a single
+// Intelligence tab ({ title, markdown } from src/intel-export.js). The full
+// session record is the other path through toDocx/toPdf.
+function singleDoc(s, opts) {
+  if (opts.report) {
+    const r = opts.report;
+    return {
+      heading: `${KIND_LABEL[r.kind] || r.kind} report — ${DEPTH_LABEL[r.depth] || r.depth}`,
+      byline: r.created_by || 'unattributed',
+      markdown: r.text || '',
+      about: { title: 'About this report', text: `Session #${s.id} · ${s.title} · rounds run: ${roundsSummaryLine(s)} · model: ${r.model || 'n/a'} · cost: $${(r.cost_usd || 0).toFixed(3)}` },
+      docTitle: `${s.title} — ${r.kind} ${r.depth}`,
+      footer: `${r.kind}/${r.depth}`,
+    };
+  }
+  const sec = opts.section;
+  return { heading: sec.title, byline: s.title, markdown: sec.markdown, about: null, docTitle: `${s.title} — ${sec.title}`, footer: sec.title };
+}
+
 async function toDocx(s, opts = {}) {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, PageBreak, AlignmentType, ExternalHyperlink, TableOfContents, Footer, PageNumber } = docx;
   const date = new Date().toISOString().slice(0, 10);
   const smap = sourceMap(s);
   const children = [];
 
-  if (opts.report) {
-    const r = opts.report;
+  if (opts.report || opts.section) {
+    const d = singleDoc(s, opts);
     children.push(
       new Paragraph({ spacing: { before: 2400 } }),
       new Paragraph({ children: [new TextRun({ text: 'Anatop Territory Evaluation', font: FONT, size: 24, color: COLOURS.muted })], alignment: AlignmentType.CENTER }),
-      new Paragraph({ children: [new TextRun({ text: `${KIND_LABEL[r.kind] || r.kind} report — ${DEPTH_LABEL[r.depth] || r.depth}`, font: FONT, size: 40, bold: true })], alignment: AlignmentType.CENTER, spacing: { before: 200 } }),
+      new Paragraph({ children: [new TextRun({ text: d.heading, font: FONT, size: 40, bold: true })], alignment: AlignmentType.CENTER, spacing: { before: 200 } }),
       new Paragraph({ children: [new TextRun({ text: s.inputs.product || 'Product: INPUT MISSING', font: FONT, size: 30 })], alignment: AlignmentType.CENTER, spacing: { before: 160 } }),
       new Paragraph({ children: [new TextRun({ text: s.inputs.country || 'Country: INPUT MISSING', font: FONT, size: 24 })], alignment: AlignmentType.CENTER }),
-      new Paragraph({ children: [new TextRun({ text: `${date} · ${r.created_by || 'unattributed'}`, font: FONT, size: 20, color: COLOURS.muted })], alignment: AlignmentType.CENTER, spacing: { before: 300 } }),
+      new Paragraph({ children: [new TextRun({ text: `${date} · ${d.byline}`, font: FONT, size: 20, color: COLOURS.muted })], alignment: AlignmentType.CENTER, spacing: { before: 300 } }),
       new Paragraph({ children: [new PageBreak()] }),
     );
-    children.push(...docxBlocks(r.text || ''));
-    children.push(new Paragraph({ children: [new PageBreak()] }));
-    children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: 'About this report', font: FONT })] }));
-    children.push(new Paragraph({ children: [new TextRun({
-      text: `Session #${s.id} · ${s.title} · rounds run: ${roundsSummaryLine(s)} · model: ${r.model || 'n/a'} · cost: $${(r.cost_usd || 0).toFixed(3)}`,
-      font: FONT, size: 18, color: COLOURS.muted,
-    })] }));
+    children.push(...docxBlocks(d.markdown));
+    if (d.about) {
+      children.push(new Paragraph({ children: [new PageBreak()] }));
+      children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: d.about.title, font: FONT })] }));
+      children.push(new Paragraph({ children: [new TextRun({ text: d.about.text, font: FONT, size: 18, color: COLOURS.muted })] }));
+    }
     const doc = new Document({
-      creator: 'Anatop Territory Evaluation', title: `${s.title} — ${r.kind} ${r.depth}`,
+      creator: 'Anatop Territory Evaluation', title: d.docTitle,
       styles: {
         default: { document: { run: { font: FONT, size: 20 } } },
         paragraphStyles: [1, 2, 3, 4, 5].map((lvl) => ({
@@ -327,23 +345,22 @@ async function toPdf(s, opts = {}) {
   const date = new Date().toISOString().slice(0, 10);
   const content = [];
 
-  if (opts.report) {
-    const r = opts.report;
+  if (opts.report || opts.section) {
+    const d = singleDoc(s, opts);
     content.push(
       { text: 'Anatop Territory Evaluation', color: '#' + COLOURS.muted, fontSize: 12, alignment: 'center', margin: [0, 160, 0, 8] },
-      { text: `${KIND_LABEL[r.kind] || r.kind} report — ${DEPTH_LABEL[r.depth] || r.depth}`, fontSize: 20, bold: true, alignment: 'center' },
+      { text: d.heading, fontSize: 20, bold: true, alignment: 'center' },
       { text: s.inputs.product || 'Product: INPUT MISSING', fontSize: 15, alignment: 'center', margin: [0, 8, 0, 0] },
       { text: s.inputs.country || 'Country: INPUT MISSING', fontSize: 12, alignment: 'center' },
-      { text: `${date} · ${r.created_by || 'unattributed'}`, fontSize: 9, color: '#' + COLOURS.muted, alignment: 'center', margin: [0, 16, 0, 0], pageBreak: 'after' },
+      { text: `${date} · ${d.byline}`, fontSize: 9, color: '#' + COLOURS.muted, alignment: 'center', margin: [0, 16, 0, 0], pageBreak: 'after' },
     );
-    content.push(...pdfBlocks(r.text || ''));
-    content.push({ text: 'About this report', style: 'h3', pageBreak: 'before' });
-    content.push({
-      text: `Session #${s.id} · ${s.title} · rounds run: ${roundsSummaryLine(s)} · model: ${r.model || 'n/a'} · cost: $${(r.cost_usd || 0).toFixed(3)}`,
-      fontSize: 8.5, color: '#' + COLOURS.muted,
-    });
+    content.push(...pdfBlocks(d.markdown));
+    if (d.about) {
+      content.push({ text: d.about.title, style: 'h3', pageBreak: 'before' });
+      content.push({ text: d.about.text, fontSize: 8.5, color: '#' + COLOURS.muted });
+    }
     const docDefinition = {
-      info: { title: `${s.title} — ${r.kind} ${r.depth}`, author: 'Anatop Territory Evaluation' },
+      info: { title: d.docTitle, author: 'Anatop Territory Evaluation' },
       pageSize: 'A4', pageMargins: [50, 50, 50, 50],
       defaultStyle: { font: FONT, fontSize: 9.5, lineHeight: 1.25 },
       styles: {
@@ -352,7 +369,7 @@ async function toPdf(s, opts = {}) {
         h3: { fontSize: 11, bold: true, margin: [0, 8, 0, 4] },
         h4: { fontSize: 10, bold: true, margin: [0, 6, 0, 3] },
       },
-      footer: (page, pages) => ({ text: `${s.title} · ${r.kind}/${r.depth} · ${page} / ${pages}`, alignment: 'center', fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 15, 0, 0] }),
+      footer: (page, pages) => ({ text: `${s.title} · ${d.footer} · ${page} / ${pages}`, alignment: 'center', fontSize: 7.5, color: '#' + COLOURS.muted, margin: [0, 15, 0, 0] }),
       content,
     };
     return pdfmake.createPdf(docDefinition).getBuffer();
@@ -420,4 +437,6 @@ async function toPdf(s, opts = {}) {
   return doc.getBuffer();
 }
 
-module.exports = { toDocx, toPdf, fileName, reportFileName };
+function sectionFileName(s, section) { return `${fileName(s)}_${section}`.slice(0, 100); }
+
+module.exports = { toDocx, toPdf, fileName, reportFileName, sectionFileName, speakerName, fmtUTC };

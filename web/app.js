@@ -4,7 +4,7 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, navPanel: null, intelCut: 'agent' };
+  const state = { config: null, sessions: [], session: null, running: false, stopRequested: false, activeTab: 'sources', sessionActiveMs: 0, warRoomOpen: false, evalsFilter: '', navPanel: null, intelCut: 'agent' };
 
   // ---------------- API ----------------
   // A 401 from our own API means the session has ended, and no error message
@@ -306,20 +306,6 @@
   }
 
   // ---------------- sidebar ----------------
-  // Collapsed/expanded state for the saved-session list. The button carries
-  // the count so it is still worth reading while collapsed.
-  function setSessionListOpen(open) {
-    const list = $('#session-list');
-    const btn = $('#btn-toggle-sessions');
-    list.hidden = !open;
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.classList.toggle('open', open);
-    const n = state.sessions.length;
-    const count = $('#session-toggle-count');
-    count.textContent = n;
-    count.hidden = !n;
-  }
-
   // Sign-out is real now: POST /logout clears the session cookie server-side.
   //
   // This used to fetch with a deliberately wrong Basic credential, because that
@@ -336,21 +322,10 @@
 
   async function loadSessions() {
     state.sessions = await api.get('/api/sessions');
-    const list = $('#session-list');
-    list.innerHTML = '';
-    if (!state.sessions.length) list.innerHTML = '<div class="empty">No sessions yet.</div>';
-    for (const s of state.sessions) {
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'session-item' + (state.session && state.session.id === s.id ? ' active' : '');
-      b.innerHTML = `<div class="t">${escapeHtml(s.title)}</div><div class="m"><span>${escapeHtml(s.country || '')}</span><span>${fmtTime(s.updated_at)}</span><span>${s.message_count} msgs</span>${s.has_decision ? '<span title="Decision output written">✓ decision</span>' : ''}</div>`;
-      b.addEventListener('click', () => openSession(s.id));
-      list.appendChild(b);
-    }
-    // Keeps the collapsed button's count honest after a run or a delete.
-    setSessionListOpen(!$('#session-list').hidden);
-    // The dashboard reads the same list, so a refetch after a run/delete keeps
-    // its KPI strip and cards current instead of showing pre-run numbers.
+    // The dashboard and the All evaluations page read this list, so a refetch
+    // after a run or a delete keeps whichever is showing current.
     if (!$('#view-dashboard').hidden) renderDashboard();
+    if (!$('#view-evaluations').hidden) renderEvaluations();
   }
 
   // ---------------- setup view ----------------
@@ -502,15 +477,19 @@
     for (const f of state.config.input_fields) inputs[f.key] = readField(root, f);
     return inputs;
   }
+  // Shows one of the four top-level views. The sidebar's meeting and
+  // Intelligence panels belong to an open evaluation, so only the session view
+  // shows them.
+  const VIEWS = ['dashboard', 'evaluations', 'setup', 'session'];
+  function showView(name) {
+    for (const v of VIEWS) $(`#view-${v}`).hidden = v !== name;
+    $('#toolbar').hidden = name !== 'session';
+    $('#intel-nav').hidden = name !== 'session';
+  }
   function showSetup() {
     state.session = null;
     renderSetupModelSelect();
-    $('#view-dashboard').hidden = true;
-    $('#view-session').hidden = true;
-    $('#view-setup').hidden = false;
-    $('#toolbar').hidden = true;
-    $('#intel-nav').hidden = true;
-    $$('.session-item').forEach((el) => el.classList.remove('active'));
+    showView('setup');
   }
 
   // ---------------- dashboard ----------------
@@ -526,8 +505,19 @@
     check: '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
     chat: '<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 2"/>',
-    layers: '<path d="M12 3 2.5 8 12 13l9.5-5z"/><path d="M2.5 12.5 12 17.5l9.5-5M2.5 16.5 12 21.5l9.5-5"/>',
     folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2.5h8.8A1.5 1.5 0 0 1 21 10v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/>',
+    list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.4"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    notes: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.6-2.7 2.6M12 16.8h.01"/>',
+    flag: '<path d="M5 21V4M5 4.5s1.2-1 4-1 4.5 2 7.5 2 2.5-.5 2.5-.5v9s-.5.5-2.5.5-4.5-2-7.5-2-4 1-4 1"/>',
+    clipboard: '<rect x="8.5" y="2.5" width="7" height="4" rx="1"/><path d="M15.5 4.5h2A1.5 1.5 0 0 1 19 6v14a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V6a1.5 1.5 0 0 1 1.5-1.5h2M9 12h6M9 16h4"/>',
+    star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
+    repeat: '<path d="m17 2.5 3.5 3.5-3.5 3.5"/><path d="M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5M7 21.5 3.5 18 7 14.5"/><path d="M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5"/>',
+    pencil: '<path d="M12 20h8.5"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4z"/>',
+    download: '<path d="M20.5 15v3.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V15"/><path d="m7 10 5 5 5-5M12 15V3.5"/>',
+    panelLeft: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15.5 10 13.5 12l2 2"/>',
   };
   const icon = (name, cls = '') =>
     `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name] || ''}</svg>`;
@@ -552,12 +542,7 @@
 
   function showDashboard() {
     state.session = null;
-    $('#view-setup').hidden = true;
-    $('#view-session').hidden = true;
-    $('#view-dashboard').hidden = false;
-    $('#toolbar').hidden = true;
-    $('#intel-nav').hidden = true;
-    $$('.session-item').forEach((el) => el.classList.remove('active'));
+    showView('dashboard');
     renderDashboard();
   }
 
@@ -617,17 +602,89 @@
         </span>
       </button>`);
     }
+    // Always offered: with no evaluations yet the page says so, rather than
+    // the tile appearing only once there is something to list.
+    const n = state.sessions.length;
+    tiles.push(`
+      <button type="button" class="action-tile" id="tile-evaluations">
+        <span class="action-icon">${icon('list')}</span>
+        <span class="action-text">
+          <span class="action-title">View all Evaluations</span>
+          <span class="action-sub">${n ? `${n} evaluation${n === 1 ? '' : 's'} on record, with market, progress, decision and last activity.` : 'Every evaluation you table is listed here.'}</span>
+        </span>
+      </button>`);
     const box = $('#dash-actions');
     box.innerHTML = tiles.join('');
     $('#tile-new').addEventListener('click', showSetup);
+    $('#tile-evaluations').addEventListener('click', showEvaluations);
     const resume = box.querySelector('[data-open]');
     if (resume) resume.addEventListener('click', () => openSession(Number(resume.dataset.open)));
   }
 
+  // ---------------- all evaluations ----------------
+  function showEvaluations() {
+    state.session = null;
+    showView('evaluations');
+    renderEvaluations();
+    $('#evals-filter').focus();
+  }
+
+  // The four standard meetings in order, as dots: which have been held.
+  function meetingProgressHtml(run) {
+    const held = new Set((run || []).filter((m) => GRID_MODES.includes(m)));
+    const steps = GRID_MODES.map((m) => `<span class="evals-step${held.has(m) ? ' on' : ''}" title="${escapeHtml(MODE_LABEL[m])}: ${held.has(m) ? 'held' : 'not yet held'}"></span>`).join('');
+    const last = [...GRID_MODES].reverse().find((m) => held.has(m));
+    return `<span class="evals-progress" aria-label="${held.size} of ${GRID_MODES.length} meetings held">${steps}</span><span class="evals-progress-label">${last ? escapeHtml(MODE_LABEL[last]) : 'Not started'}</span>`;
+  }
+
+  function renderEvaluations() {
+    const all = state.sessions;
+    const q = state.evalsFilter.trim().toLowerCase();
+    const rows = q ? all.filter((s) => [s.title, s.product, s.country].some((v) => String(v || '').toLowerCase().includes(q))) : all;
+    const decided = all.filter((s) => s.has_decision).length;
+    $('#evals-sub').textContent = all.length ? `${all.length} on record · ${decided} with a board decision · most recent first` : '';
+    const box = $('#evals-table');
+    if (!all.length) {
+      box.innerHTML = '<div class="empty">No evaluations yet. Table a new market evaluation from the dashboard to start one.</div>';
+      return;
+    }
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">No evaluation matches “${escapeHtml(state.evalsFilter.trim())}”.</div>`;
+      return;
+    }
+    const admin = isAdminUser();
+    const num = (v) => Number(v || 0);
+    box.innerHTML = `<table class="evals-table">
+      <thead><tr>
+        <th scope="col">Evaluation</th><th scope="col">Market</th><th scope="col">Meetings</th><th scope="col">Decision</th>
+        <th scope="col" class="num">Responses</th><th scope="col" class="num">Reports</th><th scope="col">Needs attention</th>
+        ${admin ? '<th scope="col" class="num">Spend</th>' : ''}<th scope="col">Last activity</th>
+      </tr></thead>
+      <tbody>${rows.map((s) => {
+        const flags = [
+          num(s.open_disagreements) ? `<span class="evals-flag">${num(s.open_disagreements)} open disagreement${num(s.open_disagreements) === 1 ? '' : 's'}</span>` : '',
+          num(s.escalated_questions) ? `<span class="evals-flag evals-flag-alert">${num(s.escalated_questions)} escalated</span>` : '',
+        ].filter(Boolean).join('');
+        return `<tr data-open="${escapeHtml(String(s.id))}" tabindex="0">
+          <th scope="row"><button type="button" class="evals-open" data-open="${escapeHtml(String(s.id))}">${escapeHtml(s.title)}</button>
+            <span class="evals-meta">Tabled ${escapeHtml(fmtTime(s.created_at))}</span></th>
+          <td><span class="evals-country">${escapeHtml(s.country || '—')}</span><span class="evals-meta">${escapeHtml(s.product || '')}</span></td>
+          <td class="evals-progress-cell">${meetingProgressHtml(s.meetings_run)}</td>
+          <td>${s.has_decision ? '<span class="evals-badge evals-badge-done">Decided</span>' : '<span class="evals-badge">Awaiting</span>'}</td>
+          <td class="num">${num(s.message_count).toLocaleString()}</td>
+          <td class="num">${num(s.report_count)}</td>
+          <td>${flags || '<span class="evals-none">—</span>'}</td>
+          ${admin ? `<td class="num">$${num(s.cost_usd).toFixed(2)}</td>` : ''}
+          <td title="${escapeHtml(fmtTime(s.updated_at))}">${escapeHtml(fmtRelative(s.updated_at))}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+
   // Header power buttons, filled into every view's .power-nav. User Guide,
   // Agents and Admin open the left slide-over through the shared [data-nav]
-  // delegation; Intelligence only goes in the session header
-  // (data-intelligence), since the panel it opens lives in that view.
+  // delegation. Intelligence is reached from the sidebar (or, on a narrow
+  // screen, the session header's picker), not from here.
   function renderPowerNav() {
     const links = [
       { nav: 'guide', title: 'User Guide', label: 'User Guide', icon: 'book' },
@@ -636,27 +693,23 @@
     if (state.me && state.me.is_admin) links.push({ nav: 'admin', title: 'Admin', label: 'Admin', icon: 'sliders' });
     const linkHtml = links.map((l) => `
       <button type="button" class="btn power-btn" data-nav="${l.nav}" data-nav-title="${escapeHtml(l.title)}" title="${escapeHtml(l.title)}" aria-pressed="false">${icon(l.icon)}<span>${escapeHtml(l.label)}</span></button>`).join('');
-    const intelHtml = `
-      <button type="button" class="btn btn-primary power-btn" id="btn-warroom" aria-pressed="false" title="The board pack: sources, disagreements, decision, minutes and agent notes">${icon('layers')}<span>Intelligence</span></button>`;
-    $$('.power-nav').forEach((nav) => { nav.innerHTML = (nav.hasAttribute('data-intelligence') ? intelHtml : '') + linkHtml; });
+    $$('.power-nav').forEach((nav) => { nav.innerHTML = linkHtml; });
     syncPowerNav();
   }
 
-  // Pressed state mirrors whichever drawer or page is open, so the header shows it.
+  // Pressed state mirrors whichever drawer is open, so the header shows it.
   function syncPowerNav() {
     $$('.power-btn[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === state.navPanel)));
-    const intel = $('#btn-warroom');
-    if (intel) intel.setAttribute('aria-pressed', String(state.warRoomOpen));
   }
 
   // Intelligence is a page of the session view, shown in place of the
   // transcript. Its tabs are the sidebar's #intel-nav items; "transcript" is
   // the meeting itself. state.warRoomOpen is true while the page is showing and
-  // state.activeTab remembers the tab, so the header button returns to it.
-  const INTEL_TABS = ['sources', 'disagreements', 'questions', 'escalations', 'decision', 'favourites', 'reports', 'minutes', 'intelligence', 'inputs'];
+  // state.activeTab remembers the tab. Reports are part of the Decision tab.
+  const INTEL_TABS = ['sources', 'disagreements', 'intelligence', 'questions', 'escalations', 'decision', 'minutes', 'favourites', 'inputs'];
   const INTEL_TITLE = {
-    sources: 'Sources', disagreements: 'Disagreements', questions: 'Agent Questions', escalations: 'Escalations', decision: 'Decision',
-    favourites: 'Favourites', reports: 'Reports', minutes: 'Minutes', intelligence: 'Agent notes', inputs: 'Inputs',
+    sources: 'Sources', disagreements: 'Disagreements', intelligence: 'Agent notes', questions: 'Agent Questions', escalations: 'Escalations',
+    decision: 'Decision & reports', minutes: 'Minutes', favourites: 'Favourites', inputs: 'Inputs',
   };
   function showSessionPane(pane) {
     const intel = INTEL_TABS.includes(pane);
@@ -680,27 +733,17 @@
     if (picker) picker.value = current;
     if (intel) $('#intel-page').scrollTop = 0;
     else if (wasOpen && state.transcriptScroll != null) transcript.scrollTop = state.transcriptScroll;
-    syncPowerNav();
-  }
-  // The header's Intelligence button: open the page on its last tab, or go back.
-  function setWarRoom(open) {
-    showSessionPane(open ? state.activeTab : 'transcript');
   }
 
   // ---------------- session view ----------------
   async function openSession(id) {
     state.session = await api.get(`/api/sessions/${id}`);
     state.sessionActiveMs = 0; // per-tab stopwatch; not persisted, resets when (re)opening a session
-    $('#view-dashboard').hidden = true;
-    $('#view-setup').hidden = true;
-    $('#view-session').hidden = false;
-    $('#toolbar').hidden = false;
-    $('#intel-nav').hidden = false;
+    showView('session');
     // A session always opens on its transcript, not on the page the last one was left on.
     state.transcriptScroll = null;
     showSessionPane('transcript');
     renderSession();
-    $$('.session-item').forEach((el) => el.classList.remove('active'));
     await loadSessions();
   }
 
@@ -709,8 +752,6 @@
     $('#session-title').textContent = s.title;
     $('#session-sub').textContent = `${s.inputs.product || 'Product: INPUT MISSING'} · ${s.inputs.country || 'Country: INPUT MISSING'} · created ${fmtTime(s.created_at)}`;
     renderSessionModelSelect();
-    $('#link-docx').href = `/api/sessions/${s.id}/export.docx`;
-    $('#link-pdf').href = `/api/sessions/${s.id}/export.pdf`;
     updateActiveClock(0);
     // inputs summary — editable in place; changes only affect turns run after saving.
     const missing = state.config.input_fields.filter((f) => !(s.inputs[f.key] || '').trim());
@@ -1791,7 +1832,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
   function setRunning(on) {
     state.running = on;
-    $$('#toolbar button, #btn-send, #btn-delete').forEach((b) => { if (!['btn-stop', 'btn-export', 'btn-toggle-process'].includes(b.id)) b.disabled = on; });
+    $$('#toolbar button, #btn-send, #btn-delete, .report-generate').forEach((b) => { if (!['btn-stop', 'btn-toggle-process'].includes(b.id)) b.disabled = on; });
     // A turn reads the model when it starts, so a switch mid-meeting would split
     // one meeting across two models. Switching waits until the meeting is over.
     $('#session-model').disabled = on;
@@ -2181,13 +2222,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
   // rather than as a transcript filter chip because the pinned banner above the
   // transcript already shows it in full on the main screen.
   function renderDecisionTab() {
-    const box = $('#tab-decision');
+    const box = $('#decision-output');
     const text = state.session.decision_text;
     if (!text) {
       box.innerHTML = '<div class="empty">No decision output yet. It is written after Converge, or whenever you ask the moderator for one.</div>';
       return;
     }
-    box.innerHTML = '<div class="decision-tab-actions"><button type="button" class="btn btn-sm" id="btn-decision-tab-jump">View in transcript ↓</button></div>';
+    box.innerHTML = '<div class="decision-tab-actions"><h3>Decision output</h3><button type="button" class="btn btn-sm" id="btn-decision-tab-jump">View in transcript ↓</button></div>';
     const body = document.createElement('div');
     body.className = 'msg-body';
     body.replaceChildren(renderMarkdown(text));
@@ -2267,8 +2308,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     const s = state.session;
     const reports = s.reports || [];
     $('#count-reports').textContent = reports.length;
-    const box = $('#tab-reports');
-    if (!reports.length) { box.innerHTML = '<div class="empty">No reports yet. Generate an Interim report any time, or a Final report once Round 3 has run.</div>'; return; }
+    const box = $('#reports-list');
+    if (!reports.length) { box.innerHTML = '<div class="empty">No reports yet. Generate an Interim report any time, or a Final report once Converge has run.</div>'; return; }
     box.innerHTML = '';
     for (const r of reports) {
       const el = document.createElement('div'); el.className = 'report-card';
@@ -2339,13 +2380,14 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         renderDecisionTab();
       }
       renderReports();
-      showSessionPane('reports');
+      showSessionPane('decision');
       toast(`${KIND_LABEL[kind]} generated.`);
     } catch (e) { toast(`Could not generate report: ${e.message}`); } finally { setRunning(false); loadSessions(); renderCost(); }
   }
 
   // ---------------- events ----------------
   async function init() {
+    $$('[data-icon]').forEach((el) => { el.outerHTML = icon(el.dataset.icon); });
     state.config = await api.get('/api/config');
     applyAgentRoster(state.config);
     renderFilterChips();
@@ -2391,10 +2433,17 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#btn-sidebar-expand').addEventListener('click', () => setSidebarCollapsed(false));
 
     $('#btn-new').addEventListener('click', showSetup);
-    // The saved-session list is long and is not what the sidebar is mainly for,
-    // so it stays collapsed until asked for. Not persisted: collapsed is the
-    // intended default on every load.
-    $('#btn-toggle-sessions').addEventListener('click', () => setSessionListOpen($('#session-list').hidden));
+    $('#evals-filter').addEventListener('input', (e) => { state.evalsFilter = e.target.value; renderEvaluations(); });
+    // A row opens its evaluation from anywhere on it; the title is the real
+    // button, so keyboard users get Enter on the row as well.
+    $('#evals-table').addEventListener('click', (e) => {
+      const row = e.target.closest('[data-open]');
+      if (row) openSession(Number(row.dataset.open));
+    });
+    $('#evals-table').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.target.tagName !== 'TR') return;
+      openSession(Number(e.target.dataset.open));
+    });
     // Same head component, same behaviour; this one starts open because the
     // meeting buttons are the main reason the sidebar exists during a session.
     $('#btn-toggle-process').addEventListener('click', () => {
@@ -2459,10 +2508,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#btn-resume-meeting').addEventListener('click', resumeStalledMeeting);
     $('#btn-stop').addEventListener('click', () => { state.stopRequested = true; $('#btn-stop').textContent = 'Stopping after this turn…'; });
 
-    // Reports ▾
-    $('#btn-reports').addEventListener('click', (e) => { e.stopPropagation(); $('#reports-menu').hidden = !$('#reports-menu').hidden; });
+    // Reports, generated from the Decision tab.
     function openReportDialog(kind) {
-      $('#reports-menu').hidden = true;
       const dlg = $('#dlg-report');
       dlg.dataset.kind = kind;
       $('#report-modal-title').textContent = KIND_LABEL[kind];
@@ -2626,8 +2673,29 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         showSetup(); await loadSessions();
       } catch (err) { toast(`Could not delete session: ${err.message}`); }
     });
-    $('#btn-export').addEventListener('click', (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; });
-    document.addEventListener('click', () => { $('#export-menu').hidden = true; $('#reports-menu').hidden = true; });
+    // Export menu on the Intelligence page. The links are filled as it opens,
+    // so they always follow the tab on show (and Agent notes' current cut).
+    const setExportMenu = (open) => {
+      $('#intel-export-menu').hidden = !open;
+      $('#btn-intel-export').setAttribute('aria-expanded', String(open));
+    };
+    $('#btn-intel-export').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = $('#intel-export-menu').hidden;
+      if (open) {
+        const base = `/api/sessions/${state.session.id}`;
+        const tab = state.activeTab;
+        const cut = tab === 'intelligence' ? `?cut=${encodeURIComponent(state.intelCut)}` : '';
+        $('#intel-export-label').textContent = `This tab: ${INTEL_TITLE[tab]}`;
+        $('#link-intel-docx').href = `${base}/intel/${tab}/export.docx${cut}`;
+        $('#link-intel-pdf').href = `${base}/intel/${tab}/export.pdf${cut}`;
+        $('#link-docx').href = `${base}/export.docx`;
+        $('#link-pdf').href = `${base}/export.pdf`;
+      }
+      setExportMenu(open);
+    });
+    $('#intel-export-menu').addEventListener('click', (e) => { if (e.target.closest('a')) setExportMenu(false); });
+    document.addEventListener('click', () => setExportMenu(false));
 
     // Intelligence page navigation in the sidebar.
     $$('#intel-nav [data-pane]').forEach((b) => b.addEventListener('click', () => showSessionPane(b.dataset.pane)));
@@ -2645,9 +2713,6 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     document.addEventListener('click', (e) => {
       if (state.warRoomOpen && e.target.closest('a[href^="#msg-"]')) showSessionPane('transcript');
     });
-
-    // #btn-warroom is rendered into the session header by renderPowerNav().
-    $('#btn-warroom').addEventListener('click', () => setWarRoom(!state.warRoomOpen));
 
     // Left slide-over for the guide / agent profiles / admin pages. The pages
     // themselves are unchanged and still work as standalone URLs (the ↗ in the
@@ -2705,6 +2770,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (state.navPanel) setNavPanel(null);
+      if (!$('#intel-export-menu').hidden) { setExportMenu(false); $('#btn-intel-export').focus(); }
     });
 
     $('#brand-home').addEventListener('click', showDashboard);

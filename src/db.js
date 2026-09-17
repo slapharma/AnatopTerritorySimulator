@@ -439,6 +439,40 @@ async function updateAgent(key, { knowledge, can_web_search, can_open_url, stanc
   return one(`UPDATE agents SET ${sets.join(', ')} WHERE key = $${i} RETURNING *`, vals);
 }
 
+// ---------- LLM usage ledger (src/usage.js) ----------
+// Before sql/schema.sql's llm_calls table is applied to a database, reads
+// return null (summarise() then works from messages and reports alone) and
+// writes are skipped, so shipping the code ahead of the migration breaks nothing.
+// 42501 is the half-applied case, as for agent_questions: the table exists but
+// app_user was never granted it.
+const ledgerUnavailable = (e) => {
+  if (e && e.code === '42501') console.warn('[db] llm_calls: permission denied. Run the whole of sql/schema.sql, not just the CREATE TABLE.');
+  return Boolean(e && (e.code === '42P01' || e.code === '42501'));
+};
+async function addLlmCall(sessionId, f) {
+  try {
+    return await one(
+      `INSERT INTO llm_calls (session_id, category, feature, speaker, model, message_id, report_id, requests,
+        input_tokens, output_tokens, searches, cost_usd, duration_ms, error, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [sessionId, f.category, f.feature, f.speaker || null, f.model || null, f.message_id ?? null, f.report_id ?? null,
+        f.requests || 0, f.input_tokens || 0, f.output_tokens || 0, f.searches || 0, f.cost_usd || 0,
+        f.duration_ms ?? null, f.error || null, f.created_by || null],
+    );
+  } catch (e) {
+    if (ledgerUnavailable(e)) return null;
+    throw e;
+  }
+}
+async function listLlmCalls(sessionId) {
+  try {
+    return await q('SELECT * FROM llm_calls WHERE session_id = $1 ORDER BY id', [sessionId]);
+  } catch (e) {
+    if (ledgerUnavailable(e)) return null;
+    throw e;
+  }
+}
+
 // ---------- knowledgebase (curated reference documents) ----------
 async function listKnowledgeItems() { return q('SELECT * FROM knowledge_items ORDER BY category, id', []); }
 async function createKnowledgeItem({ category, title, url, note, sensitive }) {
@@ -474,6 +508,7 @@ module.exports = {
   createAutopilotRun, updateAutopilotRun, getAutopilotRun, listAutopilotRuns,
   addReport, listReports, getReport, deleteReport,
   addReportEmail, listReportEmails,
+  addLlmCall, listLlmCalls,
   fullSession,
   countUsers, getUserByEmail, listUsers, createUser, countAdmins, updateUser, getUserById, deleteUser,
   listAgents, getAgent, updateAgent,

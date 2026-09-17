@@ -215,7 +215,7 @@
         </div>
         <div class="topbar-actions">
           <div class="active-clock" id="active-clock" title="Total time spent generating responses in this session (this browser tab only, resets on reload)">⏱ 0:00</div>
-          <div class="cost" id="cost-meter" title="Estimated API cost for this session (tokens × configured prices)"></div>
+          <button type="button" class="cost" id="cost-meter" title="LLM spend for this session: click for the full breakdown by use, model and agent" aria-haspopup="dialog"></button>
           <nav class="power-nav" aria-label="Board pack and reference" data-intelligence></nav>
           <button class="btn btn-danger-ghost btn-delete-session" type="button" id="btn-delete" title="Delete this evaluation">Delete</button>
         </div>
@@ -354,6 +354,17 @@
   <form method="dialog" class="dialog-form">
     <h2 id="msg-modal-title">Response</h2>
     <div id="msg-modal-body" class="msg-body msg-modal-body"></div>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- LLM usage: opened from the header cost chip -->
+<dialog id="dlg-usage" class="dlg-wide" aria-labelledby="usage-modal-title">
+  <form method="dialog" class="dialog-form">
+    <h2 id="usage-modal-title">LLM usage and cost</h2>
+    <div id="usage-modal-body" class="usage-body" aria-live="polite"></div>
     <div class="dialog-actions">
       <button value="cancel" class="btn" type="submit">Close</button>
     </div>

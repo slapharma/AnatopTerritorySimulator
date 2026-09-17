@@ -49,6 +49,8 @@ function loadRenderMinutes({ meetingMinutes = [], openMinutes } = {}) {
     MODE_LABEL: { opening: 'Baselines', round2: 'Challenge', round3: 'Converge', crosstalk: 'Cross-talk' },
     nextMeeting: (m) => ({ opening: 'round2', round2: 'round3', round3: 'crosstalk' }[m] || null),
     startMeeting: () => {},
+    // Word / PDF / Excel links beside each item (openItemModal and its route are tested elsewhere).
+    itemDownloadsHtml: (kind, key) => `<span class="item-downloads" data-kind="${kind}" data-key="${key}"></span>`, openItemModal: () => {}, GRID_MODES: ['opening', 'round2', 'round3', 'crosstalk'],
   };
   vm.createContext(ctx);
   vm.runInContext(`${src.slice(start, end)}\nthis.renderMinutes = renderMinutes;`, ctx);

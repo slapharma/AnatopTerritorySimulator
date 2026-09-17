@@ -94,7 +94,7 @@
       <div class="scroll">
         <div class="dashboard">
           <!-- Hero, onboarding callout, then the KPI strip filled by
-               renderDashboard(). Sized to fill the main column with no scroll.
+               renderDashboard(). The hero is shown whole and the page scrolls.
                Starting an evaluation and listing them all are the sidebar's
                New evaluation and View all evaluations buttons; User Guide,
                Agents and Admin are header power buttons (renderPowerNav()). -->
@@ -273,20 +273,6 @@
           <div class="intel-page-inner">
           <div class="intel-page-head">
             <h2 class="intel-page-title" id="intel-page-title">Sources</h2>
-            <!-- Every tab exports on its own; the full evaluation record (the
-                 old sidebar export) sits beside it. -->
-            <div class="menu intel-export">
-              <button type="button" class="btn btn-sm menu-btn" id="btn-intel-export" aria-haspopup="true" aria-expanded="false" aria-controls="intel-export-menu"><span data-icon="download"></span>Export<svg class="side-section-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-              <div class="menu-items" id="intel-export-menu" hidden>
-                <div class="menu-label" id="intel-export-label">This tab</div>
-                <a id="link-intel-docx" href="#" download>Word (.docx)</a>
-                <a id="link-intel-pdf" href="#" download>PDF</a>
-                <div class="menu-sep" role="separator"></div>
-                <div class="menu-label">Full evaluation record</div>
-                <a id="link-docx" href="#" download>Word (.docx)</a>
-                <a id="link-pdf" href="#" download>PDF</a>
-              </div>
-            </div>
           </div>
           <div class="tab-body" id="tab-sources"></div>
           <!-- Global, not per evaluation: the curated documents every agent is
@@ -392,7 +378,7 @@
     <h2 id="dis-modal-title">Disagreement</h2>
     <button type="button" class="status" id="dis-modal-status" title="Click to toggle"></button>
     <div id="dis-modal-body" class="dis-modal-body"></div>
-    <a href="#" id="dis-modal-back" class="dis-back">↑ view in message</a>
+    <div class="dis-modal-links"><a href="#" id="dis-modal-back" class="dis-back">↑ view in message</a><span id="dis-modal-downloads"></span></div>
     <fieldset class="agent-picks">
       <legend>Ask for comment from</legend>
       <label><input type="checkbox" value="regulatory"> Regulatory</label>
@@ -414,6 +400,7 @@
     <h2 id="msg-modal-title">Response</h2>
     <div id="msg-modal-body" class="msg-body msg-modal-body"></div>
     <div class="dialog-actions">
+      <span class="dialog-downloads" id="msg-modal-downloads"></span>
       <button value="cancel" class="btn" type="submit">Close</button>
     </div>
   </form>

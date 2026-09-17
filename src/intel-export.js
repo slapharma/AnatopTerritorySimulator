@@ -148,4 +148,61 @@ function sectionDoc(s, section, opts = {}) {
   return def ? { key: section, title: def.title, markdown: def.build(s, opts) } : null;
 }
 
-module.exports = { sectionDoc, SECTIONS };
+// ---------- single items ----------
+// One thing on the page (a report, a minutes entry, a meeting's transcript, a
+// response, a disagreement, a question) as { title, markdown }, for its View
+// modal and its Word / PDF / Excel downloads. A report also carries the row,
+// so Word and PDF keep the report cover. A meeting transcript carries `table`,
+// so Excel gets one row per response rather than one per paragraph.
+// null when the key names nothing in this session.
+const TRANSCRIPT_COLUMNS = [
+  { header: '#', width: 6 }, { header: 'Speaker', width: 24 }, { header: 'Meeting', width: 16 },
+  { header: 'Time (UTC)', width: 20 }, { header: 'Response', width: 100 },
+];
+const ITEM_KINDS = {
+  report(s, key) {
+    const r = (s.reports || []).find((x) => String(x.id) === key);
+    return r && { title: `${KIND_LABEL[r.kind] || r.kind} · ${DEPTH_LABEL[r.depth] || r.depth}`, markdown: r.text || '', report: r };
+  },
+  decision(s) {
+    return s.decision_text ? { title: 'Decision output', markdown: s.decision_text } : null;
+  },
+  minutes(s, key) {
+    const mm = (s.meeting_minutes || []).find((x) => String(x.id) === key);
+    if (!mm) return null;
+    const state = mm.round === 'question' ? '' : ` · ${mm.approved ? 'Approved' : 'Pending approval'}`;
+    return { title: `Minutes: ${safe(mm.label)}`, markdown: `${empty(`${fmtUTC(mm.created_at)}${state}`)}\n\n${mm.text || ''}` };
+  },
+  // Every response in one standard meeting, in order.
+  meeting(s, key) {
+    if (!['opening', 'round2', 'round3', 'crosstalk'].includes(key)) return null;
+    const list = s.messages.filter((m) => m.mode === key && m.role !== 'system');
+    return {
+      title: `Transcript: ${modeLabel(key)}`,
+      markdown: list.length ? list.map((m) => messageBlock(m)).join('\n\n') : empty('No responses in this meeting yet.'),
+      table: {
+        columns: TRANSCRIPT_COLUMNS,
+        rows: list.map((m) => [m.seq, speakerName(m), modeLabel(m.mode), fmtUTC(m.created_at), m.error ? `Turn failed: ${m.error}` : (m.text || '')]),
+      },
+    };
+  },
+  message(s, key) {
+    const m = s.messages.find((x) => String(x.id) === key);
+    return m && { title: `${speakerName(m)} · ${modeLabel(m.mode)} · #${m.seq}`, markdown: m.error ? empty(`Turn failed: ${safe(m.error)}`) : (m.text || '') };
+  },
+  disagreement(s, key) {
+    const d = s.disagreements.find((x) => String(x.n) === key);
+    return d && { title: `Disagreement #${d.n}: ${safe(d.topic)}`, markdown: `**Status:** ${String(d.status).toUpperCase()}\n\n${d.body || ''}` };
+  },
+  question(s, key) {
+    const q = (s.questions || []).find((x) => String(x.id) === key);
+    return q && { title: `Question: ${safe(party(q.asker))}`, markdown: questionBlock(q, s) };
+  },
+};
+
+function itemDoc(s, kind, key) {
+  const build = Object.hasOwn(ITEM_KINDS, kind) ? ITEM_KINDS[kind] : null;
+  return build ? build(s, String(key)) || null : null;
+}
+
+module.exports = { sectionDoc, SECTIONS, itemDoc, ITEM_KINDS };

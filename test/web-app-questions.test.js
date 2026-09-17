@@ -105,6 +105,8 @@ function loadQuestionsHelpers({ questions = [], messages = [], questionFilter } 
   const ctx = {
     ALL, AGENT_LABEL, MODE_LABEL, QUESTION_STATUS_LABEL, LENGTH_LABELS,
     escapeHtml, agentChipHtml,
+    // Word / PDF / Excel links beside each item (openItemModal and its route are tested elsewhere).
+    itemDownloadsHtml: (kind, key) => `<span class="item-downloads" data-kind="${kind}" data-key="${key}"></span>`, openItemModal: () => {}, GRID_MODES: ['opening', 'round2', 'round3', 'crosstalk'],
     state: { questionFilter, session: { id: 39, questions: questions.slice(), messages: messages.slice() } },
     document: { createElement: (tag) => new FakeElement(tag) },
     $: (sel, root) => (root ? root.querySelector(sel) : (elements[sel] || null)),
@@ -476,6 +478,8 @@ function loadAutopilotHelpers({ questions = [], runTurnImpl, autopilotRunRespons
   const ctx = {
     ALL, AGENT_LABEL, MODE_LABEL, QUESTION_STATUS_LABEL, LENGTH_LABELS,
     escapeHtml, agentChipHtml,
+    // Word / PDF / Excel links beside each item (openItemModal and its route are tested elsewhere).
+    itemDownloadsHtml: (kind, key) => `<span class="item-downloads" data-kind="${kind}" data-key="${key}"></span>`, openItemModal: () => {}, GRID_MODES: ['opening', 'round2', 'round3', 'crosstalk'],
     AUTOPILOT_OUTCOME_LABEL: {
       stopped_by_moderator: 'Stopped by the moderator', failed: 'A turn failed', unanimous: 'All agents reached AGREE',
       cost_cap: 'Cost cap reached', cycle_cap: 'Cycle limit reached', safety_cap: 'Safety cycle cap reached',

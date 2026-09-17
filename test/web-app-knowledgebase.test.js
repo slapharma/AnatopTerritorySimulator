@@ -3,9 +3,7 @@
 // every evaluation's Intelligence sidebar. Anyone can read it; only admins get
 // the add/edit form and the per-row Edit/Delete actions. As in the other
 // web/app.js vm tests, renderKnowledge is sliced out by string markers and run
-// in a vm context. A second, separate slice covers the export menu's
-// NO_TAB_EXPORT behaviour (hiding "This tab" export links for the shared
-// knowledgebase tab, which has no per-evaluation export).
+// in a vm context.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -155,59 +153,5 @@ describe('web/app.js renderKnowledge — loading / error states', () => {
 
     assert.match(ctx.elements['#tab-knowledgebase'].innerHTML, /No sources in the knowledgebase yet\./);
     assert.equal(ctx.elements['#count-knowledge'].textContent, 0);
-  });
-});
-
-// ---------------- export menu: NO_TAB_EXPORT hides "This tab" links ----------------
-
-function loadExportMenu({ activeTab }) {
-  const src = fs.readFileSync(WEB_APP_JS, 'utf8');
-  const start = src.indexOf('    // Export menu on the Intelligence page.');
-  const end = src.indexOf('    // Intelligence page navigation in the sidebar.');
-  assert.ok(start >= 0 && end > start, 'markers not found in web/app.js — did the export menu block move?');
-  const noTabExportStart = src.indexOf('  const NO_TAB_EXPORT = new Set');
-  const noTabExportEnd = src.indexOf('\n', noTabExportStart) + 1;
-  assert.ok(noTabExportStart >= 0, 'NO_TAB_EXPORT declaration not found');
-
-  // #intel-export-menu starts hidden, as in the real markup, so opening it is
-  // what drives the click handler's "if (open)" branch that fills the links.
-  const elements = { '#intel-export-menu': { hidden: true, setAttribute() {}, addEventListener() {} } };
-  const el = (sel) => {
-    if (!(sel in elements)) elements[sel] = { hidden: false, textContent: '', href: '', setAttribute() {}, addEventListener(type, fn) { if (type === 'click') this._click = fn; } };
-    return elements[sel];
-  };
-  const ctx = {
-    INTEL_TITLE: { knowledgebase: 'Knowledgebase', sources: 'Sources' },
-    state: { session: { id: 7 }, activeTab, intelCut: 'agent' },
-    document: { addEventListener() {} },
-    $: (sel) => el(sel),
-  };
-  vm.createContext(ctx);
-  vm.runInContext(`${src.slice(noTabExportStart, noTabExportEnd)}\n${src.slice(start, end)}`, ctx);
-  ctx.elements = elements;
-  ctx.triggerExportClick = () => elements['#btn-intel-export']._click({ stopPropagation() {} });
-  return ctx;
-}
-
-describe('web/app.js export menu — NO_TAB_EXPORT hides "This tab" links for knowledgebase', () => {
-  it('hides the "This tab" export label/links/separator when the active tab is knowledgebase', () => {
-    const ctx = loadExportMenu({ activeTab: 'knowledgebase' });
-
-    ctx.triggerExportClick();
-
-    assert.equal(ctx.elements['#intel-export-label'].hidden, true);
-    assert.equal(ctx.elements['#link-intel-docx'].hidden, true);
-    assert.equal(ctx.elements['#link-intel-pdf'].hidden, true);
-    assert.equal(ctx.elements['#intel-export-menu .menu-sep'].hidden, true);
-  });
-
-  it('shows the "This tab" export links for an ordinary tab such as sources', () => {
-    const ctx = loadExportMenu({ activeTab: 'sources' });
-
-    ctx.triggerExportClick();
-
-    assert.equal(ctx.elements['#intel-export-label'].hidden, false);
-    assert.equal(ctx.elements['#link-intel-docx'].hidden, false);
-    assert.equal(ctx.elements['#intel-export-menu .menu-sep'].hidden, false);
   });
 });

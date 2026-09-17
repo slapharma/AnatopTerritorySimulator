@@ -663,9 +663,6 @@
   // the meeting itself. state.warRoomOpen is true while the page is showing and
   // state.activeTab remembers the tab. Reports are part of the Decision tab.
   const INTEL_TABS = ['sources', 'knowledgebase', 'intelligence', 'questions', 'escalations', 'disagreements', 'decision', 'minutes', 'favourites', 'inputs'];
-  // Tabs with no per-evaluation export: the knowledgebase is shared by every
-  // evaluation, so its export menu offers only the full evaluation record.
-  const NO_TAB_EXPORT = new Set(['knowledgebase']);
   const INTEL_TITLE = {
     sources: 'Sources', knowledgebase: 'Knowledgebase', disagreements: 'Disagreements', intelligence: 'Agent notes', questions: 'Agent Questions', escalations: 'Escalations',
     decision: 'Decision & reports', minutes: 'Minutes', favourites: 'Favourites', inputs: 'Inputs',
@@ -1227,6 +1224,7 @@
     const back = $('#dis-modal-back');
     if (d.message_id) { back.href = `#msg-${d.message_id}`; back.hidden = false; back.onclick = () => $('#dlg-disagreement').close(); }
     else back.hidden = true;
+    $('#dis-modal-downloads').innerHTML = itemDownloadsHtml('disagreement', d.n);
     $$('#dlg-disagreement .agent-picks input').forEach((c) => { c.checked = false; });
     $('#dis-modal-instruction').value = '';
     const dlg = $('#dlg-disagreement');
@@ -1237,9 +1235,41 @@
   // Opens one response full-width — the inline card can be quite narrow when
   // laid out 3-up, and "Show full message" only lifts the collapse height cap.
   function openMessageModal(m, speaker) {
-    $('#msg-modal-title').textContent = `${AGENT_LABEL[speaker] || speaker}${m.mode ? ' · ' + (MODE_LABEL[m.mode] || m.mode) : ''} · #${m.seq}`;
-    $('#msg-modal-body').replaceChildren(renderMarkdown(m.text));
-    $('#dlg-message').showModal();
+    openItemModal('message', m.id, {
+      title: `${AGENT_LABEL[speaker] || speaker}${m.mode ? ' · ' + (MODE_LABEL[m.mode] || m.mode) : ''} · #${m.seq}`,
+      markdown: m.text || '',
+    });
+  }
+
+  // ---------------- item view and downloads ----------------
+  // Every item on the page (a report, the decision, a minutes entry, a
+  // meeting's transcript, a response, a disagreement, a question) opens in the
+  // wide modal and downloads as Word, PDF or Excel from one server route
+  // (GET /api/sessions/:id/items/:kind/:key, see src/intel-export.js itemDoc).
+  const ITEM_DOWNLOADS = [['docx', 'Word'], ['pdf', 'PDF'], ['xlsx', 'Excel']];
+  const itemUrl = (kind, key, format) => `/api/sessions/${state.session.id}/items/${kind}/${encodeURIComponent(key)}${format ? `/export.${format}` : ''}`;
+  function itemDownloadsHtml(kind, key) {
+    return `<span class="item-downloads">${ITEM_DOWNLOADS.map(([f, label]) => `<a href="${escapeHtml(itemUrl(kind, key, f))}" download title="Download as ${label}">${label}</a>`).join('')}</span>`;
+  }
+  // markdown given: it is already on the page, so it renders at once. Without
+  // it the server builds the item, which is how a meeting's transcript opens.
+  async function openItemModal(kind, key, { title, markdown } = {}) {
+    const dlg = $('#dlg-message');
+    const seq = (state.itemSeq = (state.itemSeq || 0) + 1);
+    $('#msg-modal-title').textContent = title || 'Loading…';
+    $('#msg-modal-downloads').innerHTML = itemDownloadsHtml(kind, key);
+    if (markdown != null) $('#msg-modal-body').replaceChildren(renderMarkdown(markdown));
+    else $('#msg-modal-body').innerHTML = '<p class="muted">Loading…</p>';
+    if (!dlg.open) dlg.showModal();
+    if (markdown != null) return;
+    try {
+      const doc = await api.get(itemUrl(kind, key));
+      if (seq !== state.itemSeq || !dlg.open) return;
+      $('#msg-modal-title').textContent = doc.title;
+      $('#msg-modal-body').replaceChildren(renderMarkdown(doc.markdown));
+    } catch (e) {
+      if (seq === state.itemSeq) $('#msg-modal-body').innerHTML = `<p class="usage-failed" role="alert">Could not load this item: ${escapeHtml(e.message)}</p>`;
+    }
   }
 
   // ---------------- LLM usage ----------------
@@ -1485,12 +1515,17 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
           ${mm.approved ? '' : '<button type="button" class="btn btn-sm btn-accent minutes-approve">Approve</button>'}
           ${!mm.approved && nextMeeting(mm.round) ? `<button type="button" class="btn btn-sm btn-primary minutes-approve minutes-continue" data-next="${escapeHtml(nextMeeting(mm.round))}" title="Approve these minutes, then convene ${escapeHtml(MODE_LABEL[nextMeeting(mm.round)])}">Approve and continue</button>` : ''}`}
         </div>
+        <div class="minutes-tools">
+          <span class="minutes-tool"><span class="minutes-tool-label">Minutes</span><button type="button" class="item-view" data-item-kind="minutes" data-item-key="${escapeHtml(String(mm.id))}">View</button>${itemDownloadsHtml('minutes', mm.id)}</span>
+          ${GRID_MODES.includes(mm.round) ? `<span class="minutes-tool"><span class="minutes-tool-label">Full transcript</span><button type="button" class="item-view" data-item-kind="meeting" data-item-key="${escapeHtml(mm.round)}">View</button>${itemDownloadsHtml('meeting', mm.round)}</span>` : ''}
+        </div>
         <div class="minutes-detail"${isOpen(mm) ? '' : ' hidden'}>
           <div class="minutes-body"></div>
           ${mm.anchor_message_id ? `<a href="#msg-${mm.anchor_message_id}" class="minutes-back">↑ ${isQuestion(mm) ? 'view in transcript' : 'view meeting'}</a>` : ''}
         </div>
       </li>`).join('')}</ol>`;
     $$('#tab-minutes .minutes-card').forEach((el, i) => { $('.minutes-body', el).replaceChildren(renderMarkdown(list[i].text)); });
+    $$('#tab-minutes .item-view').forEach((b) => b.addEventListener('click', () => openItemModal(b.dataset.itemKind, b.dataset.itemKey)));
     $$('#tab-minutes .minutes-toggle').forEach((btn) => {
       btn.addEventListener('click', () => {
         const card = btn.closest('.minutes-card');
@@ -1754,6 +1789,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $$('.qn', box).forEach((card) => {
       const qRow = list.find((x) => String(x.id) === card.dataset.qid);
       if (!qRow) return;
+      $('[data-qview]', card)?.addEventListener('click', () => openItemModal('question', qRow.id));
       $$('[data-qact]', card).forEach((b) => b.addEventListener('click', () => questionAction(qRow, b.dataset.qact, card)));
     });
     const prefix = `${name}:`;
@@ -1784,7 +1820,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       <div class="qn-head">${questionPartyChip(qRow.asker)} <span>asked</span> ${addressees.map(questionPartyChip).join(' ')}
         <span class="qn-status qn-status-${escapeHtml(qRow.status)}">${escapeHtml(QUESTION_STATUS_LABEL[qRow.status] || qRow.status)}</span></div>
       <div class="qn-text">${escapeHtml(qRow.text)}</div>
-      <div class="qn-meta">Asked in ${escapeHtml(MODE_LABEL[qRow.round] || qRow.round || 'the transcript')}${asked ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(asked.id))}">#${asked.seq}</button>` : ''}${qRow.status !== 'open' && (note || answer) ? ` · ${note || 'Answered'}${answer ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(answer.id))}">#${answer.seq}</button>` : ''}` : ''}</div>
+      <div class="qn-meta">Asked in ${escapeHtml(MODE_LABEL[qRow.round] || qRow.round || 'the transcript')}${asked ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(asked.id))}">#${asked.seq}</button>` : ''}${qRow.status !== 'open' && (note || answer) ? ` · ${note || 'Answered'}${answer ? ` <button type="button" class="qn-link" data-open-msg="${escapeHtml(String(answer.id))}">#${answer.seq}</button>` : ''}` : ''} · <button type="button" class="qn-link" data-qview>View</button>${itemDownloadsHtml('question', qRow.id)}</div>
       <div class="qn-actions">
         <button type="button" class="btn btn-sm" data-qact="answer">Answer…</button>
         ${askable.length ? '<button type="button" class="btn btn-sm" data-qact="ask">Ask agents to answer…</button>' : ''}
@@ -2392,12 +2428,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       box.innerHTML = '<div class="empty">No decision output yet. It is written after Converge, or whenever you ask the moderator for one.</div>';
       return;
     }
-    box.innerHTML = '<div class="decision-tab-actions"><h3>Decision output</h3><button type="button" class="btn btn-sm" id="btn-decision-tab-jump">View in transcript ↓</button></div>';
+    box.innerHTML = `<div class="decision-tab-actions"><h3>Decision output</h3><span class="decision-tab-tools"><button type="button" class="btn btn-sm" id="btn-decision-view">View</button>${itemDownloadsHtml('decision', 'latest')}<button type="button" class="btn btn-sm" id="btn-decision-tab-jump">View in transcript ↓</button></span></div>`;
     const body = document.createElement('div');
     body.className = 'msg-body';
     body.replaceChildren(renderMarkdown(text));
     box.appendChild(body);
     $('#btn-decision-tab-jump').addEventListener('click', jumpToDecision);
+    $('#btn-decision-view').addEventListener('click', () => openItemModal('decision', 'latest', { title: 'Decision output', markdown: text }));
   }
 
   function jumpToDecision() {
@@ -2431,7 +2468,8 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
           </div>
           <div class="fav-card-snippet">${escapeHtml(snippet)}${(m.text || '').length > 220 ? '…' : ''}</div>
           <div class="fav-card-actions">
-            <button type="button" class="fav-open">Open</button>
+            <button type="button" class="fav-open">View</button>
+            ${itemDownloadsHtml('message', m.id)}
             <button type="button" class="fav-jump">View in transcript</button>
             <button type="button" class="fav-remove danger">Unfavourite</button>
           </div>
@@ -2439,11 +2477,7 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     }).join('');
     for (const el of $$('.fav-card', box)) {
       const m = list.find((x) => String(x.id) === el.dataset.id);
-      $('.fav-open', el).addEventListener('click', () => {
-        $('#msg-modal-title').textContent = `${AGENT_LABEL[m.role === 'user' ? 'user' : m.speaker] || m.speaker} · ${MODE_LABEL[m.mode] || m.mode || ''}`;
-        $('#msg-modal-body').replaceChildren(renderMarkdown(m.text || ''));
-        $('#dlg-message').showModal();
-      });
+      $('.fav-open', el).addEventListener('click', () => openMessageModal(m, m.role === 'user' ? 'user' : m.speaker));
       $('.fav-jump', el).addEventListener('click', () => {
         const target = $(`#msg-${m.id}`);
         if (!target) return toast('That response is not in the current transcript view.');
@@ -2482,16 +2516,13 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         <div class="rc-meta">${fmtTime(r.created_at)}${r.created_by ? ` · ${escapeHtml(r.created_by)}` : ''}${r.cost_usd ? ` · ${money(r.cost_usd)}` : ''}</div>
         <div class="rc-actions">
           <button type="button" class="rc-view">View</button>
-          <a href="/api/sessions/${s.id}/reports/${r.id}/export.docx" download>Word</a>
-          <a href="/api/sessions/${s.id}/reports/${r.id}/export.pdf" download>PDF</a>
+          ${itemDownloadsHtml('report', r.id)}
           <button type="button" class="rc-email">Email…</button>
           <button type="button" class="rc-delete danger">Delete</button>
         </div>`;
-      $('.rc-view', el).addEventListener('click', () => {
-        $('#msg-modal-title').textContent = `${KIND_LABEL[r.kind] || r.kind} · ${DEPTH_LABEL_SHORT[r.depth] || r.depth}`;
-        $('#msg-modal-body').replaceChildren(renderMarkdown(r.text));
-        $('#dlg-message').showModal();
-      });
+      $('.rc-view', el).addEventListener('click', () => openItemModal('report', r.id, {
+        title: `${KIND_LABEL[r.kind] || r.kind} · ${DEPTH_LABEL_SHORT[r.depth] || r.depth}`, markdown: r.text || '',
+      }));
       $('.rc-email', el).addEventListener('click', () => {
         if (!state.config.email_configured) return toast('Email not configured: set RESEND_API_KEY and MAIL_FROM.');
         const dlg = $('#dlg-email-report');
@@ -2816,31 +2847,6 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
         showSetup(); await loadSessions();
       } catch (err) { toast(`Could not delete session: ${err.message}`); }
     });
-    // Export menu on the Intelligence page. The links are filled as it opens,
-    // so they always follow the tab on show (and Agent notes' current cut).
-    const setExportMenu = (open) => {
-      $('#intel-export-menu').hidden = !open;
-      $('#btn-intel-export').setAttribute('aria-expanded', String(open));
-    };
-    $('#btn-intel-export').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const open = $('#intel-export-menu').hidden;
-      if (open) {
-        const base = `/api/sessions/${state.session.id}`;
-        const tab = state.activeTab;
-        const cut = tab === 'intelligence' ? `?cut=${encodeURIComponent(state.intelCut)}` : '';
-        const tabExport = !NO_TAB_EXPORT.has(tab);
-        ['#intel-export-label', '#link-intel-docx', '#link-intel-pdf', '#intel-export-menu .menu-sep'].forEach((sel) => { $(sel).hidden = !tabExport; });
-        $('#intel-export-label').textContent = `This tab: ${INTEL_TITLE[tab]}`;
-        $('#link-intel-docx').href = `${base}/intel/${tab}/export.docx${cut}`;
-        $('#link-intel-pdf').href = `${base}/intel/${tab}/export.pdf${cut}`;
-        $('#link-docx').href = `${base}/export.docx`;
-        $('#link-pdf').href = `${base}/export.pdf`;
-      }
-      setExportMenu(open);
-    });
-    $('#intel-export-menu').addEventListener('click', (e) => { if (e.target.closest('a')) setExportMenu(false); });
-    document.addEventListener('click', () => setExportMenu(false));
 
     // Intelligence page navigation in the sidebar.
     $$('#intel-nav [data-pane]').forEach((b) => b.addEventListener('click', () => showSessionPane(b.dataset.pane)));
@@ -2915,7 +2921,6 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (state.navPanel) setNavPanel(null);
-      if (!$('#intel-export-menu').hidden) { setExportMenu(false); $('#btn-intel-export').focus(); }
     });
 
     $('#brand-home').addEventListener('click', showDashboard);

@@ -4,18 +4,25 @@
 // every request in its usage block and that figure is what the app records.
 module.exports = {
   OPENROUTER_BASE: 'https://openrouter.ai/api/v1',
-  // Primary model. 4B active params (26B total MoE), served first-party by Google
-  // plus 8 other providers on OpenRouter — good tool-call streaming reliability.
-  // Change to any OpenRouter model id.
+  // Primary model. Switched off the free Gemma tier on 2026-09-22: free-tier's
+  // ~20 req/min cap (see RETRY_ON_429 below) was hitting HTTP 429 on every agent
+  // mid-session — same session errored repeatedly across 2026-09-16 to
+  // 2026-09-22 (turns 229-234, all three agents). Paid billing off account
+  // credit has no such request-rate ceiling. Mistral Nemo priced here at
+  // ~$0.02/$0.03 per M tok — cheapest paid option, applied to ALL users
+  // (not admin-gated) since it replaces the free default; see MODEL_OPTIONS
+  // below for why its `free` flag is now true. Change to any OpenRouter model id.
   // (nemotron-3.5-lightning was tried as a faster swap but its streamed tool_calls
   // deltas don't parse correctly here — turns finish empty with finish_reason
   // "tool_calls" and zero parsed calls. Do not re-add it without fixing that first.)
-  MODEL: 'google/gemma-4-26b-a4b-it:free',
+  MODEL: 'mistralai/mistral-nemo',
   // Tried in order if the primary is rate-limited or down.
   // Nvidia models removed from this list: their free-tier capacity has repeatedly
   // returned "Upstream error from Nvidia: Service temporarily overloaded" mid-stream
   // when OpenRouter auto-routed here, even with a different primary model. Minimax
   // is served by multiple providers including Groq, which has held up better.
+  // Kept as a last-resort free fallback even though the primary is now paid —
+  // if Mistral Nemo itself is down, a free model finishing the turn beats none.
   FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
@@ -29,7 +36,11 @@ module.exports = {
   // — otherwise any authenticated user could start a session on a paid model
   // and run up real OpenRouter spend with no budget check anywhere.
   MODEL_OPTIONS: [
-    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free)', free: true },
+    // free:true here (not gated) because MODEL above defaults every session to
+    // this model already — refusing an explicit pick of the same model a
+    // non-admin already got by default would be inconsistent, not safer.
+    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (default — ~$0.02/$0.03 per M tok)', free: true },
+    { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free, rate-limited ~20 req/min)', free: true },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)', free: true },
     // Far and away the most expensive option here — one full evaluation is
     // dozens of turns, each carrying the whole transcript plus fetched page
@@ -40,7 +51,6 @@ module.exports = {
     { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (paid, ~$2/$10 per M tok — best quality, most expensive)', free: false },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)', free: false },
     { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)', free: false },
-    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (paid, cheapest — ~$0.02/$0.03 per M tok)', free: false },
   ],
 
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.

@@ -88,7 +88,7 @@ describe('PATCH /api/sessions/:id — model switch', () => {
     const [msg] = messages;
     assert.equal(msg.role, 'system');
     assert.equal(msg.speaker, 'model');
-    assert.match(msg.text, /Gemma 4 26B A4B/);
+    assert.match(msg.text, /Mistral Nemo/);
     assert.match(msg.text, /Nemotron 3 Ultra 550B/);
   });
 

@@ -610,6 +610,8 @@
     }
     const admin = isAdminUser();
     const num = (v) => Number(v || 0);
+    // data-label names each cell for the stacked card layout that styles.css
+    // switches to when the table's container is too narrow for the columns.
     box.innerHTML = `<table class="evals-table">
       <thead><tr>
         <th scope="col">Evaluation</th><th scope="col">Market</th><th scope="col">Meetings</th><th scope="col">Decision</th>
@@ -625,15 +627,15 @@
         return `<tr data-open="${escapeHtml(String(s.id))}" tabindex="0">
           <th scope="row"><button type="button" class="evals-open" data-open="${escapeHtml(String(s.id))}">${escapeHtml(s.title)}</button>
             <span class="evals-meta">Tabled ${escapeHtml(fmtTime(s.created_at))}</span></th>
-          <td><span class="evals-country">${escapeHtml(s.country || '—')}</span><span class="evals-meta">${escapeHtml(s.product || '')}</span></td>
-          <td class="evals-progress-cell">${meetingProgressHtml(s.meetings_run)}</td>
-          <td>${s.has_decision ? '<span class="evals-badge evals-badge-done">Decided</span>' : '<span class="evals-badge">Awaiting</span>'}</td>
-          <td class="num">${num(s.message_count).toLocaleString()}</td>
-          <td class="num">${num(s.report_count)}</td>
-          <td>${flags || '<span class="evals-none">—</span>'}</td>
-          ${admin ? `<td class="num">$${num(s.cost_usd).toFixed(2)}</td>` : ''}
-          <td title="${escapeHtml(fmtTime(s.updated_at))}">${escapeHtml(fmtRelative(s.updated_at))}</td>
-          <td class="evals-actions"><button type="button" class="btn btn-sm btn-danger-ghost evals-delete" data-delete="${escapeHtml(String(s.id))}" aria-label="Delete ${escapeHtml(s.title)}">Delete</button></td>
+          <td data-label="Market"><span class="evals-country">${escapeHtml(s.country || '—')}</span><span class="evals-meta evals-product" title="${escapeHtml(s.product || '')}">${escapeHtml(s.product || '')}</span></td>
+          <td data-label="Meetings"><div class="evals-progress-cell">${meetingProgressHtml(s.meetings_run)}</div></td>
+          <td data-label="Decision">${s.has_decision ? '<span class="evals-badge evals-badge-done">Decided</span>' : '<span class="evals-badge">Awaiting</span>'}</td>
+          <td data-label="Responses" class="num">${num(s.message_count).toLocaleString()}</td>
+          <td data-label="Reports" class="num">${num(s.report_count)}</td>
+          <td data-label="Needs attention"><div class="evals-flags">${flags || '<span class="evals-none">—</span>'}</div></td>
+          ${admin ? `<td data-label="Spend" class="num">$${num(s.cost_usd).toFixed(2)}</td>` : ''}
+          <td data-label="Last activity" title="${escapeHtml(fmtTime(s.updated_at))}">${escapeHtml(fmtRelative(s.updated_at))}</td>
+          <td class="evals-actions"><button type="button" class="btn btn-sm btn-danger-ghost evals-delete" data-delete="${escapeHtml(String(s.id))}" aria-label="Delete ${escapeHtml(s.title)}" title="Delete this evaluation"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6h17M8.5 6V4.5A1.5 1.5 0 0 1 10 3h4a1.5 1.5 0 0 1 1.5 1.5V6M18.5 6l-.8 13.1a2 2 0 0 1-2 1.9H8.3a2 2 0 0 1-2-1.9L5.5 6M10 10.5v6M14 10.5v6"/></svg></button></td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;

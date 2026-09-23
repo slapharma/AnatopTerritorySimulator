@@ -789,6 +789,8 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 .evals-flag { display: inline-block; margin-right: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: #FFF7ED; color: #9A3412; }
 .evals-flag-alert { background: var(--estimate-bg); color: var(--estimate-fg); }
 .evals-none { color: var(--muted); }
+.evals-table td.evals-actions { text-align: right; }
+.evals-delete:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
 @media (max-width: 640px) {
   .evals-page { padding: 16px 16px 48px; }
   .evals-search { flex-basis: 100%; }

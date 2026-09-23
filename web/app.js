@@ -615,6 +615,7 @@
         <th scope="col">Evaluation</th><th scope="col">Market</th><th scope="col">Meetings</th><th scope="col">Decision</th>
         <th scope="col" class="num">Responses</th><th scope="col" class="num">Reports</th><th scope="col">Needs attention</th>
         ${admin ? '<th scope="col" class="num">Spend</th>' : ''}<th scope="col">Last activity</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
       </tr></thead>
       <tbody>${rows.map((s) => {
         const flags = [
@@ -632,6 +633,7 @@
           <td>${flags || '<span class="evals-none">—</span>'}</td>
           ${admin ? `<td class="num">$${num(s.cost_usd).toFixed(2)}</td>` : ''}
           <td title="${escapeHtml(fmtTime(s.updated_at))}">${escapeHtml(fmtRelative(s.updated_at))}</td>
+          <td class="evals-actions"><button type="button" class="btn btn-sm btn-danger-ghost evals-delete" data-delete="${escapeHtml(String(s.id))}" aria-label="Delete ${escapeHtml(s.title)}">Delete</button></td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;
@@ -2632,7 +2634,27 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     $('#evals-filter').addEventListener('input', (e) => { state.evalsFilter = e.target.value; renderEvaluations(); });
     // A row opens its evaluation from anywhere on it; the title is the real
     // button, so keyboard users get Enter on the row as well.
-    $('#evals-table').addEventListener('click', (e) => {
+    $('#evals-table').addEventListener('click', async (e) => {
+      // Delete sits inside the row, so it is handled first and never opens it.
+      // Same server gate as the session header's Delete: creator or admin.
+      const del = e.target.closest('[data-delete]');
+      if (del) {
+        const s = state.sessions.find((x) => String(x.id) === del.dataset.delete);
+        if (!s || !confirm(`Delete "${s.title}"? This cannot be undone.`)) return;
+        del.disabled = true;
+        try {
+          await api.send('DELETE', `/api/sessions/${s.id}`);
+        } catch (err) {
+          del.disabled = false;
+          toast(`Could not delete session: ${err.message}`);
+          return;
+        }
+        toast(`Deleted "${s.title}".`);
+        // Outside the try: the delete already happened, so a failed refresh
+        // must not be reported as a failed delete.
+        loadSessions().catch((err) => toast(`Deleted, but could not refresh the list: ${err.message}`));
+        return;
+      }
       const row = e.target.closest('[data-open]');
       if (row) openSession(Number(row.dataset.open));
     });

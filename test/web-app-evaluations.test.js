@@ -289,4 +289,45 @@ describe('web/app.js renderEvaluations()', () => {
     ctx.renderEvaluations();
     assert.equal(JSON.stringify(sessions), snapshot);
   });
+
+  // The stacked-card layout (@container (max-width: 980px) in styles.css)
+  // turns each td's data-label into a visible label via ::before, so every
+  // non-actions <td> needs one that matches its column header text, or the
+  // card layout shows a blank/wrong label.
+  it('gives every data cell a data-label matching its header text, for an admin user', () => {
+    const sessions = [{ id: 1, title: 'A', has_decision: false, meetings_run: [], cost_usd: 1 }];
+    const { ctx, page } = load({ sessions, isAdmin: true });
+    ctx.renderEvaluations();
+    const html = page['#evals-table'].innerHTML;
+    // "Evaluation" (the first header) is rendered as <th scope="row">, not a
+    // <td>, so it is excluded here along with "Actions", which is deliberately
+    // label-less (see the doesNotMatch assertion below).
+    const headers = [...html.matchAll(/<th scope="col"[^>]*>(.*?)<\/th>/g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+    const dataHeaders = headers.filter((h) => h && h !== 'Actions' && h !== 'Evaluation');
+    const labels = [...html.matchAll(/<td data-label="([^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(labels, dataHeaders);
+    // the actions cell carries no data-label, it isn't part of the card fields
+    assert.doesNotMatch(html, /<td class="evals-actions"[^>]*data-label/);
+  });
+
+  it('gives every data cell a data-label matching its header text, for a non-admin user (no Spend column)', () => {
+    const sessions = [{ id: 1, title: 'A', has_decision: false, meetings_run: [], cost_usd: 1 }];
+    const { ctx, page } = load({ sessions, isAdmin: false });
+    ctx.renderEvaluations();
+    const html = page['#evals-table'].innerHTML;
+    const headers = [...html.matchAll(/<th scope="col"[^>]*>(.*?)<\/th>/g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+    const dataHeaders = headers.filter((h) => h && h !== 'Actions' && h !== 'Evaluation');
+    const labels = [...html.matchAll(/<td data-label="([^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(labels, dataHeaders);
+    assert.ok(!labels.includes('Spend'), 'non-admin rows must not carry a Spend cell at all');
+  });
+
+  it('wraps the meeting progress dots in a div, not on the td itself, so the td keeps its default table alignment', () => {
+    const sessions = [{ id: 1, title: 'A', has_decision: false, meetings_run: ['opening'] }];
+    const { ctx, page } = load({ sessions });
+    ctx.renderEvaluations();
+    const html = page['#evals-table'].innerHTML;
+    assert.match(html, /<td data-label="Meetings"><div class="evals-progress-cell">/, 'progress wrapper must be an inner div');
+    assert.doesNotMatch(html, /<td[^>]*class="[^"]*evals-progress-cell/, 'evals-progress-cell must not be a class on the td itself');
+  });
 });

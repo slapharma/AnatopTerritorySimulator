@@ -32,8 +32,15 @@ code { font-family: Consolas, 'Cascadia Mono', monospace; font-size: .92em; back
 
 /* ---------- layout ---------- */
 .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; }
-.app.sidebar-collapsed { grid-template-columns: 0 1fr; }
+/* Collapsed, the sidebar is display:none and so is no longer a grid item, and
+   #btn-sidebar-expand is position:fixed, so it is not one either: .main is the
+   only item left and auto-places into the FIRST column. A two-column template
+   here ("0 1fr") therefore put .main in the 0px column, crushing the whole
+   page into the left edge. One column, and the topbar clears the fixed
+   expand button instead. */
+.app.sidebar-collapsed { grid-template-columns: 1fr; }
 .app.sidebar-collapsed .sidebar { display: none; }
+.app.sidebar-collapsed .topbar { padding-left: 52px; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 /* ---------- sidebar ----------
    Three stacked blocks, each with one job: the brand and New evaluation; the
@@ -537,6 +544,10 @@ dialog.dlg-wide { width: min(1200px, 94vw); }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  /* The sidebar is hidden here whether or not it is collapsed, so the expand
+     button would only reveal nothing; and the topbar needs no room for it. */
+  .sidebar-expand-btn { display: none; }
+  .app.sidebar-collapsed .topbar { padding-left: 20px; }
   .panel { width: 100vw; }
   .fields { grid-template-columns: 1fr; }
   .agent-grid { grid-template-columns: 1fr; }

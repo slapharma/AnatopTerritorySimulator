@@ -88,7 +88,11 @@ describe('PATCH /api/sessions/:id — model switch', () => {
     const [msg] = messages;
     assert.equal(msg.role, 'system');
     assert.equal(msg.speaker, 'model');
-    assert.match(msg.text, /Mistral Nemo/);
+    // "from" is the configured default (session.model starts null), named by
+    // its label; derived rather than spelled out so a default change is not a
+    // test change.
+    const defaultName = config.MODEL_OPTIONS.find((o) => o.id === config.MODEL).label.replace(/\s*\(.*$/, '');
+    assert.ok(msg.text.includes(`from ${defaultName} to`), msg.text);
     assert.match(msg.text, /Nemotron 3 Ultra 550B/);
   });
 

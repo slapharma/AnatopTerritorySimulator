@@ -20,8 +20,13 @@ function stripEmphasis(s) {
 // roster, keyed by agent key with name/short/function/label) and 'moderator'.
 // Unrecognised names are dropped.
 function addresseeKeys(phrase, agents) {
+  // A parenthetical is its own part: "the Moderator (the human)", the wording
+  // evidence-rules.md itself uses, left "the Moderator  the human" as one part
+  // that matched nobody, so the whole block was dropped. As separate parts,
+  // "the human" resolves to the moderator, and "the other agents (Ruth,
+  // Charlie)" still resolves to Ruth and Charlie.
   const parts = stripEmphasis(phrase)
-    .replace(/[()]/g, ' ')
+    .replace(/[()]/g, ',')
     .split(/\s*(?:,|\/|&|\band\b)\s*/i)
     .map((p) => p.trim())
     .filter(Boolean);

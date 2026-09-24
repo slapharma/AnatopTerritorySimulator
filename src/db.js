@@ -219,13 +219,23 @@ async function switchModel(sessionId, model, describe) {
   });
 }
 
+// A source's kind only ever moves towards 'cited' (see src/transcript.js for
+// what each kind means). A URL cited while unseen ('unverified') that later
+// turns up in a search or an open is real and cited, so it becomes 'cited' too.
+function mergeSourceKind(a, b) {
+  if (a === b) return a;
+  if (a === 'cited' || b === 'cited') return 'cited';
+  if ((a === 'searched' && b === 'unverified') || (a === 'unverified' && b === 'searched')) return 'cited';
+  return a || b;
+}
+
 async function upsertSource(sessionId,{ url, title, kind, messageId, speaker }) {
   return withSessionLock(sessionId, async (client) => {
     const existing = (await client.query('SELECT * FROM sources WHERE session_id = $1 AND url = $2', [sessionId, url])).rows[0];
     if (existing) {
       const citedBy = JSON.parse(existing.cited_by_json);
       if (!citedBy.some((c) => c.message_id === messageId)) citedBy.push({ message_id: messageId, speaker });
-      const newKind = existing.kind === 'cited' || kind === 'cited' ? 'cited' : 'searched';
+      const newKind = mergeSourceKind(existing.kind, kind);
       await client.query('UPDATE sources SET title = COALESCE($1, title), kind = $2, cited_by_json = $3 WHERE id = $4',
         [title || null, newKind, JSON.stringify(citedBy), existing.id]);
       return existing.n;
@@ -521,7 +531,7 @@ module.exports = {
   getDefaults, setDefaultField, replaceDefaults,
   listSessions, getSession, lastSession, renameSession, touchSession, setDecision, setModel, switchModel, updateInputs, deleteSession, createSession,
   listMessages, getMessage, deleteMessage, updateMessage, addMessage, beginAgentTurn, setFavourite,
-  listSources, upsertSource,
+  listSources, upsertSource, mergeSourceKind,
   listDisagreements, setDisStatus, upsertDisagreement,
   listMeetingMinutes, addMeetingMinutes, setMinutesApproved, getMinutesByToken,
   listQuestions, addQuestions, getQuestion, updateQuestion,

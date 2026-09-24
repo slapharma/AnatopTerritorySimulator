@@ -31,7 +31,8 @@ function messageBlock(m, heading = `${speakerName(m)} · ${modeLabel(m.mode)} ·
 
 function sources(s) {
   const cited = s.sources.filter((x) => x.kind === 'cited');
-  const searched = s.sources.length - cited.length;
+  const searched = s.sources.filter((x) => x.kind === 'searched').length;
+  const unverified = s.sources.filter((x) => x.kind === 'unverified');
   const lines = cited.map((x) => {
     const by = [...new Set((x.cited_by || []).map((c) => party(c.speaker)))].join(', ');
     return `- **${x.n}.** [${safe(x.title || x.url)}](${String(x.url).replace(/\(/g, '%28').replace(/\)/g, '%29')}) · cited ${fmtUTC(x.first_cited_at)}${by ? ` · ${by}` : ''}`;
@@ -39,6 +40,10 @@ function sources(s) {
   return [
     lines.length ? lines.join('\n') : empty('No sources have been cited in a claim yet.'),
     searched ? empty(`${searched} additional page(s) were searched but not cited in any claim.`) : '',
+    unverified.length ? [
+      '**Unverified links.** Cited by an agent, but no agent searched for or opened these addresses, so they may not exist.',
+      unverified.map((x) => `- **${x.n}.** ${safe(x.url)}`).join('\n'),
+    ].join('\n\n') : '',
   ].filter(Boolean).join('\n\n');
 }
 

@@ -18,6 +18,10 @@
   --verified-fg: #166534; --verified-bg: #DCFCE7;
   --estimate-fg: #92400E; --estimate-bg: #FEF3C7;
   --unknown-fg: #374151; --unknown-bg: #E5E7EB;
+  /* A VERIFIED claim whose quote failed the server check, and a claim resting on
+     company material the panel could not read (src/evidence.js). */
+  --downgraded-fg: #9A3412; --downgraded-bg: #FFEDD5;
+  --internal-fg: #1E3A8A; --internal-bg: #DBEAFE;
   --radius: 10px; --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .08);
   --sidebar-w: 268px; --panel-w: 860px;
 }
@@ -385,6 +389,29 @@ body.non-admin .msg-cost { display: none; }
 .badge-estimate { color: var(--estimate-fg); background: var(--estimate-bg); }
 .badge-unknown { color: var(--unknown-fg); background: var(--unknown-bg); }
 .badge .d { font-weight: 500; }
+/* Over-claim: labelled UNVERIFIED in text, dashed edge, so it does not rely on colour alone. */
+.badge-downgraded { color: var(--downgraded-fg); background: var(--downgraded-bg); outline: 1px dashed var(--downgraded-fg); outline-offset: -1px; }
+.badge-internal { color: var(--internal-fg); background: var(--internal-bg); }
+.badge .q { font-style: italic; font-weight: 500; }
+.badge .why { font-weight: 600; }
+
+/* ---------- evidence strip (per message) and session status ---------- */
+.evidence-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 16px 12px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); }
+.ev { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-weight: 600; line-height: 1.6; }
+.ev-verified { background: var(--verified-bg); color: var(--verified-fg); }
+.ev-downgraded { background: var(--downgraded-bg); color: var(--downgraded-fg); }
+.ev-estimate { background: var(--estimate-bg); color: var(--estimate-fg); }
+.ev-unknown { background: var(--unknown-bg); color: var(--unknown-fg); }
+.ev-internal { background: var(--internal-bg); color: var(--internal-fg); }
+.ev-warn { background: var(--danger-soft); color: var(--danger); border: 1px solid #FECACA; }
+.msg-warning { margin: 0 16px 10px; padding: 8px 12px; background: var(--estimate-bg); border: 1px solid #FCD34D; border-radius: var(--radius); color: var(--estimate-fg); font-size: 13px; font-weight: 600; }
+.session-status { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow); font-size: 13px; }
+.session-status .ss-decision, .session-status .ss-evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.session-status .ss-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.session-status .ss-none { color: var(--text-2); }
+.session-status .ss-conf { font-weight: 600; color: var(--text-2); }
+.session-status .ss-meta { font-size: 12px; color: var(--muted); }
+.chip.chip-attention:not(.active) { border-color: var(--estimate-fg); color: var(--estimate-fg); }
 .badge-endpoint { display: block; width: fit-content; margin-bottom: 2px; cursor: default; }
 .badge-nextstep { color: var(--primary-hover); background: var(--primary-soft); }
 .badge-question { color: var(--user); background: var(--user-soft); }
@@ -469,7 +496,9 @@ body.non-admin .msg-cost { display: none; }
 .src a { word-break: break-all; font-size: 11.5px; }
 .src .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .src .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding: 1px 5px; border-radius: var(--radius); background: var(--surface-2); margin-left: 4px; }
-.src .kind.cited { background: var(--verified-bg); color: var(--verified-fg); }
+.src .kind.cited { background: var(--primary-soft); color: var(--primary-hover); }
+.src .kind.read { background: var(--verified-bg); color: var(--verified-fg); }
+.src .kind.unverified { background: var(--downgraded-bg); color: var(--downgraded-fg); cursor: help; }
 .dis { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer; border-radius: var(--radius); }
 .dis:hover { background: var(--surface-2); }
 .dis .topic { font-weight: 700; display: flex; align-items: center; gap: 8px; }

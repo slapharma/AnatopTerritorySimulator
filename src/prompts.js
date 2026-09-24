@@ -75,6 +75,12 @@ const INDICATION_SUGGESTIONS = [
 const INPUT_FIELDS = [
   { key: 'product',              label: 'PRODUCT', required: true },
   { key: 'indication',           label: 'INDICATION', suggestions: INDICATION_SUGGESTIONS },
+  // Restored 2026-09-24 after "Dossier on hand" was cut: the Clinical agent is
+  // asked whether the pivotal data will satisfy the regulator, and with nothing
+  // here both models audited invented a trial to answer it. Blank stays
+  // INPUT MISSING, which the agent is told to say rather than fill.
+  { key: 'pivotal_evidence',     label: 'PIVOTAL EVIDENCE', multiline: true,
+    hint: 'The pivotal trial(s) behind the dossier: design, population, comparator, primary endpoint and headline result, as the study report states them. Agents treat this as the company\'s own account (INTERNAL), not as independently verified' },
   { key: 'country',              label: 'COUNTRY', options: COUNTRY_OPTIONS, required: true },
   { key: 'reference_approvals',  label: 'REFERENCE APPROVALS', type: 'country-status',
     options: COUNTRY_OPTIONS, statuses: APPROVAL_STATUSES,
@@ -235,7 +241,7 @@ async function knowledgeBlock() {
   }
   return [
     '## INTERNAL KNOWLEDGEBASE (curated company Drive index — titles/notes only)',
-    'These are real internal documents the company holds. You cannot open their Drive links with your web tool — cite them by title as internal references ("per the company\'s [title]") when relevant, do not invent their content, and never present a title as something you have read in full.',
+    'These are real internal documents the company holds. You cannot open them, and you have read none of them. You may point the moderator to one by title, tagged `[INTERNAL — <title>, not read by the panel]`, but you know nothing of its contents beyond the title and note below: never state its design, figures or conclusions.',
     '',
     lines.join('\n'),
   ].join('\n');
@@ -245,7 +251,13 @@ async function systemPrompt(agentKey, inputs) {
   const agent = AGENTS[agentKey];
   if (!agent) throw new Error(`Unknown agent ${agentKey}`);
   const persona = fill(await personaFor(agentKey), inputs);
-  const rules = fill(readPrompt('evidence-rules.md'), inputs);
+  // The evidence rules bind everyone. The formatting rules (Slides deck,
+  // Questions block, disagreement format) are for the panel's spoken turns: on
+  // the Moderator Assistant they collided with minutes, reports and the JSON
+  // answered-check, which then ended with a slide deck.
+  const rules = fill(agentKey === 'moderator'
+    ? readPrompt('evidence-rules.md')
+    : `${readPrompt('evidence-rules.md')}\n${readPrompt('formatting-rules.md')}`, inputs);
   const today = new Date().toISOString().slice(0, 10);
   // The roster is on first-name terms (prompts/agents/index.json `name`). An agent
   // that does not know it is called Ruth cannot answer to "Ruth, what's the
@@ -288,22 +300,41 @@ function speakerLabel(msg) {
 // window mid-turn. Older messages drop first; the full record is always in
 // the export, so nothing is actually lost, just not re-sent every turn.
 const MAX_TRANSCRIPT_CHARS = 60000;
+// Reports, the decision and the answered-check summarise the whole evaluation,
+// and the facts they rest on sit in the earliest meetings: exactly what an
+// oldest-first cut drops first, so a Final report after cross-talk could not
+// see a single Baselines answer. They get a larger budget (about 50k tokens,
+// well inside the default model's window), and when even that is exceeded the
+// side conversations go before the three core meetings do.
+const SYNTHESIS_TRANSCRIPT_CHARS = 200000;
+const CORE_MODES = new Set(['opening', 'round2', 'round3']);
+// Named in each message header, so "the agents' Converge figures" and "this
+// meeting only" refer to something the model can see.
+const MEETING_LABEL = {
+  opening: 'Round 1 — Baselines', round2: 'Round 2 — Challenge', round3: 'Round 3 — Converge',
+  crosstalk: 'Cross-talk', reply: 'Reply', custom: 'Custom meeting', dive_deeper: 'Dive Deeper',
+  autopilot: 'Autopilot', decision: 'Decision output',
+};
 
-function transcriptText(messages) {
+function transcriptText(messages, { synthesis = false } = {}) {
   const usable = messages.filter((m) => !m.error && m.text);
   if (!usable.length) return '(no messages yet. This is the first turn)';
   const blocks = usable.map((m) => {
     const to = m.role === 'user' && m.addressed_to && m.addressed_to !== 'all' ? ` (to ${AGENTS[m.addressed_to] ? AGENTS[m.addressed_to].label : m.addressed_to})` : '';
-    return `--- [${m.seq}] ${speakerLabel(m)}${to} · ${m.created_at} ---\n${m.text}`;
+    const meeting = m.role === 'agent' && MEETING_LABEL[m.mode] ? ` · ${MEETING_LABEL[m.mode]}` : '';
+    return { core: m.role === 'agent' && CORE_MODES.has(m.mode), text: `--- [${m.seq}] ${speakerLabel(m)}${to}${meeting} · ${m.created_at} ---\n${m.text}` };
   });
-  let total = blocks.reduce((n, b) => n + b.length + 2, 0);
+  const budget = synthesis ? SYNTHESIS_TRANSCRIPT_CHARS : MAX_TRANSCRIPT_CHARS;
+  let total = blocks.reduce((n, b) => n + b.text.length + 2, 0);
   let dropped = 0;
-  while (total > MAX_TRANSCRIPT_CHARS && blocks.length > 1) {
-    total -= blocks.shift().length + 2;
+  while (total > budget && blocks.length > 1) {
+    const i = synthesis ? Math.max(0, blocks.findIndex((b) => !b.core)) : 0;
+    total -= blocks.splice(i, 1)[0].text.length + 2;
     dropped++;
   }
-  if (dropped) blocks.unshift(`--- ${dropped} earlier message(s) omitted here to stay within the model's context budget; the full transcript is in the session record and export. ---`);
-  return blocks.join('\n\n');
+  const out = blocks.map((b) => b.text);
+  if (dropped) out.unshift(`--- ${dropped} ${synthesis ? '' : 'earlier '}message(s) omitted here to stay within the model's context budget; the full transcript is in the session record and export. ---`);
+  return out.join('\n\n');
 }
 
 const COMPACT_SUFFIX = "\n\nKeep this response compact: under 350 words, lead with your conclusion, use tight bullet points, and do not restate context or repeat earlier messages. Full depth and nuance are for if the moderator clicks \"Dive Deeper\" on this response — until then, favour brevity.";
@@ -312,7 +343,7 @@ const COMPACT_SUFFIX = "\n\nKeep this response compact: under 350 words, lead wi
 // assembled server-side from data the model would otherwise have to re-derive
 // from the raw transcript (disagreement statuses, autopilot run summaries,
 // sources count, missing inputs).
-function reportMetaBlock({ disagreements, autopilotRuns, sourcesCount, inputs }) {
+function reportMetaBlock({ disagreements, autopilotRuns, sources, evidence, inputs }) {
   const disLines = (disagreements || []).length
     ? disagreements.map((d) => `- #${d.n} ${d.topic} — ${d.status.toUpperCase()}`).join('\n')
     : '(none logged)';
@@ -321,6 +352,11 @@ function reportMetaBlock({ disagreements, autopilotRuns, sourcesCount, inputs })
     : '(none run)';
   const missing = INPUT_FIELDS.filter((f) => !(inputs[f.key] || '').trim()).map((f) => `- ${f.label}`);
   const missingLines = missing.length ? missing.join('\n') : '(none — all inputs provided)';
+  const s = sources || {};
+  const t = (evidence && evidence.totals) || {};
+  const agentLines = evidence && evidence.byAgent && evidence.byAgent.size
+    ? [...evidence.byAgent.entries()].map(([a, c]) => `- ${a}: ${c.verified} VERIFIED, ${c.downgraded} downgraded, ${c.estimate} ESTIMATE, ${c.unknown} UNKNOWN, ${c.internal} INTERNAL`).join('\n')
+    : '(no tagged claims yet)';
   return [
     '## REPORT METADATA (assembled by the app — use this instead of re-deriving it from the transcript)',
     '### Disagreement log',
@@ -329,7 +365,11 @@ function reportMetaBlock({ disagreements, autopilotRuns, sourcesCount, inputs })
     '### Autopilot runs',
     runLines,
     '',
-    `### Sources cited so far: ${sourcesCount || 0}`,
+    '### Evidence counts (every tag in the panel\'s messages; VERIFIED = quote found on a page the agent opened)',
+    `Total: ${t.verified || 0} VERIFIED, ${t.downgraded || 0} downgraded from VERIFIED, ${t.estimate || 0} ESTIMATE, ${t.unknown || 0} UNKNOWN, ${t.internal || 0} INTERNAL`,
+    agentLines,
+    '',
+    `### Sources: ${s.opened || 0} page(s) opened and read, ${s.cited || 0} cited, ${s.searched || 0} search result(s) only, ${s.unverified || 0} link(s) cited that no agent ever searched or opened`,
     '',
     '### Inputs still marked INPUT MISSING',
     missingLines,
@@ -352,7 +392,7 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
   const r = rounds();
   let roundText = r[mode] || r.crosstalk;
   if (mode === 'custom') roundText = `${r.custom}\n\nCUSTOM INSTRUCTION:\n${instruction || '(none given)'}`;
-  if (mode === 'decision') roundText = 'Write the DECISION OUTPUT now from the transcript above.';
+  if (mode === 'decision') roundText = fill(readPrompt('decision.md'), inputs || {});
   if (mode === 'dive_deeper') roundText = `${r.dive_deeper}\n\n${instruction || ''}`;
   else if (mode === 'autopilot' && question) {
     // A question discussion (Intelligence > Agent Questions): whoever was asked
@@ -390,9 +430,10 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
   // itself says not to reference other agents. Showing the real transcript
   // here would leak later rounds' content into it if opening is ever re-run
   // or resumed after other rounds already happened, so it never sees one.
+  const synthesis = ['report', 'decision', 'questions_check'].includes(mode);
   const parts = mode === 'opening'
     ? ['## TRANSCRIPT SO FAR', '(Round 1: Baselines. Answer independently — do not reference other agents or any other message, even if some exist.)']
-    : ['## TRANSCRIPT SO FAR', transcriptText(messages)];
+    : ['## TRANSCRIPT SO FAR', transcriptText(messages, { synthesis })];
   if (disText) parts.push('', disText);
   parts.push('', `## YOUR TURN. You are ${who}.`, roundText);
   return parts.join('\n');
@@ -400,5 +441,5 @@ function turnUserMessage({ agentKey, mode, instruction, messages, disagreements,
 
 module.exports = {
   AGENTS, AGENT_ORDER, INPUT_FIELDS, BASE_VALUES, systemPrompt, agentAbilities, knowledgeDefault,
-  turnUserMessage, inputsBlock, speakerLabel, rounds, STANCE, personaFilesRaw, fill,
+  turnUserMessage, inputsBlock, speakerLabel, rounds, STANCE, personaFilesRaw, fill, transcriptText,
 };

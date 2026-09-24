@@ -25,6 +25,10 @@ Flat, light, low-chrome. Cards with 1px borders and a 4px left rule in the speak
 | VERIFIED badge | #166534 on #DCFCE7 |
 | ESTIMATE badge | #92400E on #FEF3C7 |
 | UNKNOWN badge | #374151 on #E5E7EB |
+| UNVERIFIED badge (a VERIFIED claim whose quote failed the check) | #9A3412 on #FFEDD5, dashed 1px outline, labelled "UNVERIFIED" |
+| INTERNAL badge (rests on company material) | #1E3A8A on #DBEAFE |
+| Source pill: read / cited / search result / unverified link | verified colours / primary on #ECFEFF / grey / UNVERIFIED colours |
+| "No research" and "out of date" warnings | #B91C1C on #FEF2F2, #FECACA border |
 | Disagreement block | #FFF7ED with #FED7AA border |
 | Questions block | #ECFEFF with #A5F3FC border |
 
@@ -38,6 +42,12 @@ Montserrat (self-hosted TTF in `fonts/`): 400 body, 600 labels/buttons, 700 head
 - Transitions 150ms colour/border only; no transform hover.
 - Streaming text repaints at most every 250ms; the transcript stays pinned to the bottom only if the user is already there.
 - `prefers-reduced-motion` disables the spinner animation and smooth scroll.
+
+## Evidence signals (added 2026-09-24)
+- Every agent message ends with an evidence strip: searches, pages read, and pill counts per tag kind, plus a red "No research this turn" chip when an evidence meeting ran no search.
+- Above the transcript, a status card (4px accent rule) carries the latest recommendation, its confidence and date, an "Out of date" chip once the panel has spoken since, and the session-wide tag counts.
+- Status is never colour alone: each pill and badge carries its word (UNVERIFIED, INTERNAL, read, unverified link).
+- A quote inside a VERIFIED badge is italic, in curly quotes, so it can be read against the claim.
 
 ## Anti-patterns avoided
 Neon colours, AI purple/pink gradients, motion-heavy reveals, emoji-as-icon, transparent glass cards on a light ground.

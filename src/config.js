@@ -4,18 +4,18 @@
 // every request in its usage block and that figure is what the app records.
 module.exports = {
   OPENROUTER_BASE: 'https://openrouter.ai/api/v1',
-  // Primary model. Switched off the free Gemma tier on 2026-09-22: free-tier's
-  // ~20 req/min cap (see RETRY_ON_429 below) was hitting HTTP 429 on every agent
-  // mid-session — same session errored repeatedly across 2026-09-16 to
-  // 2026-09-22 (turns 229-234, all three agents). Paid billing off account
-  // credit has no such request-rate ceiling. Mistral Nemo priced here at
-  // ~$0.02/$0.03 per M tok — cheapest paid option, applied to ALL users
-  // (not admin-gated) since it replaces the free default; see MODEL_OPTIONS
-  // below for why its `free` flag is now true. Change to any OpenRouter model id.
+  // Primary model. Qwen 3.7 Flash since 2026-09-24. Mistral Nemo, the default
+  // from 2026-09-22 (chosen to get off the free tier's 429s), never called its
+  // tools: in a measured Korea evaluation it ran nine turns with zero searches
+  // and cited 17 URLs it had invented (tasks/audit-2026-09-24-human-factcheck.md).
+  // Qwen searched and read in the same run, in Korean as well as English, for
+  // about $0.03 a session. Paid, so no free-tier rate cap. Change to any
+  // OpenRouter model id, but check it calls web_search first: a model that
+  // answers from memory looks fine until the sources are opened.
   // (nemotron-3.5-lightning was tried as a faster swap but its streamed tool_calls
   // deltas don't parse correctly here — turns finish empty with finish_reason
   // "tool_calls" and zero parsed calls. Do not re-add it without fixing that first.)
-  MODEL: 'mistralai/mistral-nemo',
+  MODEL: 'qwen/qwen3.7-flash',
   // Tried in order if the primary is rate-limited or down.
   // Nvidia models removed from this list: their free-tier capacity has repeatedly
   // returned "Upstream error from Nvidia: Service temporarily overloaded" mid-stream
@@ -39,7 +39,7 @@ module.exports = {
     // free:true here (not gated) because MODEL above defaults every session to
     // this model already — refusing an explicit pick of the same model a
     // non-admin already got by default would be inconsistent, not safer.
-    { id: 'mistralai/mistral-nemo', label: 'Mistral Nemo (default — ~$0.02/$0.03 per M tok)', free: true },
+    { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (default — ~$0.03/$0.13 per M tok)', free: true },
     { id: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B A4B (free, rate-limited ~20 req/min)', free: true },
     { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)', free: true },
     // Far and away the most expensive option here — one full evaluation is
@@ -50,8 +50,17 @@ module.exports = {
     // stand up. AUTOPILOT.max_cost_usd still caps a single autopilot run.
     { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5 (paid, ~$2/$10 per M tok — best quality, most expensive)', free: false },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (paid, ~$0.03/$0.13 per M tok)', free: false },
-    { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash (paid, ~$0.03/$0.13 per M tok)', free: false },
   ],
+
+  // Models taken out of service because they cannot do the job, with the reason
+  // written into the transcript when a session still on one is moved off it.
+  // A session keeps whatever model it was created with (sessions.model), so
+  // without this every evaluation started on Nemo would go on answering from
+  // memory. The next turn in such a session switches it to MODEL, and the
+  // switch note says why.
+  RETIRED_MODELS: {
+    'mistralai/mistral-nemo': 'it does not use web search, so its answers came from memory with invented sources',
+  },
 
   // Used only when OpenRouter does not return a cost (it normally does). USD per million tokens.
   PRICES: {
@@ -61,7 +70,10 @@ module.exports = {
   },
   USD_TO_GBP: 0.78,              // on-screen GBP estimate only
 
-  MAX_TOKENS_AGENT: 4500,        // compact default; see COMPACT_SUFFIX in prompts.js
+  // Ceilings, not targets: a request is billed for what it writes. A reasoning
+  // model spends part of this thinking before any visible text, so a tight
+  // ceiling ends a turn with nothing written (finish_reason "length").
+  MAX_TOKENS_AGENT: 8000,        // compact default; see COMPACT_SUFFIX in prompts.js
   MAX_TOKENS_DIVE_DEEPER: 16000, // "Dive Deeper" follow-up on one response
   MAX_TOKENS_DECISION: 32000,
 
@@ -82,11 +94,14 @@ module.exports = {
     default_max_chars: 600,
   },
 
-  // Report depth (3 stops, both Interim and Final). max_tokens scaled per stop;
-  // word bands are enforced in the prompt text (prompts/report-*.md).
+  // Report depth (3 stops, both Interim and Final). Word bands are enforced in
+  // the prompt text (prompts/report-*.md); max_tokens only has to leave room
+  // for them after the model's reasoning. At 6000, a Standard Final report on
+  // Qwen 3.7 Flash spent the whole budget reasoning and wrote nothing
+  // (2026-09-24); the same report at 32000 wrote 18k characters.
   REPORT_DEPTH: {
-    brief:    { max_tokens: 2000,  words: [0, 450] },
-    standard: { max_tokens: 6000,  words: [1000, 1800] },
+    brief:    { max_tokens: 8000,  words: [0, 450] },
+    standard: { max_tokens: 16000, words: [1000, 1800] },
     full:     { max_tokens: 32000, words: [2500, 4000] }, // = MAX_TOKENS_DECISION
   },
 

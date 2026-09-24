@@ -156,9 +156,36 @@
     // Fail closed: if the sanitizer did not load, render the text as escaped
     // plain text rather than trusting raw HTML from an agent or another user.
     html = window.DOMPurify ? DOMPurify.sanitize(html) : `<p>${escapeHtml(text || '')}</p>`;
-    html = html.replace(/\[(VERIFIED|ESTIMATE|UNKNOWN)\b\s*(?:&#8212;|—|–|:|-)?\s*([^\]]*)\]/g, (m, tag, detail) => {
-      const d = detail.trim();
-      return `<span class="badge badge-${tag.toLowerCase()}" title="${escapeHtml(d.replace(/<[^>]+>/g, ''))}">${tag}${d ? ` <span class="d">${d}</span>` : ''}</span>`;
+    // A tag the model put in backticks (stored before the server began
+    // dropping them) is still a tag, not code.
+    html = html.replace(/<code>(\[(?:VERIFIED|ESTIMATE|UNKNOWN|INTERNAL)\b[^\]<]*\](?:\s*\[\d+\])*)<\/code>/g, '$1');
+    html = html.replace(/\[(VERIFIED|ESTIMATE|UNKNOWN|INTERNAL)\b\s*(?:&#8212;|—|–|:|-)?\s*([^\]]*)\]/g, (m, tag, detail) => {
+      let d = detail.trim();
+      // A VERIFIED tag that failed the server's quote check (src/evidence.js)
+      // is stored as an ESTIMATE saying why. It gets its own label and style,
+      // not just a colour, so an over-claim reads differently from an honest estimate.
+      // The reason is one of src/evidence.js REASONS (plain words); anything
+      // else is not a downgrade the server wrote, so it is left as an ESTIMATE.
+      const down = tag === 'ESTIMATE' && /^\(unverified, downgraded from VERIFIED(?::\s*([a-z ]{1,40}))?\)/i.exec(d);
+      let label = tag;
+      let cls = tag.toLowerCase();
+      if (down) {
+        label = 'UNVERIFIED';
+        cls = 'downgraded';
+        d = `${d.slice(down[0].length).replace(/^\s*(?:&#8212;|—|–|:|-)\s*/, '')} <span class="why">(claimed VERIFIED: ${escapeHtml(down[1] || 'page not opened')})</span>`;
+      }
+      // The words quoted from the page, set apart so they can be read against
+      // the claim. Only quotes in text count, not an attribute such as the
+      // href="…" marked puts on a linked URL.
+      const inTag = [];
+      for (const t of d.matchAll(/<[^>]*>/g)) inTag.push([t.index, t.index + t[0].length]);
+      const quotes = [...d.matchAll(/(?:&quot;|["“”«»])((?:(?!&quot;)[^"“”«»<>])+)(?:&quot;|["“”«»])/g)]
+        .filter((q) => !inTag.some(([a, b]) => q.index >= a && q.index < b));
+      if (quotes.length && !down) {
+        const q = quotes[quotes.length - 1];
+        d = `${d.slice(0, q.index).replace(/[,\s]+$/, '')} <span class="q">“${q[1].trim()}”</span>${d.slice(q.index + q[0].length)}`;
+      }
+      return `<span class="badge badge-${cls}" title="${escapeHtml(d.replace(/<[^>]+>/g, ''))}">${label}${d ? ` <span class="d">${d}</span>` : ''}</span>`;
     });
     const max = state.session ? state.session.sources.length : 0;
     html = html.replace(/\[(\d{1,3})\]/g, (m, n) => (Number(n) >= 1 && Number(n) <= max ? `<a class="cite" href="#src-${n}" data-src="${n}" title="Source ${n}">[${n}]</a>` : m));
@@ -177,6 +204,9 @@
         const norm = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
         return `<${tag}>${lead}<span class="badge badge-endpoint badge-${norm.toLowerCase().replace(/\s+/g, '')}">${norm}</span>`;
       });
+    // The decorations above are string edits on sanitized HTML; sanitize once
+    // more so no cut or re-joined fragment can become live markup.
+    if (window.DOMPurify) html = DOMPurify.sanitize(html);
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     const root = tpl.content;
@@ -808,11 +838,40 @@
     return row;
   }
 
+  // The session at a glance, above the transcript: the latest recommendation
+  // (flagged stale once the panel has spoken again since), and what the panel's
+  // claims rest on, counted by the same rules as each message's strip.
+  function sessionStatusEl() {
+    const s = state.session;
+    const agentMsgs = s.messages.filter((m) => m.role === 'agent' && !m.error && m.text);
+    if (!agentMsgs.length) return null;
+    const k = { verified: 0, downgraded: 0, estimate: 0, unknown: 0, internal: 0 };
+    for (const m of agentMsgs) { const c = tagCounts(m.text); for (const key of Object.keys(k)) k[key] += c[key]; }
+    const unresearched = agentMsgs.filter(noResearch).length;
+    const decision = [...s.messages].reverse().find((m) => m.mode === 'decision' && m.text);
+    const el = document.createElement('section');
+    el.className = 'session-status';
+    el.setAttribute('aria-label', 'Evaluation status');
+    let decisionHtml = '<div class="ss-decision ss-none">No recommendation yet. Run the meetings, then a Final report.</div>';
+    if (decision) {
+      const rec = (decision.text.match(/\b(GO WITH CONDITIONS|NO-GO|INSUFFICIENT INFORMATION|GO)\b/) || [])[1];
+      const conf = (decision.text.match(/Confidence[^A-Za-z]{0,8}(High|Medium|Low)\b/i) || [])[1];
+      const since = s.messages.filter((m) => m.seq > decision.seq && (m.role === 'agent' || m.role === 'user')).length;
+      decisionHtml = `<div class="ss-decision"><span class="ss-label">Recommendation</span> <strong>${escapeHtml(rec || 'see decision')}</strong>${conf ? ` <span class="ss-conf">Confidence ${escapeHtml(conf)}</span>` : ''} <span class="ss-meta">written ${escapeHtml(fmtTime(decision.created_at))}</span>${since ? ` <span class="ev ev-warn">Out of date: ${since} message(s) since</span>` : ''} <button type="button" class="btn btn-sm" data-ss="decision">Open</button></div>`;
+    }
+    el.innerHTML = `${decisionHtml}<div class="ss-evidence"><span class="ss-label">Panel evidence</span>
+      <span class="ev ev-verified">${k.verified} VERIFIED</span>${k.downgraded ? `<span class="ev ev-downgraded">${k.downgraded} UNVERIFIED</span>` : ''}<span class="ev ev-estimate">${k.estimate} ESTIMATE</span><span class="ev ev-unknown">${k.unknown} UNKNOWN</span>${k.internal ? `<span class="ev ev-internal">${k.internal} INTERNAL</span>` : ''}${unresearched ? `<span class="ev ev-warn">${unresearched} response(s) with no research</span>` : ''}</div>`;
+    $('[data-ss="decision"]', el)?.addEventListener('click', jumpToDecision);
+    return el;
+  }
+
   function renderTranscript() {
     const s = state.session;
     const t = $('#transcript');
     t.innerHTML = '';
     if (!s.messages.length) { t.innerHTML = '<div class="empty">No messages yet. Run Baselines to start.</div>'; return; }
+    const status = sessionStatusEl();
+    if (status) t.appendChild(status);
     t.appendChild(columnHeadsRow());
     renderByMeeting(t, s.messages);
     applyFilter();
@@ -879,6 +938,52 @@
       }
       el.hidden = !anyVisible;
     });
+  }
+
+  // ---------------- evidence signals ----------------
+  // Counted from the stored text, which the server has already checked, so old
+  // messages get a strip too. content_json adds how the answer was reached.
+  const RESEARCH_MODES = ['opening', 'round2', 'dive_deeper'];
+  function contentOf(m) {
+    if (!m.content_json) return {};
+    try { return JSON.parse(m.content_json) || {}; } catch { return {}; }
+  }
+  function tagCounts(text) {
+    const k = { verified: 0, downgraded: 0, estimate: 0, unknown: 0, internal: 0 };
+    for (const t of String(text || '').matchAll(/\[(VERIFIED|ESTIMATE|UNKNOWN|INTERNAL)\b([^\]]*)\]/g)) {
+      if (t[1] === 'ESTIMATE' && /^\s*\(unverified, downgraded from VERIFIED/i.test(t[2])) k.downgraded++;
+      else k[t[1].toLowerCase()]++;
+    }
+    return k;
+  }
+  function noResearch(m) {
+    const c = contentOf(m);
+    const searches = (c.research && c.research.searches) ?? (c.usage && c.usage.searches) ?? m.searches ?? 0;
+    const required = c.research ? c.research.required : RESEARCH_MODES.includes(m.mode);
+    return Boolean(required && !searches);
+  }
+  function evidenceStripEl(m) {
+    if (m.role !== 'agent' || m.error || !m.text) return null;
+    const c = contentOf(m);
+    const searches = (c.research && c.research.searches) ?? (c.usage && c.usage.searches) ?? m.searches ?? 0;
+    const opens = (c.research && c.research.opens) ?? (c.usage && c.usage.opens) ?? null;
+    const k = tagCounts(m.text);
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const chips = [
+      `<span class="ev">${plural(searches, 'search', 'searches')}</span>`,
+      opens == null ? '' : `<span class="ev">${plural(opens, 'page read', 'pages read')}</span>`,
+      `<span class="ev ev-verified">${k.verified} VERIFIED</span>`,
+      k.downgraded ? `<span class="ev ev-downgraded" title="Claimed VERIFIED, but the quoted words were not found on a page the agent opened">${k.downgraded} UNVERIFIED</span>` : '',
+      `<span class="ev ev-estimate">${k.estimate} ESTIMATE</span>`,
+      `<span class="ev ev-unknown">${k.unknown} UNKNOWN</span>`,
+      k.internal ? `<span class="ev ev-internal">${k.internal} INTERNAL</span>` : '',
+      noResearch(m) ? '<span class="ev ev-warn" role="note">No research this turn: its claims come from the model\'s memory</span>' : '',
+    ].filter(Boolean).join('');
+    const el = document.createElement('div');
+    el.className = 'evidence-strip';
+    el.setAttribute('aria-label', 'Evidence behind this response');
+    el.innerHTML = chips;
+    return el;
   }
 
   function messageElement(m) {
@@ -960,9 +1065,18 @@
       pending.appendChild(retry);
       el.appendChild(pending);
     } else {
+      // The server appends a truncation marker at the end, which a collapsed
+      // long message hides; say it up front instead.
+      if (/\[Response truncated/.test(m.text)) {
+        const warn = document.createElement('div'); warn.className = 'msg-warning'; warn.setAttribute('role', 'note');
+        warn.textContent = 'This response was cut short: the model ran out of output tokens. Treat it as incomplete, and use Regenerate for a full answer.';
+        el.appendChild(warn);
+      }
       body.appendChild(renderMarkdown(m.text));
       linkAgentMentions(body, m);
       el.appendChild(body);
+      const strip = evidenceStripEl(m);
+      if (strip) el.appendChild(strip);
       if (!isSystem) {
       const openFullBtn = document.createElement('button');
       openFullBtn.type = 'button'; openFullBtn.className = 'msg-openfull'; openFullBtn.title = 'Open full response in a wide view'; openFullBtn.textContent = '⤢';
@@ -1009,27 +1123,50 @@
     return el;
   }
 
-  function sourceRowHtml(src) {
+  // Pages an agent actually opened, from every turn's tool trace. Normalised
+  // like src/evidence.js normUrl, so a redirect or trailing slash still matches.
+  function normUrl(u) {
+    try {
+      const x = new URL(String(u).trim());
+      return `${x.hostname.toLowerCase().replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '') || '/'}${x.search}`;
+    } catch { return String(u || '').trim().toLowerCase(); }
+  }
+  function openedUrls() {
+    const set = new Set();
+    for (const m of state.session.messages) {
+      for (const t of contentOf(m).trace || []) if (t.type === 'open') for (const u of [t.url, t.requested_url]) if (u) set.add(normUrl(u));
+    }
+    return set;
+  }
+  // read: opened by an agent. cited: cited and known to exist. searched: only a
+  // search result. unverified: cited, but nobody ever searched or opened it.
+  const SOURCE_KIND_LABEL = { read: 'read', cited: 'cited', searched: 'search result', unverified: 'unverified link' };
+  function sourceRowHtml(src, opened) {
     const by = [...new Set(src.cited_by.map((c) => AGENT_LABEL[c.speaker] || c.speaker))].join(', ');
     const backlink = src.first_message_id ? ` · <a href="#msg-${src.first_message_id}" class="src-back" data-msg="${src.first_message_id}">↑ view in message</a>` : '';
-    return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${src.kind}">${src.kind === 'cited' ? 'cited' : 'searched'}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}${backlink}</div></div>`;
+    const kind = src.kind === 'unverified' ? 'unverified' : opened && opened.has(normUrl(src.url)) ? 'read' : src.kind === 'cited' ? 'cited' : 'searched';
+    const title = kind === 'unverified' ? ' title="Cited by an agent, but no agent searched for or opened this address. It may not exist."' : '';
+    return `<div class="src" id="src-${src.n}"><span class="n">[${src.n}]</span>${escapeHtml(src.title || src.url)}<span class="kind ${kind}"${title}>${SOURCE_KIND_LABEL[kind]}</span><br><a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">${escapeHtml(src.url)}</a><div class="meta">First ${fmtTime(src.first_cited_at)} · ${escapeHtml(by)}${backlink}</div></div>`;
   }
 
   function renderSources() {
     const s = state.session;
-    $('#count-sources').textContent = s.sources.filter((src) => src.kind === 'cited').length;
+    $('#count-sources').textContent = s.sources.filter((src) => src.kind === 'cited' || src.kind === 'unverified').length;
     const box = $('#tab-sources');
     if (!s.sources.length) { box.innerHTML = '<div class="empty">No sources yet. Every URL the agents search or cite appears here, numbered.</div>'; return; }
     // Default to cited sources only — a research turn can search a dozen pages
     // and cite two; listing every search result as if it were evidence used
     // buries the sources actually backing the claims. The rest stay one click away.
-    const cited = s.sources.filter((src) => src.kind === 'cited');
-    const searchedOnly = s.sources.filter((src) => src.kind !== 'cited');
-    const citedHtml = cited.length ? cited.map(sourceRowHtml).join('') : '<div class="empty">No sources have been cited in a claim yet.</div>';
+    // Unverified links are cited too, so they stay in the main list, labelled.
+    const opened = openedUrls();
+    const row = (src) => sourceRowHtml(src, opened);
+    const cited = s.sources.filter((src) => src.kind === 'cited' || src.kind === 'unverified');
+    const searchedOnly = s.sources.filter((src) => src.kind === 'searched');
+    const citedHtml = cited.length ? cited.map(row).join('') : '<div class="empty">No sources have been cited in a claim yet.</div>';
     const toggleHtml = searchedOnly.length
       ? `<button type="button" class="btn btn-sm" id="btn-toggle-searched">${state.showAllSources ? 'Hide' : 'Show'} ${searchedOnly.length} more searched but not cited</button>`
       : '';
-    const searchedHtml = state.showAllSources ? searchedOnly.map(sourceRowHtml).join('') : '';
+    const searchedHtml = state.showAllSources ? searchedOnly.map(row).join('') : '';
     box.innerHTML = citedHtml + toggleHtml + searchedHtml;
     const toggleBtn = $('#btn-toggle-searched', box);
     if (toggleBtn) toggleBtn.addEventListener('click', () => { state.showAllSources = !state.showAllSources; renderSources(); });
@@ -1739,6 +1876,9 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
     }
     const openN = list.filter((x) => x.status === 'open' || x.status === 'escalated').length;
     $('#count-questions').textContent = list.length ? `${openN}/${list.length}` : '0';
+    // Reset here too: the empty-list return below skips the amber "For you" update.
+    $('#count-questions').className = 'count';
+    $('#count-questions').title = '';
     renderEscalations(list);
     const box = $(QUESTION_BOXES.questions);
     if (!list.length) {
@@ -1748,16 +1888,24 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
       $('#btn-questions-scan', box)?.addEventListener('click', scanQuestions);
       return;
     }
-    const filter = state.questionFilter || 'open';
+    // Questions put to the human: only the moderator can answer them, so they
+    // get their own view, and it opens first while any are waiting.
+    const forYou = (x) => x.status === 'open' && String(x.addressees || '').split(',').includes('moderator');
     const counts = {
+      mine: list.filter(forYou).length,
       open: list.filter((x) => x.status === 'open').length,
       escalated: list.filter((x) => x.status === 'escalated').length,
       done: list.filter((x) => x.status === 'answered' || x.status === 'resolved').length,
       all: list.length,
     };
-    const shown = list.filter((x) => filter === 'all' || (filter === 'done' ? (x.status === 'answered' || x.status === 'resolved') : x.status === filter));
-    const chip = (key, label) => `<button type="button" class="chip${filter === key ? ' active' : ''}" data-qfilter="${key}">${label} (${counts[key]})</button>`;
-    box.innerHTML = `<div class="qn-filters">${chip('open', 'Open')}${chip('escalated', 'Escalated')}${chip('done', 'Answered')}${chip('all', 'All')}
+    // Amber while a question is waiting on the human, like the Escalations count.
+    const qCount = $('#count-questions');
+    qCount.className = counts.mine ? 'count count-alert' : 'count';
+    qCount.title = counts.mine ? `${counts.mine} question(s) waiting for your answer` : '';
+    const filter = state.questionFilter || (counts.mine ? 'mine' : 'open');
+    const shown = list.filter((x) => filter === 'all' || (filter === 'mine' ? forYou(x) : filter === 'done' ? (x.status === 'answered' || x.status === 'resolved') : x.status === filter));
+    const chip = (key, label) => `<button type="button" class="chip${filter === key ? ' active' : ''}${key === 'mine' && counts.mine ? ' chip-attention' : ''}" data-qfilter="${key}">${label} (${counts[key]})</button>`;
+    box.innerHTML = `<div class="qn-filters">${chip('mine', 'For you')}${chip('open', 'Open')}${chip('escalated', 'Escalated')}${chip('done', 'Answered')}${chip('all', 'All')}
         <span class="qn-filters-actions">
           <button type="button" class="btn btn-sm" id="btn-questions-check">Check for answers now</button>
           <button type="button" class="btn btn-sm btn-quiet" id="btn-questions-scan">Rescan transcript</button>
@@ -2095,6 +2243,11 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
             else if (name === 'text') { raw += data.delta; paint(false); }
             else if (name === 'done') {
               state.session.messages.push(data.message); state.session.sources = data.sources; state.session.disagreements = data.disagreements;
+              // The server moved this evaluation off a retired model before the turn.
+              if (data.session_model) { state.session.model = data.session_model; fillModelSelect($('#session-model'), data.session_model); }
+              const statusBox = $('#transcript .session-status');
+              const fresh = sessionStatusEl();
+              if (statusBox && fresh) statusBox.replaceWith(fresh);
               if (data.message.mode === 'decision') { state.session.decision_text = data.message.text; renderDecisionTab(); }
               renderSources(); renderDisagreements(); renderCost();
               if (data.new_disagreements.length) toast(`${data.new_disagreements.length} disagreement(s) logged`);

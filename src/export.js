@@ -14,7 +14,14 @@ const COLOURS = {
   ...Object.fromEntries(Object.entries(prompts.AGENTS).map(([k, a]) => [k, String(a.colour || '#334155').replace('#', '').toUpperCase()])),
   user: 'B45309',
   verified: '166534', estimate: '92400E', unknown: '4B5563', link: '0891B2', muted: '64748B', system: '94A3B8',
+  // downgraded: a VERIFIED tag that failed the quote check (src/evidence.js);
+  // internal: a claim resting on company material the panel could not read.
+  downgraded: 'C2410C', internal: '1E3A8A',
 };
+
+// Said once above the list, so a reader who meets [n] in the text can tell why
+// that link is not with the others.
+const UNVERIFIED_NOTE = 'Cited by an agent, but no agent searched for or opened these addresses, so they may not exist. Treat anything resting on them as unverified.';
 
 function fileName(s) {
   return `${s.title}`.replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').slice(0, 80) || 'session';
@@ -228,7 +235,8 @@ async function toDocx(s, opts = {}) {
   // all of them here would bury the ones the decision actually rests on.
   children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'Verification', font: FONT })] }));
   const citedSources = s.sources.filter((src) => src.kind === 'cited');
-  const searchedOnlyCount = s.sources.length - citedSources.length;
+  const searchedOnlyCount = s.sources.filter((src) => src.kind === 'searched').length;
+  const unverifiedSources = s.sources.filter((src) => src.kind === 'unverified');
   if (!citedSources.length) children.push(new Paragraph({ children: [new TextRun({ text: 'No sources have been cited in a claim yet.', font: FONT, italics: true, color: COLOURS.muted })] }));
   for (const src of citedSources) {
     const by = src.cited_by.map((c) => prompts.AGENTS[c.speaker] ? prompts.AGENTS[c.speaker].label : c.speaker).filter((v, i, a) => a.indexOf(v) === i).join(', ');
@@ -243,6 +251,13 @@ async function toDocx(s, opts = {}) {
     }));
   }
   if (searchedOnlyCount) children.push(new Paragraph({ children: [new TextRun({ text: `${searchedOnlyCount} additional page(s) were searched but not cited in any claim.`, font: FONT, italics: true, size: 16, color: COLOURS.muted })] }));
+  if (unverifiedSources.length) {
+    children.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [new TextRun({ text: 'Unverified links', font: FONT })] }));
+    children.push(new Paragraph({ children: [new TextRun({ text: UNVERIFIED_NOTE, font: FONT, italics: true, size: 16, color: COLOURS.muted })] }));
+    for (const src of unverifiedSources) {
+      children.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: `[${src.n}] `, bold: true, font: FONT, size: 18 }), new TextRun({ text: src.url, font: FONT, size: 16, color: COLOURS.downgraded })] }));
+    }
+  }
   void smap;
 
   // Transcript — appendix. Everyone who needs the decision has it already;
@@ -400,7 +415,8 @@ async function toPdf(s, opts = {}) {
   }
   content.push({ text: 'Verification', style: 'h1', pageBreak: 'before' });
   const citedSourcesPdf = s.sources.filter((src) => src.kind === 'cited');
-  const searchedOnlyCountPdf = s.sources.length - citedSourcesPdf.length;
+  const searchedOnlyCountPdf = s.sources.filter((src) => src.kind === 'searched').length;
+  const unverifiedSourcesPdf = s.sources.filter((src) => src.kind === 'unverified');
   if (!citedSourcesPdf.length) content.push({ text: 'No sources have been cited in a claim yet.', italics: true, color: '#' + COLOURS.muted });
   for (const src of citedSourcesPdf) {
     const by = src.cited_by.map((c) => prompts.AGENTS[c.speaker] ? prompts.AGENTS[c.speaker].label : c.speaker).filter((v, i, a) => a.indexOf(v) === i).join(', ');
@@ -411,6 +427,11 @@ async function toPdf(s, opts = {}) {
     });
   }
   if (searchedOnlyCountPdf) content.push({ text: `${searchedOnlyCountPdf} additional page(s) were searched but not cited in any claim.`, italics: true, fontSize: 8, color: '#' + COLOURS.muted });
+  if (unverifiedSourcesPdf.length) {
+    content.push({ text: 'Unverified links', style: 'h3', margin: [0, 8, 0, 2] });
+    content.push({ text: UNVERIFIED_NOTE, italics: true, fontSize: 8, color: '#' + COLOURS.muted, margin: [0, 0, 0, 4] });
+    for (const src of unverifiedSourcesPdf) content.push({ text: [{ text: `[${src.n}] `, bold: true }, { text: src.url, color: '#' + COLOURS.downgraded }], fontSize: 8, margin: [0, 0, 0, 3] });
+  }
   // Transcript — appendix.
   content.push({ text: 'Transcript (appendix)', style: 'h1', pageBreak: 'before' });
   for (const m of s.messages) {

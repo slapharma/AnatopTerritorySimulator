@@ -7,6 +7,8 @@ const db = require('./db');
 const prompts = require('./prompts');
 const { assembleText } = require('./transcript');
 const { runTurn } = require('./agents');
+const evidence = require('./evidence');
+const { parseDisagreements, openDisagreementsMarkdown, dropSection } = require('./disagreements');
 const exporter = require('./export');
 const intelExport = require('./intel-export');
 const xlsx = require('./xlsx');
@@ -467,23 +469,41 @@ app.patch('/api/sessions/:id/messages/:mid/favourite', async (req, res, next) =>
 
 // ---------- agent turns (SSE over a POST) ----------
 
-// ⚠️? tolerates the emoji-presentation variation selector (⚠️) the model
-// sometimes emits instead of bare ⚠. [\s\S]*? (not [^\n]*) so a blank line
-// between Position A/B/Status — required by the FORMATTING RULES above —
-// doesn't truncate the block before Status is reached.
-const DIS_RE = /⚠️?\s*\**\s*DISAGREEMENT[\s\S]*?Status\s*:?\s*\**\s*(?:RESOLVED|UNRESOLVED)[^\n]*/g;
-
+// Parsing lives in src/disagreements.js, shared with scripts/simulate-session.js.
 async function extractDisagreements(sessionId, messageId, text) {
   const found = [];
-  for (const m of text.matchAll(DIS_RE)) {
-    const block = m[0].trim();
-    const head = block.split('\n')[0];
-    const topicMatch = head.match(/DISAGREEMENT\s*\**\s*(?:#\s*\d+)?\s*[—–:-]?\s*\[?([^\]\n]*?)\]?\**\s*$/i);
-    const topic = topicMatch && topicMatch[1].trim() ? topicMatch[1].trim() : 'untitled';
-    const status = /Status\s*:?\s*\**\s*RESOLVED/i.test(block) && !/Status\s*:?\s*\**\s*UNRESOLVED/i.test(block) ? 'resolved' : 'unresolved';
-    found.push(await db.upsertDisagreement(sessionId, messageId, topic, block, status));
-  }
+  for (const d of parseDisagreements(text)) found.push(await db.upsertDisagreement(sessionId, messageId, d.topic, d.block, d.status));
   return found;
+}
+
+// The model a background call (minutes, the answered-check) should use: the
+// session's own, unless it is retired, when the default stands in rather than
+// running one more call on a model known not to do the job.
+const liveModel = (session) => (session.model && !config.RETIRED_MODELS[session.model] ? session.model : config.MODEL);
+
+// A session still on a retired model (config.RETIRED_MODELS) is moved to the
+// default before its next turn, with a transcript note saying why, instead of
+// going on producing answers the model cannot evidence. switchModel runs under
+// the session lock and does nothing when the session has already moved, so the
+// three parallel Baselines turns write one note between them. Returns the note
+// text when a switch happened.
+async function moveOffRetiredModel(id, session) {
+  const why = session && session.model && config.RETIRED_MODELS[session.model];
+  if (!why) return null;
+  const name = (m) => (config.MODEL_OPTIONS.find((o) => o.id === m) || { label: m }).label.replace(/\s*\(.*$/, '');
+  const note = await db.switchModel(id, config.MODEL, (from, to) => `Model changed from ${name(from)} to ${name(to)}: ${name(from)} has been retired because ${why}. Turns from here on run on ${name(to)}.`);
+  return note ? note.text : `This evaluation now runs on ${name(config.MODEL)}.`;
+}
+
+// What the app, not a model, counts about a session's evidence: the tags in
+// the panel's messages and the kinds of source behind them. Fed to reports
+// (REPORT METADATA) and appended to them as the evidence register.
+function evidenceSummary(session) {
+  const register = evidence.evidenceRegister(session.messages, agentLabel);
+  const opened = evidence.sessionContext(session.messages).opened;
+  const sources = { opened: opened.size, cited: 0, searched: 0, unverified: 0 };
+  for (const s of session.sources || []) if (s.kind in sources) sources[s.kind]++;
+  return { register, sources };
 }
 
 // ---------- agent questions ----------
@@ -646,11 +666,14 @@ app.post('/api/sessions/:id/questions/check', async (req, res, next) => {
     const id = Number(req.params.id);
     const session = await db.fullSession(id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    const open = (session.questions || []).filter((x) => x.status === 'open');
+    // A question put to the Moderator is the human's to answer. Left in, any
+    // later agent message that touched the topic could mark it answered and
+    // drop it from the moderator's Open list without them ever seeing it.
+    const open = (session.questions || []).filter((x) => x.status === 'open' && !String(x.addressees || '').split(',').includes('moderator'));
     if (!open.length) return res.json({ updated: 0, questions: session.questions || [], meeting_minutes: session.meeting_minutes || [] });
     const seqOf = new Map(session.messages.map((m) => [String(m.id), m.seq]));
     const list = open.map((x) => `- id ${x.id} · asked by ${agentLabel(x.asker)} in message [${seqOf.get(String(x.message_id)) ?? '?'}] to ${x.addressees.split(',').map(agentLabel).join(' and ')}: ${x.text.replace(/\s+/g, ' ')}`).join('\n');
-    const checkModel = session.model || config.MODEL;
+    const checkModel = liveModel(session);
     const checkStarted = Date.now();
     const checkCall = { classification: usage.classify({ mode: 'questions_check' }), speaker: 'moderator', requestedModel: checkModel, started: checkStarted };
     let result;
@@ -745,7 +768,7 @@ function agentsWithCompletedRound(messages, mode) {
 
 app.post('/api/sessions/:id/turn', async (req, res) => {
   const id = Number(req.params.id);
-  const session = await db.fullSession(id);
+  let session = await db.fullSession(id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   const speaker = req.body.speaker;
   const mode = req.body.mode || 'crosstalk';
@@ -766,6 +789,17 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
         return res.status(400).json({ error: `Run ${ROUND_SEQUENCE[i]} for all ${prompts.AGENT_ORDER.length} agents before starting ${mode}.` });
       }
     }
+  }
+
+  // Before the turn's own row exists, so the switch note sits ahead of it in
+  // the transcript. A failed switch is logged and the turn runs as it would
+  // have: refusing the turn over a note is worse than one more turn on the old model.
+  let modelNote = null;
+  try {
+    modelNote = await moveOffRetiredModel(id, session);
+    if (modelNote) session = await db.fullSession(id);
+  } catch (e) {
+    console.error(`[turn] session ${id}: could not move off retired model ${session.model}:`, e.message);
   }
 
   // Reports don't join the transcript: no message row / turn-lock up front.
@@ -826,6 +860,10 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
 
   if (!isReport) send('start', { message_id: msg.id, seq: msg.seq, speaker, mode, created_at: msg.created_at });
   else send('start', { report: true, kind: req.body.kind, depth: req.body.depth });
+  if (modelNote) send('status', { text: modelNote });
+  // What earlier turns established (pages opened, quotes verified), so a
+  // VERIFIED tag re-used from an earlier meeting is recognised, not demoted.
+  const evidenceCtx = evidence.sessionContext(session.messages);
   const searches = [];
   const turnStarted = Date.now();
   // disagreement_n on a custom meeting is classification only: it marks the
@@ -842,6 +880,10 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   let result = null;
   let callRecorded = false;
   const recordTurn = (fields) => { callRecorded = true; return recordLlmCall(req, id, { ...turnCall, ...fields }); };
+  // Reports and the decision are written from the app's own evidence counts,
+  // and end with the register compiled from them rather than a model's table.
+  const summary = isReport || mode === 'decision' ? evidenceSummary(session) : null;
+  const reportDepth = ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard';
   try {
     result = await runTurn({
       inputs: session.inputs, agentKey: speaker, mode, instruction, messages: session.messages,
@@ -850,22 +892,26 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       max_chars: req.body.max_chars, stance: questionScope ? null : stanceText, disagreementTopic, question: questionScope,
       report: isReport ? {
         kind: req.body.kind === 'final' ? 'final' : 'interim',
-        depth: ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard',
+        depth: reportDepth,
         meta: {
           disagreements: session.disagreements, autopilotRuns: session.autopilot_runs,
-          sourcesCount: session.sources.length, inputs: session.inputs,
+          sources: summary.sources, evidence: summary.register, inputs: session.inputs,
         },
       } : undefined,
+      evidenceCtx,
       onEvent: (name, payload) => { if (name === 'search') searches.push(payload.query); send(name, payload); },
     });
+    const withRegister = (text, depth) => `${String(text).trim()}\n\n${evidence.registerMarkdown(summary.register, depth)}`;
+    const checkCtx = { ...evidenceCtx, pages: result.pages };
 
     if (isReport) {
       const kind = req.body.kind === 'final' ? 'final' : 'interim';
-      const depth = ['brief', 'standard', 'full'].includes(req.body.depth) ? req.body.depth : 'standard';
+      const depth = reportDepth;
       // No message row backs a report (except Final, added below), so pass no
       // message id to link citations to — reports still get [n] markers against
       // the session's existing source list, just without a "first seen here" link.
-      const text = await assembleText(id, null, 'moderator', result.text, result.trace);
+      const assembled = await assembleText(id, null, 'moderator', withRegister(result.text, depth), result.trace, checkCtx);
+      const { text } = assembled;
       const report = await db.addReport(id, {
         kind, depth, text, model: result.model, cost_usd: result.cost_usd,
         created_by: (req.user && req.user.email) || null,
@@ -879,7 +925,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       if (kind === 'final') {
         const finalMsg = await db.addMessage(id, { role: 'moderator', speaker: 'moderator', mode: 'decision', text });
         await db.updateMessage(finalMsg.id, {
-          text, content_json: JSON.stringify({ model: result.model, trace: result.trace, usage: result.usage, report_id: report.id }),
+          text, content_json: JSON.stringify({ model: result.model, trace: result.trace, usage: result.usage, report_id: report.id, evidence: assembled.evidence }),
           input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
           searches: result.usage.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
         });
@@ -887,7 +933,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
         finalMessage = await db.getMessage(finalMsg.id);
       }
       await db.touchSession(id);
-      send('done', { report, message: finalMessage });
+      send('done', { report, message: finalMessage, ...(modelNote ? { session_model: config.MODEL } : {}) });
       return res.end();
     }
 
@@ -900,19 +946,26 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       send('error', { message_id: msg.id, message: 'This turn was cleared before it finished, so its answer was discarded.', code: 'CLEARED' });
       return;
     }
-    let text = await assembleText(id, msg.id, speaker, result.text, result.trace);
+    const assembled = await assembleText(id, msg.id, speaker, mode === 'decision' ? withRegister(result.text, 'full') : result.text, result.trace, checkCtx);
+    let { text } = assembled;
     if (mode === 'autopilot') text = enforceCharLimit(text, req.body.max_chars);
     const u = result.usage;
     await db.updateMessage(msg.id, {
       text, content_json: JSON.stringify({
         model: result.model, trace: result.trace, usage: u, stop_reason: result.stop_reason,
+        // evidence: the tag counts and the quotes that passed, so later turns
+        // can re-use them; research: how the answer was reached, for the
+        // moderator's evidence strip.
+        evidence: assembled.evidence, research: result.research,
         ...(mode === 'autopilot' ? { max_chars: req.body.max_chars, stance_index: req.body.stance_index, autopilot: req.body.autopilot } : {}),
       }),
       input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_read_tokens: 0, cache_write_tokens: 0,
       searches: u.searches, cost_usd: result.cost_usd, error: null, duration_ms: Date.now() - turnStarted,
     });
     await recordTurn({ outcome: result, message_id: msg.id });
-    const disagreements = await extractDisagreements(id, msg.id, text);
+    // The disagreement log is the panel's: the Moderator Assistant restating a
+    // block in its decision must not reset a status the moderator set.
+    const disagreements = speaker === 'moderator' ? [] : await extractDisagreements(id, msg.id, text);
     // A question that cannot be stored must not fail a turn that already has
     // its answer saved: log it and carry on.
     const newQuestions = await extractQuestions(id, msg.id, speaker, mode, text)
@@ -930,6 +983,7 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
       questions: allQuestions,
       new_questions: newQuestions,
       searches,
+      ...(modelNote ? { session_model: config.MODEL } : {}),
     });
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
@@ -1010,6 +1064,18 @@ app.post('/api/sessions/:id/reports/:rid/email', async (req, res, next) => {
 });
 
 // ---------- meeting minutes ----------
+// Minutes are a record and are emailed, so they get the same tag check as a
+// turn (against what the session has verified; they register no sources), and
+// their open-disagreement section is the log itself rather than a model's
+// reading of it. The 2026-09-24 audit had model-written minutes report "None"
+// under two open challenges, and invent a date that no message contained.
+async function checkedMinutes(sessionId, session, result) {
+  const ctx = { ...evidence.sessionContext(session.messages), pages: result.pages };
+  const body = dropSection(result.text, /^open disagreements\b/i);
+  const { text } = await assembleText(sessionId, null, 'moderator', body, result.trace, ctx, { register: false });
+  return `${text.trim()}\n\n${openDisagreementsMarkdown(session.disagreements)}`;
+}
+
 // Runs the moderator agent (non-streaming — minutes are short) and stores the
 // result separately from `messages`, so it never touches the transcript/filter
 // chips; email is fire-and-forget and never blocks the response.
@@ -1024,7 +1090,7 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
     const rawAnchor = req.body.anchor_message_id;
     const anchorNum = typeof rawAnchor === 'string' && /^\d+$/.test(rawAnchor) ? Number(rawAnchor) : rawAnchor;
     const anchorMessageId = Number.isSafeInteger(anchorNum) ? anchorNum : null;
-    const minutesModel = session.model || config.MODEL;
+    const minutesModel = liveModel(session);
     const minutesCall = { classification: usage.classify({ mode: 'meeting_minutes' }), speaker: 'moderator', requestedModel: minutesModel, started: Date.now() };
     let result;
     try {
@@ -1037,7 +1103,8 @@ app.post('/api/sessions/:id/meeting-minutes', async (req, res, next) => {
       throw err;
     }
     await recordLlmCall(req, id, { ...minutesCall, outcome: result });
-    const row = await db.addMeetingMinutes(id, { round, label, text: result.text, anchor_message_id: anchorMessageId });
+    const text = await checkedMinutes(id, session, result);
+    const row = await db.addMeetingMinutes(id, { round, label, text, anchor_message_id: anchorMessageId });
     const recipient = (req.user && req.user.email) || process.env.MODERATOR_EMAIL || null;
     sendMeetingMinutesEmail(session, row, recipient).catch((e) => console.error('[meeting-minutes] email failed:', e.message));
     res.json(row);

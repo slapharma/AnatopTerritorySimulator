@@ -2,13 +2,16 @@
 // Tiny Markdown parser used by the exporters. Produces a flat list of blocks:
 //   {type:'heading', level, runs} | {type:'para', runs} | {type:'bullet', ordered, runs}
 //   {type:'table', rows:[[runs,...],...]} | {type:'code', text} | {type:'disagreement', runs}
-// runs: [{text, bold, italic, code, badge:'verified'|'estimate'|'unknown', cite:n, link}]
+// runs: [{text, bold, italic, code, badge:'verified'|'estimate'|'downgraded'|'unknown'|'internal', cite:n, link}]
 
-const BADGE_RE = /\[(VERIFIED|ESTIMATE|UNKNOWN)\b\s*[—–:-]?\s*([^\]]*)\]/;
+const BADGE_RE = /\[(VERIFIED|ESTIMATE|UNKNOWN|INTERNAL)\b\s*[—–:-]?\s*([^\]]*)\]/;
+// A VERIFIED tag that failed the quote check (src/evidence.js) is stored as an
+// ESTIMATE that says so; exports colour it apart from an honest estimate.
+const DOWNGRADED_RE = /^\(unverified, downgraded from VERIFIED/i;
 
 function parseInline(s) {
   const runs = [];
-  const re = /(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(_[^_\n]+_)|(`[^`]+`)|(\[(?:VERIFIED|ESTIMATE|UNKNOWN)\b[^\]]*\])|(\[\d+\])|(\[[^\]]+\]\((https?:[^)\s]+)\))/g;
+  const re = /(\*\*[^*]+\*\*)|(\*[^*\n]+\*)|(_[^_\n]+_)|(`[^`]+`)|(\[(?:VERIFIED|ESTIMATE|UNKNOWN|INTERNAL)\b[^\]]*\])|(\[\d+\])|(\[[^\]]+\]\((https?:[^)\s]+)\))/g;
   let last = 0;
   for (const m of s.matchAll(re)) {
     if (m.index > last) runs.push({ text: s.slice(last, m.index) });
@@ -18,7 +21,9 @@ function parseInline(s) {
     else if (m[4]) runs.push({ text: tok.slice(1, -1), code: true });
     else if (m[5]) {
       const b = tok.match(BADGE_RE);
-      runs.push({ text: tok, badge: b[1].toLowerCase(), badgeDetail: (b[2] || '').trim() });
+      const detail = (b[2] || '').trim();
+      const badge = b[1] === 'ESTIMATE' && DOWNGRADED_RE.test(detail) ? 'downgraded' : b[1].toLowerCase();
+      runs.push({ text: tok, badge, badgeDetail: detail });
     } else if (m[6]) runs.push({ text: tok, cite: Number(tok.slice(1, -1)) });
     else if (m[7]) {
       const inner = tok.match(/^\[([^\]]+)\]\((https?:[^)\s]+)\)$/);

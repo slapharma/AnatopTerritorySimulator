@@ -125,3 +125,66 @@ Escalations tab lists escalated questions.
 - [x] Dashboard: action tiles removed; hero fills the main column with no scroll
 - [x] Session sidebar fits the window with no scroll (horizontal meeting stepper, tighter rows; the 100px gap shrinks first on shorter windows). Checked at 1000, 860 and 760px tall
 - [x] Minutes: "Approve and continue" approves, then convenes the next meeting on the agenda
+
+## Fact-checking and moderator-evidence fixes (2026-09-24 audit)
+
+Source: `tasks/audit-2026-09-24-human-factcheck.md`.
+
+Decisions (Clifton, 2026-09-24): default model Qwen 3.7 Flash; VERIFIED tags carry a verbatim quote; restore a Pivotal evidence input.
+
+Batch 1: close the hallucination paths
+- [x] Check the audit harness in as `scripts/simulate-session.js` (in-memory db, never reads
+      DATABASE_URL); it is the before/after measurement for every item below
+- [x] Default model moved to a model that calls its tools; update the MODEL_OPTIONS flags
+- [x] A zero-search evidence turn is refused once, then flagged "no research this turn"
+- [x] One opened-URL set per session; record both the requested and the final URL; normalise
+      URLs before comparing
+- [x] Sources: new `unverified` kind for URLs nobody searched or opened; UI and exports show it
+- [x] Minutes: figures keep their tags; Open disagreements come from the database log
+- [x] Evidence table built by the app from session data, passed to reports and rendered as-is
+- [x] Report `max_tokens` raised for Brief and Standard so reasoning models can finish
+
+Batch 2: VERIFIED means "the page says so"
+- [x] Quote-anchored VERIFIED, checked server-side against the page text open_url returned
+- [x] Personas: drop the "refer back to your own past reviews" and insider lines; experience
+      may appear only as labelled professional judgement
+- [x] INTERNAL tag for knowledgebase titles; resolve the pivotal-data input gap
+- [x] "secondary" label required for blog, consultancy and law-firm sources
+
+Batch 3: evidence in front of the moderator
+- [x] Evidence strip per message, agent and session (searches, opens, tag counts)
+- [x] Distinct downgraded badge; Sources separates opened, searched and unverified
+- [x] Questions for the Moderator: count and filter, excluded from the auto-check, "(human)" parsed
+- [x] Decision banner with stale flag; truncated turns warned (the meeting step still turns green: not changed)
+- [x] Guide: what VERIFIED does and does not prove
+
+Also done: disagreement regex tolerance, report transcript window, `moderator.md` split from the report
+prompts, moderator turns no longer rewrite disagreement statuses. Not done (need a production schema
+change): cascade delete of disagreements on regenerate; an agent restatement still overwrites the
+moderator's resolved/unresolved toggle.
+
+Verification for every batch: re-run the audit harness (Korea example, both models) and
+compare searches, opens, unverified URLs, downgrades and unsupported-VERIFIED spot checks
+against the 2026-09-24 baseline.
+
+
+### Review (2026-09-24)
+
+Measured with `scripts/simulate-session.js` (Korea example, in-memory db), before vs after:
+
+| | Before, Nemo default | Before, Qwen | After, Qwen default |
+|---|---|---|---|
+| Evidence turns with no search | 6 of 6 | 0 | 0 |
+| VERIFIED that passed the check | 0 (of 19 claimed) | 9 page-opened, 2 of 6 checked unsupported | 19, all quote-checked |
+| Cited links nobody searched or opened | 17 | 2 | 0 |
+| Standard Final report | written, "VERIFIED: 12" false | failed (token cap) | written, app-built register |
+| Minutes | tags stripped, invented facts | tags stripped, invented date | tags kept, disagreements from log |
+| Cost | $0.002 | $0.03 | $0.038 |
+
+Nemo re-run on the fixed code (it stays selectable only for a session that already has it, and is
+moved off at the next turn): 6 of 6 evidence turns still unresearched after the research nudge, now
+flagged "No research this turn" in the UI, 4 claims shown UNVERIFIED, 2 links shown as unverified.
+
+Residual limits: the quote proves the page says the words, not that the words support the whole
+claim (seen: a quote about a planned fee rise attached to specific fee figures). The moderator can
+now see the quote beside the claim; nothing checks the fit mechanically.

@@ -4,6 +4,16 @@
 const config = require('./config');
 const { systemPrompt, turnUserMessage, agentAbilities } = require('./prompts');
 const search = require('./search');
+const evidence = require('./evidence');
+
+// Meetings whose whole point is evidence: the baselines, the challenge round
+// ("using evidence (search first)") and a Dive Deeper ("full supporting detail,
+// sourcing"). A turn in one of these that never searched is answering from
+// memory. Converge, cross-talk and replies may legitimately work from the
+// transcript alone, so they are not held to it.
+const RESEARCH_MODES = new Set(['opening', 'round2', 'dive_deeper']);
+// Each correction costs a full rewrite of the answer, so a turn gets at most two.
+const MAX_NUDGES = 2;
 
 function apiKey() {
   const k = process.env.OPENROUTER_API_KEY;
@@ -150,13 +160,21 @@ async function runTool(call, counters, onEvent) {
       counters.opens++;
       onEvent('status', { text: `Reading ${url.slice(0, 80)}…` });
       const p = await search.openUrl(url);
+      // The page text is what a VERIFIED tag's quote is checked against
+      // (src/evidence.js). It is kept for this turn only, under both the URL
+      // asked for and the one a redirect ended on, since the agent is told to
+      // cite the first and the trace records the second.
+      if (!p.blocked) {
+        const page = { text: String(p.text || ''), title: String(p.title || '') };
+        counters.pages.set(evidence.normUrl(p.url), page);
+        counters.pages.set(evidence.normUrl(url), page);
+      }
       return {
         ok: true,
-        // A blocked fetch gets its own trace type, so assembleText()'s
-        // `t.type === 'open'` pass skips it: the URL never joins openedUrls and
-        // so cannot hold up a VERIFIED tag, and it is never recorded as a
-        // cited source. Nothing was read, so it is not an open.
-        trace: { type: p.blocked ? 'open_blocked' : 'open', url: p.url, title: p.title, status: p.status, blocked: Boolean(p.blocked) },
+        // A blocked fetch gets its own trace type, so it is never counted as
+        // an open: the URL cannot hold up a VERIFIED tag and is never recorded
+        // as a cited source. Nothing was read, so it is not an open.
+        trace: { type: p.blocked ? 'open_blocked' : 'open', url: p.url, requested_url: url, title: p.title, status: p.status, blocked: Boolean(p.blocked) },
         content: JSON.stringify({
           url: p.url, title: p.title,
           blocked: Boolean(p.blocked), published: p.published || null, published_source: p.published_source || null,
@@ -189,7 +207,62 @@ async function runTurn(args) {
   }
 }
 
-async function turn({ inputs, agentKey, mode, instruction, messages, disagreements, onEvent, model: requestedModel, max_chars, stance, disagreementTopic, question, report }, spent) {
+// The first thing wrong with a finished draft that one more round could fix, or
+// null. In order:
+//  - research: an evidence meeting answered with no search at all. Measured
+//    2026-09-24: the default model of the day ran nine turns, zero searches,
+//    and cited 17 URLs it had invented.
+//  - read: it searched but opened nothing, so everything rests on snippets.
+//    Measured before this existed: three agents, 33 tags, 33 demoted.
+//  - tags: VERIFIED tags that transcript.js would downgrade (no quote, quote
+//    not on the page, page never opened). Sent back with the reasons, so the
+//    agent can open the page and copy the words, or retag honestly.
+function draftProblem({ mode, draft, counters, abilities, sent, ctx }) {
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 'es'}`;
+  if (!sent.includes('research') && RESEARCH_MODES.has(mode) && counters.searches === 0 && abilities.can_web_search) {
+    return {
+      kind: 'research',
+      status: 'Answered without searching — asking for evidence first…',
+      message: [
+        'Stop. This meeting needs evidence and you have not run a single search, so every claim above would come from memory.',
+        'Search for the facts your answer depends on, open the two or three pages that settle them, then rewrite your response in full with the tags corrected.',
+        'If a search genuinely finds nothing, keep the claim but tag it ESTIMATE or UNKNOWN, never VERIFIED.',
+      ].join('\n\n'),
+    };
+  }
+  if (!sent.includes('read') && counters.searches > 0 && counters.opens === 0 && abilities.can_open_url && counters.knownUrls.size) {
+    const candidates = [...counters.knownUrls].slice(0, 12);
+    return {
+      kind: 'read',
+      status: 'Searched but read nothing — asking for sources to be opened…',
+      message: [
+        `Stop. You have run ${plural(counters.searches, 'search')} and opened nothing, so every claim above rests on a search snippet and none of it can be tagged VERIFIED.`,
+        'Open the two or three pages that actually decide your answers, then rewrite your response in full with the tags corrected. These URLs are already in hand:',
+        candidates.map((u) => `- ${u}`).join('\n'),
+        'If none of them is worth opening, say so in one line and leave the claims tagged ESTIMATE.',
+      ].join('\n\n'),
+    };
+  }
+  if (!sent.includes('tags') && abilities.can_open_url) {
+    const { failures } = evidence.verifyText(draft, ctx);
+    if (failures.length) {
+      const list = failures.slice(0, 8).map((f) => `- ${f.tag.length > 160 ? `${f.tag.slice(0, 157)}…` : f.tag}\n  → ${f.reason}`).join('\n');
+      return {
+        kind: 'tags',
+        status: 'Checking VERIFIED tags against the pages read…',
+        message: [
+          `Before you finish: ${failures.length} of your VERIFIED tag${failures.length === 1 ? '' : 's'} would be shown to the moderator as unverified.`,
+          list,
+          'A VERIFIED tag must end with words copied exactly from the text open_url returned for that URL in this turn (one continuous passage from the body, not the page title), or be an exact copy of a VERIFIED tag already in the transcript, quote included.',
+          'Open the page and copy the words, or retag the claim ESTIMATE. Then rewrite your response in full.',
+        ].join('\n\n'),
+      };
+    }
+  }
+  return null;
+}
+
+async function turn({ inputs, agentKey, mode, instruction, messages, disagreements, onEvent, model: requestedModel, max_chars, stance, disagreementTopic, question, report, evidenceCtx }, spent) {
   apiKey();
   const [systemContent, abilities] = await Promise.all([systemPrompt(agentKey, inputs), agentAbilities(agentKey)]);
   const tools = search.TOOLS.filter((t) =>
@@ -204,7 +277,7 @@ async function turn({ inputs, agentKey, mode, instruction, messages, disagreemen
     : mode === 'report' ? (config.REPORT_DEPTH[report.depth] || config.REPORT_DEPTH.full).max_tokens
     : mode === 'autopilot' ? (max_chars && max_chars !== 'as_required' ? (config.AUTOPILOT_CHAR_TO_TOKENS[max_chars] || config.MAX_TOKENS_AGENT) : config.MAX_TOKENS_DIVE_DEEPER)
       : config.MAX_TOKENS_AGENT;
-  const counters = { searches: 0, opens: 0, knownUrls: new Set() };
+  const counters = { searches: 0, opens: 0, knownUrls: new Set(), pages: new Map() };
   const trace = [];
   const usage = { input_tokens: 0, output_tokens: 0, cost: 0, requests: 0 };
   let text = '';
@@ -232,7 +305,7 @@ async function turn({ inputs, agentKey, mode, instruction, messages, disagreemen
   // Only the last round's text is kept as the answer — earlier rounds are the
   // model narrating what it's about to search for, not its conclusion.
   let exhaustedRounds = true;
-  let nudgedToRead = false;
+  const sentNudges = [];
   for (let round = 0; round < config.SEARCH.max_tool_rounds; round++) {
     if (Date.now() - turnStarted > config.TURN_TIMEOUT_MS) {
       const err = new Error(`Turn exceeded its ${Math.round(config.TURN_TIMEOUT_MS / 1000)}s time budget after ${round} tool round(s).`);
@@ -256,30 +329,18 @@ async function turn({ inputs, agentKey, mode, instruction, messages, disagreemen
       }
       continue;
     }
-    // The agent has stopped calling tools and started writing. If it searched but
-    // never opened anything, everything it is about to assert rests on snippets,
-    // and transcript.js will demote every VERIFIED tag in it — measured: three
-    // agents, 33 tags, 33 demoted, because they had read nothing. Telling them to
-    // read in the prompt moved this only halfway (opens 0/2/3, one agent still
-    // reading nothing with eight rounds to spare), so the turn refuses to end
-    // here instead: it hands back the URLs already in hand and spends a round.
-    // Once only — a second refusal would just burn the budget on a model that
-    // has demonstrated it will not open pages this turn.
-    if (!nudgedToRead && counters.searches > 0 && counters.opens === 0 && abilities.can_open_url && counters.knownUrls.size) {
-      nudgedToRead = true;
-      const candidates = [...counters.knownUrls].slice(0, 12);
+    // The agent has stopped calling tools and started writing. Its draft is
+    // checked before the turn is allowed to end, and sent back once per problem
+    // (at most MAX_NUDGES) — see draftProblem. The Moderator Assistant only
+    // synthesises, so its drafts are not held to this.
+    const problem = agentKey === 'moderator' || sentNudges.length >= MAX_NUDGES ? null
+      : draftProblem({ mode, draft: r.text || '', counters, abilities, sent: sentNudges, ctx: evidence.turnContext(evidenceCtx, trace, counters.pages) });
+    if (problem) {
+      sentNudges.push(problem.kind);
       // Some providers reject an assistant turn with empty content.
       convo.push({ role: 'assistant', content: r.text || '(no answer written yet)' });
-      convo.push({
-        role: 'user',
-        content: [
-          `Stop. You have run ${counters.searches} search${counters.searches === 1 ? '' : 'es'} and opened nothing, so every claim above rests on a search snippet and none of it can be tagged VERIFIED.`,
-          'Open the two or three pages that actually decide your answers, then rewrite your response in full with the tags corrected. These URLs are already in hand:',
-          candidates.map((u) => `- ${u}`).join('\n'),
-          'If none of them is worth opening, say so in one line and leave the claims tagged ESTIMATE.',
-        ].join('\n\n'),
-      });
-      onEvent('status', { text: 'Searched but read nothing — asking for sources to be opened…' });
+      convo.push({ role: 'user', content: problem.message });
+      onEvent('status', { text: problem.status });
       continue;
     }
     exhaustedRounds = false;
@@ -307,7 +368,14 @@ async function turn({ inputs, agentKey, mode, instruction, messages, disagreemen
     text += '\n\n**[Response truncated — the model ran out of output tokens. Treat this as incomplete, not a finished answer.]**';
   }
 
-  return { text, trace, usage: usageOut(), model, stop_reason: finish, cost_usd: costUsd() };
+  // pages: the text of every page read this turn, for transcript.js's quote
+  // check; not stored. research: what the moderator is shown about how the
+  // answer was reached (content_json), including which corrections were sent.
+  const research = {
+    required: agentKey !== 'moderator' && RESEARCH_MODES.has(mode),
+    searches: counters.searches, opens: counters.opens, nudges: sentNudges,
+  };
+  return { text, trace, usage: usageOut(), model, stop_reason: finish, cost_usd: costUsd(), pages: counters.pages, research };
 }
 
-module.exports = { runTurn };
+module.exports = { runTurn, RESEARCH_MODES };

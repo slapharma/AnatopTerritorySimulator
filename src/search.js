@@ -195,12 +195,27 @@ async function webSearch(query, max = config.SEARCH.max_results) {
 function isPrivateIp(ip) {
   if (net.isIPv6(ip)) {
     const low = ip.toLowerCase();
-    return low === '::1' || low === '::' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80') || low.startsWith('::ffff:127.');
+    // IPv4-mapped (::ffff:a.b.c.d, or the hex form ::ffff:a9fe:a9fe that the
+    // URL parser produces) and NAT64 (64:ff9b::/96) carry an IPv4 address that
+    // reaches the same host, so judge them by that address.
+    const dotted = low.match(/^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/);
+    if (dotted) return isPrivateIp(dotted[1]);
+    const hex = low.match(/^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (hex) {
+      const hi = parseInt(hex[1], 16);
+      const lo = parseInt(hex[2], 16);
+      return isPrivateIp(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    return low === '::1' || low === '::' || low.startsWith('::ffff:') || /^f[cd]/.test(low) || /^fe[89ab]/.test(low) || low.startsWith('ff');
   }
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true; // malformed — refuse rather than guess
-  const [a, b] = parts;
-  return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  const [a, b, c] = parts;
+  return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
+    || (a === 100 && b >= 64 && b <= 127)        // carrier-grade NAT, used for some cloud-internal ranges
+    || (a === 192 && b === 0 && c === 0)          // IETF protocol assignments
+    || (a === 198 && (b === 18 || b === 19))      // benchmarking
+    || a >= 224;                                  // multicast and reserved
 }
 
 // Best-effort SSRF guard: a model told (by a jailbreak, or an instruction
@@ -209,24 +224,46 @@ function isPrivateIp(ip) {
 // DNS-rebinding between this check and the actual fetch isn't fully closed —
 // that would need a custom low-level connect — but this stops the overwhelmingly
 // common case (literal IPs, localhost, cloud metadata, normal private hostnames).
-async function assertPublicHost(hostname) {
+async function assertPublicHost(rawHostname) {
+  const refuse = () => { throw new Error('open_url may not target a private or internal address'); };
+  // URL.hostname keeps the brackets on an IPv6 literal ("[::1]"), which
+  // net.isIP does not recognise as an address at all.
+  const hostname = rawHostname.replace(/^\[|\]$/g, '');
   if (net.isIP(hostname)) {
-    if (isPrivateIp(hostname)) throw new Error('open_url may not target a private or internal address');
+    if (isPrivateIp(hostname)) refuse();
     return;
   }
-  if (/^localhost$/i.test(hostname)) throw new Error('open_url may not target a private or internal address');
+  if (/^localhost\.?$/i.test(hostname) || /\.localhost\.?$/i.test(hostname)) refuse();
+  // Fail closed: a name that does not resolve here cannot be judged, and the
+  // fetch would resolve it again anyway.
   const addrs = await dns.lookup(hostname, { all: true }).catch(() => []);
-  if (addrs.some((a) => isPrivateIp(a.address))) throw new Error('open_url may not target a private or internal address');
+  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) refuse();
 }
 
 const MAX_BODY_BYTES = 3_000_000; // stop reading a huge/hostile response body well before it becomes a memory problem
+const MAX_REDIRECTS = 5;
+
+// Redirects are followed by hand so every hop is checked: fetch's own
+// following would let a public page 302 straight to an internal address.
+async function fetchPublic(url) {
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const parsed = new URL(current);
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error('open_url only follows http(s) redirects');
+    await assertPublicHost(parsed.hostname);
+    const res = await fetchWithTimeout(current, { redirect: 'manual' });
+    const location = res.status >= 300 && res.status < 400 && res.headers.get('location');
+    if (!location) return res;
+    if (res.body) res.body.cancel().catch(() => {});
+    current = new URL(location, current).href;
+  }
+  throw new Error(`open_url gave up after ${MAX_REDIRECTS} redirects`);
+}
 
 // Fetches a page and returns readable text (scripts, styles, nav noise removed).
 async function openUrl(url) {
   if (!/^https?:\/\//i.test(url)) throw new Error('open_url needs an absolute http(s) URL');
-  const parsed = new URL(url);
-  await assertPublicHost(parsed.hostname);
-  const res = await fetchWithTimeout(url);
+  const res = await fetchPublic(url);
   const type = (res.headers.get('content-type') || '').toLowerCase();
   // Every open_url result carries `published`, including the failures — an
   // absent field reads as 'not applicable', null reads as 'unknown'.
@@ -295,4 +332,4 @@ const TOOLS = [
   },
 ];
 
-module.exports = { webSearch, openUrl, TOOLS, extractPublished, toIsoDate, detectInterstitial };
+module.exports = { webSearch, openUrl, TOOLS, extractPublished, toIsoDate, detectInterstitial, isPrivateIp, assertPublicHost };

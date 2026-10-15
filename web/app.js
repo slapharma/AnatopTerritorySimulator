@@ -210,6 +210,16 @@
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     const root = tpl.content;
+    // Every external link an agent writes is a source link: it opens the source
+    // modal, never a tab. rel is set here rather than trusted from the model's
+    // Markdown, and target is stripped for the same reason.
+    for (const a of Array.from(root.querySelectorAll('a[href]'))) {
+      if (!/^https?:/i.test(a.getAttribute('href') || '')) continue;
+      a.classList.add('src-link');
+      a.removeAttribute('target');
+      a.rel = 'noopener noreferrer';
+      a.title = 'Open this source in a preview';
+    }
     // "Questions for X:" blocks
     for (const el of Array.from(root.querySelectorAll('p, h1, h2, h3, h4, h5, h6'))) {
       if (/^\s*questions?\s+for\b/i.test(el.textContent)) {
@@ -911,6 +921,88 @@
         t.appendChild(messageElement(m));
         i++;
       }
+    }
+  }
+
+  // ---------------- source preview modal ----------------
+  // A link inside a message opens here instead of navigating: leaving the page
+  // mid-meeting loses the run, and a new tab buries the thing you were reading.
+  // The modal shows what the agent said and, where it can be found, the passage
+  // on the page that says it.
+  const sourceModal = {
+    // The request in flight, so a slow fetch for a link you have already
+    // navigated away from cannot paint over a newer one.
+    token: 0,
+  };
+
+  // What the agent was saying where the link sits. The sentence carrying the
+  // link, not the whole paragraph: the server scores a claim on how much of it
+  // the page accounts for, so dragging in the neighbouring sentence — usually
+  // the agent's own reasoning, which is nowhere on the source page — pushes a
+  // real match below the threshold and the reader is told there is no passage.
+  function claimAround(a) {
+    const block = a.closest('li, p, td, th, blockquote, h1, h2, h3, h4, h5, h6') || a.parentElement;
+    const text = (block ? block.textContent : '').replace(/\s+/g, ' ').trim();
+    if (text.length <= 240) return text;
+    const anchorText = (a.textContent || '').replace(/\s+/g, ' ').trim();
+    const at = anchorText ? text.indexOf(anchorText) : -1;
+    if (at === -1) return text.slice(0, 1200);
+    // Sentence boundaries either side of the link, keeping the sentence the
+    // link sits in whole.
+    const lead = text.slice(0, at);
+    const leadCut = Math.max(lead.lastIndexOf('. '), lead.lastIndexOf('! '), lead.lastIndexOf('? '));
+    const tail = text.slice(at);
+    const tailHit = tail.search(/[.!?]\s/);
+    const start = leadCut === -1 ? 0 : leadCut + 2;
+    const end = tailHit === -1 ? text.length : at + tailHit + 1;
+    const sentence = text.slice(start, end).trim();
+    return sentence.length > 20 ? sentence.slice(0, 1200) : text.slice(0, 1200);
+  }
+
+  function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } }
+
+  function openSourceModal(url, claim) {
+    const dlg = $('#dlg-source');
+    const my = ++sourceModal.token;
+    $('#source-modal-title').textContent = hostOf(url);
+    $('#source-modal-meta').innerHTML = '';
+    const urlEl = $('#source-modal-url');
+    urlEl.textContent = url; urlEl.href = url;
+    $('#btn-source-open').href = url;
+    $('#source-modal-claim').hidden = !claim;
+    $('#source-modal-claim').innerHTML = claim ? `<span class="source-label">What the agent said</span><p>${escapeHtml(claim)}</p>` : '';
+    $('#source-modal-body').innerHTML = '<div class="source-loading"><span class="spinner"></span> Reading the page…</div>';
+    dlg.showModal();
+
+    api.get(`/api/sessions/${state.session.id}/source-preview?url=${encodeURIComponent(url)}&claim=${encodeURIComponent(claim || '')}`)
+      .then((r) => { if (my === sourceModal.token) renderSourcePreview(r); })
+      .catch((e) => { if (my === sourceModal.token) $('#source-modal-body').innerHTML = `<div class="source-note">${escapeHtml(e.message)}</div>`; });
+  }
+
+  function renderSourcePreview(r) {
+    if (r.title) $('#source-modal-title').textContent = r.title;
+    const bits = [];
+    if (r.source) {
+      bits.push(`<span class="n">[${r.source.n}]</span>`);
+      // Same wording as the Sources tab: "unverified" must never read as "searched".
+      const kindLabel = { read: 'read', cited: 'cited', searched: 'search result', unverified: 'unverified link' }[r.source.kind] || r.source.kind;
+      bits.push(`<span class="kind ${escapeHtml(r.source.kind)}">${escapeHtml(kindLabel)}</span>`);
+      const by = [...new Set((r.source.cited_by || []).map((c) => AGENT_LABEL[c.speaker] || c.speaker))];
+      if (by.length) bits.push(`<span class="muted">Cited by ${escapeHtml(by.join(', '))}</span>`);
+    }
+    if (r.published) bits.push(`<span class="muted">Published ${escapeHtml(r.published)}</span>`);
+    $('#source-modal-meta').innerHTML = bits.join('');
+    const ex = r.excerpt;
+    if (ex) {
+      // The highlight is a claim about the page, so it says how it was found:
+      // a verbatim quote located exactly, or a best match on the wording.
+      const how = ex.quoted ? 'Quoted on this page' : 'Closest passage on this page';
+      $('#source-modal-body').innerHTML =
+        `<span class="source-label">${how}</span>` +
+        `<blockquote class="source-excerpt">${escapeHtml(ex.before)} <mark>${escapeHtml(ex.match)}</mark> ${escapeHtml(ex.after)}</blockquote>` +
+        (ex.quoted ? '' : '<p class="source-note">Matched on wording, not a quotation — read the page itself before relying on it.</p>');
+    } else {
+      $('#source-modal-body').innerHTML = `<div class="source-note">${escapeHtml(r.note || 'Nothing on this page could be matched to what the agent said.')}</div>`;
     }
   }
 
@@ -3102,6 +3194,23 @@ Clear it and ask again anyway? Any answer still on its way will be discarded.`))
 
     $('#brand-home').addEventListener('click', showDashboard);
     $('#btn-logout').addEventListener('click', logout);
+    // A source link in a message opens the preview modal. Bound on the document
+    // so it also covers the wide-view message modal, which renders the same body.
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a.src-link');
+      if (!a || !a.closest('.msg-body, .msg-modal-body')) return;
+      // A deliberate modifier- or middle-click still means "new tab": overriding
+      // that would take away the only way out of the modal flow.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      if (!state.session) return;
+      openSourceModal(a.href, claimAround(a));
+    });
+    $('#btn-source-copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($('#source-modal-url').textContent); toast('Link copied.'); }
+      catch { toast('Could not copy the link.'); }
+    });
+
     // Citation clicks open the Sources tab and highlight the entry.
     $('#transcript').addEventListener('click', (e) => {
       const a = e.target.closest('a.cite');

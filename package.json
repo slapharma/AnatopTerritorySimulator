@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/server.js",
     "import-knowledgebase": "node scripts/import-knowledgebase.js",
-    "test": "node --test test/*.test.js"
+    "test:excerpt": "node scripts/test-excerpt.js",
+    "test:source-preview": "node scripts/test-source-preview.js",
+    "test": "node --test test/*.test.js && node scripts/test-excerpt.js && node scripts/test-source-preview.js"
   },
   "license": "UNLICENSED",
   "private": true,

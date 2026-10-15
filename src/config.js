@@ -17,13 +17,16 @@ module.exports = {
   // "tool_calls" and zero parsed calls. Do not re-add it without fixing that first.)
   MODEL: 'qwen/qwen3.7-flash',
   // Tried in order if the primary is rate-limited or down.
-  // Nvidia models removed from this list: their free-tier capacity has repeatedly
-  // returned "Upstream error from Nvidia: Service temporarily overloaded" mid-stream
-  // when OpenRouter auto-routed here, even with a different primary model. Minimax
-  // is served by multiple providers including Groq, which has held up better.
   // Kept as a last-resort free fallback even though the primary is now paid —
-  // if Mistral Nemo itself is down, a free model finishing the turn beats none.
-  FALLBACK_MODELS: ['minimax/minimax-m2.7:free'],
+  // if the primary itself is down, a free model finishing the turn beats none.
+  // minimax/minimax-m2.7:free (the previous entry here) was discontinued by
+  // OpenRouter — it 404s with "This model is unavailable for free", so a turn
+  // failed outright whenever the primary was unavailable (seen 2026-09-16:
+  // primary 429, fallback 404, every retry exhausted). Still absent from
+  // OpenRouter's /models list on 2026-10-15. Nvidia was dropped from this list
+  // earlier for intermittent "Service temporarily overloaded" errors, but a
+  // fallback that sometimes overloads beats one that is permanently gone.
+  FALLBACK_MODELS: ['nvidia/nemotron-3-ultra-550b-a55b:free'],
   REASONING_EFFORT: 'medium',   // low | medium | high (models that support it)
 
   // Offered in the New Evaluation form's model picker and the session header's.

@@ -438,6 +438,23 @@
   </form>
 </dialog>
 
+<!-- Source preview: a link inside an agent's message opens here, showing the
+     passage on that page the agent was drawing on, rather than navigating away. -->
+<dialog id="dlg-source" class="dlg-wide" aria-labelledby="source-modal-title">
+  <form method="dialog" class="dialog-form">
+    <h2 id="source-modal-title">Source</h2>
+    <div id="source-modal-meta" class="source-meta"></div>
+    <a id="source-modal-url" class="source-url" href="#" target="_blank" rel="noopener noreferrer"></a>
+    <div id="source-modal-claim" class="source-claim" hidden></div>
+    <div id="source-modal-body" class="source-body" aria-live="polite"></div>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit">Close</button>
+      <button type="button" class="btn" id="btn-source-copy">Copy link</button>
+      <a class="btn btn-primary" id="btn-source-open" href="#" target="_blank" rel="noopener noreferrer">Open in new tab</a>
+    </div>
+  </form>
+</dialog>
+
 <!-- Report generation dialog -->
 <dialog id="dlg-report">
   <form method="dialog" class="dialog-form">

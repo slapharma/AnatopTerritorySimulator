@@ -12,6 +12,8 @@ const { parseDisagreements, openDisagreementsMarkdown, dropSection } = require('
 const exporter = require('./export');
 const intelExport = require('./intel-export');
 const xlsx = require('./xlsx');
+const search = require('./search');
+const sourcePreview = require('./source-preview');
 const email = require('./email');
 const questions = require('./questions');
 const usage = require('./usage');
@@ -999,6 +1001,28 @@ app.post('/api/sessions/:id/turn', async (req, res) => {
   } finally {
     res.end();
   }
+});
+
+// ---------- source preview ----------
+// A link in an agent's message opens in a modal, not a tab, and the modal shows
+// the passage on the page that the surrounding sentence is talking about. That
+// means fetching the page server-side: the browser cannot read a cross-origin
+// page, and going through the server also reuses open_url's SSRF guard, its
+// interstitial detection and its published-date extraction. The gate on which
+// URLs may be fetched, and the shape of the reply, live in source-preview.js.
+app.get('/api/sessions/:id/source-preview', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await db.getSession(id))) return res.status(404).json({ error: 'Session not found' });
+    const url = String(req.query.url || '');
+    const claim = String(req.query.claim || '').slice(0, 2000);
+    // Messages are only read when the URL is not already a known source, which
+    // is the common case — no need to load a whole transcript to preview [1].
+    const sources = await db.listSources(id);
+    const messages = sources.some((s) => sourcePreview.sameUrl(s.url, url)) ? [] : await db.listMessages(id);
+    const { status, body } = await sourcePreview.buildPreview({ url, claim, sources, messages, fetchPage: search.openUrl });
+    res.status(status).json(body);
+  } catch (e) { next(e); }
 });
 
 // ---------- reports ----------
